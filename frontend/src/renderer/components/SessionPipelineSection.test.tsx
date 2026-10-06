@@ -27,7 +27,7 @@ const multi = { id: "build-test", file: "f", valid: true, executable: false, una
 
 const run = (overrides: Record<string, unknown> = {}) => ({
 	id: "prun_1", sessionId: "w-1", projectId: "proj", workflowId: "build-only", state: "running", currentStageId: "build", requestedBy: "user",
-	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], revision: 1,
+	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], revision: 1,
 	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 	stages: [{ id: "build", kind: "build", state: "active", model: "opus", settingsSource: "worker" }],
 	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now" }],
@@ -170,5 +170,31 @@ describe("SessionPipelineSection", () => {
 		);
 		renderSection();
 		expect(await screen.findByText("Handing off")).toBeInTheDocument();
+	});
+
+	it("labels specialist evidence with the revision it covers and shows scope and report", async () => {
+		mockGets(
+			run({
+				state: "paused",
+				pauseReason: "production_defect",
+				pauseDetail: "Stage test found 1 production defect(s) for Build to fix",
+				currentStageId: "test",
+				stages: [
+					{ id: "build", kind: "build", state: "accepted", settingsSource: "worker" },
+					{ id: "test", kind: "specialist", state: "failed", settingsSource: "profile", allowedPaths: ["**/*_test.go", "test/**"] },
+				],
+				attempts: [
+					{ id: "a2", stageId: "test", attemptNo: 1, state: "failed", outcome: "production_defect", executorSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now",
+						report: { findings: [{ criterion: "c", status: "unmet" }], commands: [{ command: "go test", exitCode: 1 }], remainingIssues: ["flaky"], defects: [{ description: "Add overflows" }] } },
+				],
+				evidence: [{ stageId: "test", attemptId: "a2", revision: "abcdef1234567", outcome: "production_defect", findings: 1, commands: 1, defects: 1, remainingIssues: 1 }],
+			}),
+			[],
+		);
+		renderSection();
+		expect(await screen.findByText("May change: **/*_test.go, test/**")).toBeInTheDocument();
+		expect(screen.getByText("Report: 1 findings, 1 commands, 1 remaining issues")).toBeInTheDocument();
+		expect(screen.getAllByText("Add overflows").length).toBeGreaterThan(0);
+		expect(screen.getByText("test: production defect at abcdef1")).toBeInTheDocument();
 	});
 });

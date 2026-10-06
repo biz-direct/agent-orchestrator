@@ -13405,6 +13405,8 @@ components:
           type: string
         predecessorAttemptId:
           type: string
+        report:
+          $ref: '#/components/schemas/PipelineStageReport'
         stageId:
           type: string
         startedAt:
@@ -13471,6 +13473,36 @@ components:
       required:
       - kind
       - at
+      type: object
+    PipelineEvidenceView:
+      properties:
+        attemptId:
+          type: string
+        commands:
+          type: integer
+        defects:
+          type: integer
+        findings:
+          type: integer
+        outcome:
+          type: string
+        profile:
+          type: string
+        remainingIssues:
+          type: integer
+        revision:
+          type: string
+        stageId:
+          type: string
+      required:
+      - stageId
+      - attemptId
+      - revision
+      - outcome
+      - findings
+      - commands
+      - defects
+      - remainingIssues
       type: object
     PipelineProfile:
       properties:
@@ -13543,6 +13575,46 @@ components:
       - message
       - at
       type: object
+    PipelineReportCommand:
+      properties:
+        command:
+          type: string
+        exitCode:
+          type: integer
+        summary:
+          type: string
+      required:
+      - command
+      - exitCode
+      type: object
+    PipelineReportDefect:
+      properties:
+        description:
+          type: string
+        paths:
+          items:
+            type: string
+          type: array
+      required:
+      - description
+      type: object
+    PipelineReportFinding:
+      properties:
+        criterion:
+          type: string
+        evidence:
+          type: string
+        status:
+          enum:
+          - met
+          - unmet
+          - not_applicable
+          - unverified
+          type: string
+      required:
+      - criterion
+      - status
+      type: object
     PipelineRunEnvelope:
       properties:
         run:
@@ -13574,6 +13646,10 @@ components:
         events:
           items:
             $ref: '#/components/schemas/PipelineEventView'
+          type: array
+        evidence:
+          items:
+            $ref: '#/components/schemas/PipelineEvidenceView'
           type: array
         expectedBranch:
           type: string
@@ -13637,6 +13713,7 @@ components:
       - snapshotCapturedAt
       - stages
       - attempts
+      - evidence
       - events
       - revision
       - createdAt
@@ -13677,8 +13754,36 @@ components:
         model:
           type: string
       type: object
+    PipelineStageReport:
+      properties:
+        commands:
+          items:
+            $ref: '#/components/schemas/PipelineReportCommand'
+          type: array
+        defects:
+          items:
+            $ref: '#/components/schemas/PipelineReportDefect'
+          type: array
+        findings:
+          items:
+            $ref: '#/components/schemas/PipelineReportFinding'
+          type: array
+        remainingIssues:
+          items:
+            type: string
+          type: array
+      required:
+      - findings
+      - commands
+      - remainingIssues
+      - defects
+      type: object
     PipelineStageView:
       properties:
+        allowedPaths:
+          items:
+            type: string
+          type: array
         harness:
           type: string
         id:
@@ -15740,9 +15845,12 @@ components:
           enum:
           - succeeded
           - failed
+          - production_defect
           type: string
         outputCommit:
           type: string
+        report:
+          $ref: '#/components/schemas/PipelineStageReport'
         runId:
           type: string
         summary:

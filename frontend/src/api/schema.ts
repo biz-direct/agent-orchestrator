@@ -4575,6 +4575,7 @@ export interface components {
             outcome?: string;
             outputCommit?: string;
             predecessorAttemptId?: string;
+            report?: components["schemas"]["PipelineStageReport"];
             stageId: string;
             /** Format: date-time */
             startedAt: string;
@@ -4599,6 +4600,17 @@ export interface components {
             attemptId?: string;
             kind: string;
             message?: string;
+        };
+        PipelineEvidenceView: {
+            attemptId: string;
+            commands: number;
+            defects: number;
+            findings: number;
+            outcome: string;
+            profile?: string;
+            remainingIssues: number;
+            revision: string;
+            stageId: string;
         };
         PipelineProfile: {
             allowedPaths: string[];
@@ -4625,6 +4637,21 @@ export interface components {
             message: string;
             paths?: string[];
         };
+        PipelineReportCommand: {
+            command: string;
+            exitCode: number;
+            summary?: string;
+        };
+        PipelineReportDefect: {
+            description: string;
+            paths?: string[];
+        };
+        PipelineReportFinding: {
+            criterion: string;
+            evidence?: string;
+            /** @enum {string} */
+            status: "met" | "unmet" | "not_applicable" | "unverified";
+        };
         PipelineRunEnvelope: {
             run: null | components["schemas"]["PipelineRunView"];
         };
@@ -4637,6 +4664,7 @@ export interface components {
             createdAt: string;
             currentStageId?: string;
             events: components["schemas"]["PipelineEventView"][];
+            evidence: components["schemas"]["PipelineEvidenceView"][];
             expectedBranch?: string;
             id: string;
             lastRejection?: components["schemas"]["PipelineRejectionView"];
@@ -4676,7 +4704,14 @@ export interface components {
             harness?: string;
             model?: string;
         };
+        PipelineStageReport: {
+            commands: components["schemas"]["PipelineReportCommand"][];
+            defects: components["schemas"]["PipelineReportDefect"][];
+            findings: components["schemas"]["PipelineReportFinding"][];
+            remainingIssues: string[];
+        };
         PipelineStageView: {
+            allowedPaths?: string[];
             harness?: string;
             id: string;
             kind: string;
@@ -5473,8 +5508,9 @@ export interface components {
             expectedInputCommit: string;
             idempotencyKey: string;
             /** @enum {string} */
-            outcome: "succeeded" | "failed";
+            outcome: "succeeded" | "failed" | "production_defect";
             outputCommit?: string;
+            report?: components["schemas"]["PipelineStageReport"];
             runId: string;
             summary?: string;
         };

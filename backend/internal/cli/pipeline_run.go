@@ -3,6 +3,7 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -90,6 +91,9 @@ type pipelineSubmitRequestDTO struct {
 	ExpectedInputCommit  string `json:"expectedInputCommit"`
 	OutputCommit         string `json:"outputCommit,omitempty"`
 	Summary              string `json:"summary,omitempty"`
+	// Report is the specialist's structured result, passed through verbatim so
+	// the daemon validates it against its own contract.
+	Report json.RawMessage `json:"report,omitempty"`
 }
 
 type pipelineSubmitResultDTO struct {
@@ -199,7 +203,7 @@ func newPipelineStatusCommand(ctx *commandContext) *cobra.Command {
 }
 
 func newPipelineSubmitCommand(ctx *commandContext) *cobra.Command {
-	var session, outcome, summary string
+	var session, outcome, summary, reportFile string
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "submit",
@@ -209,8 +213,16 @@ func newPipelineSubmitCommand(ctx *commandContext) *cobra.Command {
 			"complete a stage; only this verified submission does.",
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if outcome != "succeeded" && outcome != "failed" {
-				return usageError{errors.New(`--outcome must be "succeeded" or "failed"`)}
+			if outcome != "succeeded" && outcome != "failed" && outcome != "production_defect" {
+				return usageError{errors.New(`--outcome must be "succeeded", "failed", or "production_defect"`)}
+			}
+			var report json.RawMessage
+			if reportFile != "" {
+				raw, err := readReport(cmd, reportFile)
+				if err != nil {
+					return err
+				}
+				report = raw
 			}
 			id, err := pipelineSessionID(session)
 			if err != nil {
@@ -233,18 +245,18 @@ func newPipelineSubmitCommand(ctx *commandContext) *cobra.Command {
 				return errors.New("the pipeline run has no active stage attempt")
 			}
 			output := ""
-			if outcome == "succeeded" {
+			if outcome != "failed" {
 				out, gitErr := exec.CommandContext(cmd.Context(), "git", "rev-parse", "HEAD").Output()
 				if gitErr != nil {
 					return fmt.Errorf("could not read HEAD of the current worktree: %w", gitErr)
 				}
 				output = strings.TrimSpace(string(out))
 			}
-			sum := sha256.Sum256([]byte(strings.Join([]string{attempt.ID, outcome, output, summary}, "\x00")))
+			sum := sha256.Sum256([]byte(strings.Join([]string{attempt.ID, outcome, output, summary, string(report)}, "\x00")))
 			req := pipelineSubmitRequestDTO{
 				RunID: current.Run.ID, AttemptID: attempt.ID, ControllerGeneration: attempt.ControllerGeneration,
 				IdempotencyKey: hex.EncodeToString(sum[:16]), Outcome: outcome,
-				ExpectedInputCommit: attempt.InputCommit, OutputCommit: output, Summary: summary,
+				ExpectedInputCommit: attempt.InputCommit, OutputCommit: output, Summary: summary, Report: report,
 			}
 			var res pipelineSubmitResultDTO
 			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/pipeline/results", req, &res); err != nil {
@@ -270,6 +282,7 @@ func newPipelineSubmitCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&session, "session", "", "Worker session id (default: AO_SESSION_ID)")
 	f.StringVar(&outcome, "outcome", "", `Stage outcome: "succeeded" or "failed"`)
 	f.StringVar(&summary, "summary", "", "Short description of what the stage did or why it failed")
+	f.StringVar(&reportFile, "report-file", "", `Structured specialist report as JSON ("-" reads stdin): findings, commands, remainingIssues, defects`)
 	f.BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
 }
@@ -326,4 +339,26 @@ func shortHash(h string) string {
 		return h[:10]
 	}
 	return h
+}
+
+// readReport loads a specialist report from a file or stdin and checks it is a
+// JSON object; the daemon owns the schema and validates the contents.
+func readReport(cmd *cobra.Command, source string) (json.RawMessage, error) {
+	var (
+		raw []byte
+		err error
+	)
+	if source == "-" {
+		raw, err = io.ReadAll(io.LimitReader(cmd.InOrStdin(), 1<<20))
+	} else {
+		raw, err = os.ReadFile(source) //nolint:gosec // the caller names their own report file
+	}
+	if err != nil {
+		return nil, usageError{fmt.Errorf("could not read the report: %w", err)}
+	}
+	var probe map[string]any
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, usageError{fmt.Errorf("--report-file must contain a JSON object: %w", err)}
+	}
+	return json.RawMessage(raw), nil
 }

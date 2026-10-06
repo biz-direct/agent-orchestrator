@@ -2541,5 +2541,12 @@
 	"inspector.pipeline.stageState.handoff": "Handing off",
 	"inspector.pipeline.openConversation": "Open {{stage}} conversation",
 	"inspector.pipeline.conversationTitle": "{{stage}} conversation",
-	"inspector.pipeline.conversationDescription": "Conversation of the {{stage}} pipeline stage"
+	"inspector.pipeline.conversationDescription": "Conversation of the {{stage}} pipeline stage",
+	"inspector.pipeline.scope": "May change: {{paths}}",
+	"inspector.pipeline.scopeNote": "Checked on the stage's commits at hand-off. This is a constraint, not a sandbox.",
+	"inspector.pipeline.reportSummary": "Report: {{findings}} findings, {{commands}} commands, {{issues}} remaining issues",
+	"inspector.pipeline.evidence": "{{stage}}: {{outcome}} at {{revision}}",
+	"inspector.pipeline.outcome.succeeded": "passed",
+	"inspector.pipeline.outcome.production_defect": "production defect",
+	"inspector.pipeline.outcome.failed": "failed"
 }

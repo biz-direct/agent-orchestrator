@@ -143,3 +143,50 @@ func TestPipelineSubmitValidatesBeforeCallingDaemon(t *testing.T) {
 		}
 	}
 }
+
+func TestPipelineSubmitSendsASpecialistReportVerbatim(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "task"}, {"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	report := `{"findings":[{"criterion":"c","status":"met"}],"commands":[],"remainingIssues":[],"defects":[]}`
+	reportPath := repo + "/../report-" + t.Name() + ".json"
+	if err := os.WriteFile(reportPath, []byte(report), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(reportPath) })
+	var got pipelineSubmitRequestDTO
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, runningRunJSON)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = io.WriteString(w, `{"run":{"id":"prun_1","workflowId":"wf","state":"completed","stages":[],"attempts":[]},"attempt":{"id":"pstg_1","stageId":"test","attemptNo":1,"state":"accepted"},"accepted":true,"replayed":false}`)
+	})
+	t.Setenv("AO_SESSION_ID", "w-1-att-2")
+	old, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+	if _, stderr, err := executeCLI(t, deps, "pipeline", "submit", "--outcome", "succeeded", "--report-file", reportPath); err != nil {
+		t.Fatalf("submit: %v %s", err, stderr)
+	}
+	if string(got.Report) != report || got.OutputCommit == "" {
+		t.Fatalf("the report must reach the daemon untouched, with the verified HEAD: %+v", got)
+	}
+	if _, _, err := executeCLI(t, deps, "pipeline", "submit", "--outcome", "succeeded", "--report-file", repo+"/missing.json"); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("an unreadable report is a usage error: %v", err)
+	}
+	if err := os.WriteFile(reportPath, []byte("[1]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executeCLI(t, deps, "pipeline", "submit", "--outcome", "succeeded", "--report-file", reportPath); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("a non-object report is a usage error: %v", err)
+	}
+}

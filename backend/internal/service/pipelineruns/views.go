@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/pipeline"
 )
 
 // Stage display states are derived from attempts and the run; they are never
@@ -43,11 +44,15 @@ type RunView struct {
 	// LastRejection explains the newest refused stage submission that is still
 	// relevant to the active attempt.
 	LastRejection *RejectionView `json:"lastRejection,omitempty"`
-	Events        []EventView    `json:"events"`
-	Revision      int64          `json:"revision"`
-	CreatedAt     time.Time      `json:"createdAt"`
-	UpdatedAt     time.Time      `json:"updatedAt"`
-	CompletedAt   *time.Time     `json:"completedAt,omitempty"`
+	// Evidence lists specialist results with the exact revision each covers. A
+	// result never speaks for later revisions, so it is never shown as
+	// validation of a newer head.
+	Evidence    []EvidenceView `json:"evidence"`
+	Events      []EventView    `json:"events"`
+	Revision    int64          `json:"revision"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+	CompletedAt *time.Time     `json:"completedAt,omitempty"`
 }
 
 // StageView is one workflow stage with its derived state and resolved settings.
@@ -59,7 +64,10 @@ type StageView struct {
 	Harness        string `json:"harness,omitempty"`
 	Model          string `json:"model,omitempty"`
 	SettingsSource string `json:"settingsSource"`
-	State          string `json:"state" enum:"pending,handoff,active,accepted,failed,interrupted,paused"`
+	// AllowedPaths is the change scope snapshotted for a specialist stage. It is
+	// a hand-off constraint checked on commits, not a filesystem or process sandbox.
+	AllowedPaths []string `json:"allowedPaths,omitempty"`
+	State        string   `json:"state" enum:"pending,handoff,active,accepted,failed,interrupted,paused"`
 }
 
 // AttemptView is one stage attempt.
@@ -80,9 +88,12 @@ type AttemptView struct {
 	PredecessorAttemptID string `json:"predecessorAttemptId,omitempty"`
 	// ConversationSessionID is the attached specialist conversation that
 	// executes (or executed) this attempt; empty for the worker's own stage.
-	ConversationSessionID string     `json:"conversationSessionId,omitempty"`
-	StartedAt             time.Time  `json:"startedAt"`
-	FinishedAt            *time.Time `json:"finishedAt,omitempty"`
+	ConversationSessionID string `json:"conversationSessionId,omitempty"`
+	// Report is the specialist's structured result, retained even when the
+	// attempt did not advance the run.
+	Report     *StageReport `json:"report,omitempty"`
+	StartedAt  time.Time    `json:"startedAt"`
+	FinishedAt *time.Time   `json:"finishedAt,omitempty"`
 }
 
 // CheckpointView names a committed revision recorded for the run.
@@ -99,6 +110,20 @@ type RejectionView struct {
 	Message string    `json:"message"`
 	Paths   []string  `json:"paths,omitempty"`
 	At      time.Time `json:"at"`
+}
+
+// EvidenceView is one specialist result bound to the revision it covers.
+type EvidenceView struct {
+	StageID   string `json:"stageId"`
+	AttemptID string `json:"attemptId"`
+	Profile   string `json:"profile,omitempty"`
+	// Revision is the commit the result is about (the stage's output commit).
+	Revision string `json:"revision"`
+	Outcome  string `json:"outcome"`
+	Findings int    `json:"findings"`
+	Commands int    `json:"commands"`
+	Defects  int    `json:"defects"`
+	Issues   int    `json:"remainingIssues"`
 }
 
 // EventView is one recorded execution fact.
@@ -143,7 +168,7 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 		CurrentStageID: run.CurrentStageID, RequestedBy: string(run.RequestedBy), ExpectedBranch: run.ExpectedBranch,
 		RepairBudget: run.RepairBudget, RepairsUsed: run.RepairsUsed, RepairsRemaining: max(run.RepairBudget-run.RepairsUsed, 0),
 		SnapshotSHA256: run.SnapshotSHA256, SnapshotCaptured: snap.CapturedAt.Format(time.RFC3339),
-		Stages: []StageView{}, Attempts: []AttemptView{}, Events: []EventView{},
+		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Events: []EventView{},
 		Revision: run.Revision, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, CompletedAt: run.CompletedAt,
 	}
 	latestByStage := map[string]domain.PipelineStageAttempt{}
@@ -156,7 +181,18 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 			InputCommit: a.InputCommit, OutputCommit: a.OutputCommit, NoChange: a.NoChange, Outcome: a.Outcome,
 			Summary: a.Summary, InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
 			PredecessorAttemptID: a.PredecessorAttemptID, ConversationSessionID: attachedConversation(run, a),
+			Report: parseReport(a.ResultJSON),
 		})
+		if rep := parseReport(a.ResultJSON); rep != nil && a.OutputCommit != "" {
+			profile := ""
+			if st, _, ok := snap.stage(a.StageID); ok {
+				profile = st.Profile
+			}
+			v.Evidence = append(v.Evidence, EvidenceView{
+				StageID: a.StageID, AttemptID: a.ID, Profile: profile, Revision: a.OutputCommit, Outcome: a.Outcome,
+				Findings: len(rep.Findings), Commands: len(rep.Commands), Defects: len(rep.Defects), Issues: len(rep.RemainingIssues),
+			})
+		}
 		if a.State == domain.PipelineAttemptActive || a.State == domain.PipelineAttemptHandoff {
 			activeAttempt = &attempts[i]
 		}
@@ -166,6 +202,11 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 	}
 	for _, st := range snap.Stages {
 		sv := StageView{ID: st.ID, Kind: string(st.Kind), Profile: st.Profile, RepairTo: st.RepairTo, Harness: st.Harness, Model: st.Model, SettingsSource: st.SettingsSource, State: StageStatePending}
+		for _, p := range snap.Profiles {
+			if p.ID == st.Profile && st.Kind == pipeline.StageSpecialist {
+				sv.AllowedPaths = append([]string{}, p.AllowedPaths...)
+			}
+		}
 		if a, ok := latestByStage[st.ID]; ok {
 			switch a.State {
 			case domain.PipelineAttemptAccepted:

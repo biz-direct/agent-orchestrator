@@ -39,6 +39,7 @@ const (
 	eventStageReportedFailure = "stage_reported_failure"
 	eventHandoffStarted       = "handoff_started"
 	eventHandoffActivated     = "handoff_activated"
+	eventProductionDefect     = "production_defect"
 	eventRunCompleted         = "run_completed"
 	eventRunPaused            = "run_paused"
 	maxSummaryLen             = 2000
@@ -102,10 +103,13 @@ type SubmitInput struct {
 	AttemptID            string           `json:"attemptId"`
 	ControllerGeneration string           `json:"controllerGeneration"`
 	IdempotencyKey       string           `json:"idempotencyKey"`
-	Outcome              string           `json:"outcome" enum:"succeeded,failed"`
+	Outcome              string           `json:"outcome" enum:"succeeded,failed,production_defect"`
 	ExpectedInputCommit  string           `json:"expectedInputCommit"`
 	OutputCommit         string           `json:"outputCommit,omitempty"`
 	Summary              string           `json:"summary,omitempty"`
+	// Report is the specialist's structured result. It is required for a
+	// specialist's succeeded or production_defect outcome.
+	Report *StageReport `json:"report,omitempty"`
 }
 
 // SubmitResult reports what the daemon decided.
@@ -496,10 +500,25 @@ func (s *Service) Submit(ctx context.Context, in SubmitInput) (SubmitResult, err
 		return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_STALE_REVISION", fmt.Sprintf("The result expects input commit %s but this attempt started from %s", shortCommit(in.ExpectedInputCommit), shortCommit(attempt.InputCommit)), nil)
 	}
 
+	// A specialist's pass or defect is a structured claim, validated before
+	// anything is decided. Only a specialist may report a production defect.
+	if attempt.StageKind == string(pipeline.StageSpecialist) && in.Outcome != OutcomeFailed {
+		if in.Report == nil {
+			return SubmitResult{}, apierr.Invalid("INVALID_PIPELINE_RESULT", "a specialist stage result needs a structured report (findings, commands, remainingIssues, defects)", nil)
+		}
+		normalized, rerr := in.Report.validate(in.Outcome)
+		if rerr != nil {
+			return SubmitResult{}, apierr.Invalid("INVALID_PIPELINE_RESULT", "invalid stage report: "+rerr.Error(), nil)
+		}
+		in.Report = &normalized
+	} else if in.Outcome == OutcomeProductionDefect {
+		return SubmitResult{}, apierr.Invalid("INVALID_PIPELINE_RESULT", "only a specialist stage can report a production defect", nil)
+	}
+
 	if in.Outcome == OutcomeFailed {
 		return s.acceptFailure(ctx, run, attempt, in)
 	}
-	return s.acceptSuccess(ctx, run, attempt, session, in)
+	return s.acceptCommitted(ctx, run, attempt, session, in)
 }
 
 func validateSubmitShape(in SubmitInput) error {
@@ -508,14 +527,14 @@ func validateSubmitShape(in SubmitInput) error {
 		return apierr.Invalid("INVALID_PIPELINE_RESULT", "runId and attemptId are required", nil)
 	case strings.TrimSpace(in.IdempotencyKey) == "" || len(in.IdempotencyKey) > maxIdempotencyKeyLen:
 		return apierr.Invalid("INVALID_PIPELINE_RESULT", fmt.Sprintf("idempotencyKey is required (at most %d characters)", maxIdempotencyKeyLen), nil)
-	case in.Outcome != OutcomeSucceeded && in.Outcome != OutcomeFailed:
-		return apierr.Invalid("INVALID_PIPELINE_RESULT", `outcome must be "succeeded" or "failed"`, nil)
+	case in.Outcome != OutcomeSucceeded && in.Outcome != OutcomeFailed && in.Outcome != OutcomeProductionDefect:
+		return apierr.Invalid("INVALID_PIPELINE_RESULT", `outcome must be "succeeded", "failed", or "production_defect"`, nil)
 	case utf8.RuneCountInString(in.Summary) > maxSummaryLen:
 		return apierr.Invalid("INVALID_PIPELINE_RESULT", fmt.Sprintf("summary must be at most %d characters", maxSummaryLen), nil)
 	case !commitPattern.MatchString(in.ExpectedInputCommit):
 		return apierr.Invalid("INVALID_PIPELINE_RESULT", "expectedInputCommit must be a full or abbreviated lowercase commit hash", nil)
-	case in.Outcome == OutcomeSucceeded && !commitPattern.MatchString(in.OutputCommit):
-		return apierr.Invalid("INVALID_PIPELINE_RESULT", "a succeeded result needs outputCommit, a lowercase commit hash", nil)
+	case in.Outcome != OutcomeFailed && !commitPattern.MatchString(in.OutputCommit):
+		return apierr.Invalid("INVALID_PIPELINE_RESULT", "a succeeded or production_defect result needs outputCommit, a lowercase commit hash", nil)
 	}
 	return nil
 }
@@ -551,6 +570,13 @@ func (s *Service) reject(ctx context.Context, run domain.PipelineRun, attempt do
 	return apierr.Conflict(code, message, details)
 }
 
+func reportJSON(r *StageReport) string {
+	if r == nil {
+		return ""
+	}
+	return r.marshal()
+}
+
 func (s *Service) acceptFailure(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, in SubmitInput) (SubmitResult, error) {
 	now := s.clock()
 	reason := "The worker reported that the stage could not be completed"
@@ -559,14 +585,14 @@ func (s *Service) acceptFailure(ctx context.Context, run domain.PipelineRun, att
 	}
 	_, err := s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
 		RunID: run.ID, ExpectedRevision: run.Revision, At: now,
-		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, Outcome: OutcomeFailed, Summary: in.Summary, ResultKey: in.IdempotencyKey, FinishedAt: now},
+		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, Outcome: OutcomeFailed, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now},
 		Run:     &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: domain.PipelinePauseStageFailed, PauseDetail: reason, CurrentStageID: run.CurrentStageID},
 		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventStageReportedFailure, Detail: eventDetail{Message: reason}.marshal()}},
 	})
 	return s.finishSubmit(ctx, run, attempt, in, err, false)
 }
 
-func (s *Service) acceptSuccess(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, session domain.SessionRecord, in SubmitInput) (SubmitResult, error) {
+func (s *Service) acceptCommitted(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, session domain.SessionRecord, in SubmitInput) (SubmitResult, error) {
 	state, err := s.git.Inspect(ctx, session.Metadata.WorkspacePath)
 	if err != nil {
 		return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_WORKSPACE_UNREADABLE", fmt.Sprintf("The workspace could not be inspected: %v", err), nil)
@@ -589,6 +615,19 @@ func (s *Service) acceptSuccess(ctx context.Context, run domain.PipelineRun, att
 			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_NON_LINEAR_HANDOFF", fmt.Sprintf("Commit %s does not descend from the stage's input commit %s; history was rewritten", shortCommit(state.Head), shortCommit(attempt.InputCommit)), nil)
 		}
 	}
+	// A specialist's whole stage-owned diff (every commit since its input
+	// checkpoint, including deletions, renames, and symlinks) must stay inside
+	// the scope snapshotted at start. Violations are preserved and explained;
+	// the stage cannot advance until the net diff is back inside scope.
+	snap, perr := parseSnapshot(run.Snapshot)
+	if perr != nil {
+		return SubmitResult{}, apierr.Internal("PIPELINE_SNAPSHOT_CORRUPT", "The pipeline snapshot could not be read")
+	}
+	if attempt.StageKind == string(pipeline.StageSpecialist) && !noChange {
+		if rejection := s.checkScope(ctx, session.Metadata.WorkspacePath, snap, attempt, state.Head); rejection != nil {
+			return SubmitResult{}, s.reject(ctx, run, attempt, rejection.code, rejection.message, rejection.paths)
+		}
+	}
 	now := s.clock()
 	message := fmt.Sprintf("Stage %q accepted at %s", attempt.StageID, shortCommit(state.Head))
 	if noChange {
@@ -596,9 +635,8 @@ func (s *Service) acceptSuccess(ctx context.Context, run domain.PipelineRun, att
 	}
 	events := []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventStageAccepted, Detail: eventDetail{Message: message}.marshal()}}
 	update := &domain.PipelineRunUpdate{State: domain.PipelineRunRunning, CurrentStageID: run.CurrentStageID}
-	snap, perr := parseSnapshot(run.Snapshot)
-	if perr != nil {
-		return SubmitResult{}, apierr.Internal("PIPELINE_SNAPSHOT_CORRUPT", "The pipeline snapshot could not be read")
+	if in.Outcome == OutcomeProductionDefect {
+		return s.recordProductionDefect(ctx, run, attempt, in, state.Head, noChange)
 	}
 	var successor *domain.PipelineStageAttempt
 	if _, idx, found := snap.stage(attempt.StageID); found && idx+1 < len(snap.Stages) {
@@ -621,7 +659,7 @@ func (s *Service) acceptSuccess(ctx context.Context, run domain.PipelineRun, att
 	}
 	_, err = s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
 		RunID: run.ID, ExpectedRevision: run.Revision, At: now, Run: update, Events: events, NewAttempt: successor,
-		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: state.Head, NoChange: noChange, Outcome: OutcomeSucceeded, Summary: in.Summary, ResultKey: in.IdempotencyKey, FinishedAt: now},
+		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: state.Head, NoChange: noChange, Outcome: OutcomeSucceeded, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now},
 	})
 	if err == nil && successor != nil {
 		// The submitting executor is still mid-turn (it is blocked inside this very
@@ -817,4 +855,63 @@ func stageHarness(cat pipeline.Catalog, st pipeline.Stage, overrides map[string]
 		return domain.AgentHarness(pe.Profile.Harness)
 	}
 	return ""
+}
+
+type scopeRejection struct {
+	code    string
+	message string
+	paths   []string
+}
+
+// checkScope validates a specialist's stage diff and returns the rejection to
+// report, or nil when every changed path is in scope.
+func (s *Service) checkScope(ctx context.Context, workspace string, snap Snapshot, attempt domain.PipelineStageAttempt, head string) *scopeRejection {
+	stage, _, found := snap.stage(attempt.StageID)
+	if !found {
+		return &scopeRejection{code: "PIPELINE_SCOPE_UNVERIFIABLE", message: fmt.Sprintf("Stage %q is not in the run's snapshot, so its change scope cannot be verified", attempt.StageID)}
+	}
+	var allowed []string
+	for _, p := range snap.Profiles {
+		if p.ID == stage.Profile {
+			allowed = p.AllowedPaths
+		}
+	}
+	entries, err := s.git.DiffEntries(ctx, workspace, attempt.InputCommit, head)
+	if err != nil {
+		return &scopeRejection{code: "PIPELINE_SCOPE_UNVERIFIABLE", message: fmt.Sprintf("The stage's changes could not be listed, so its scope cannot be verified: %v", err)}
+	}
+	violations, total := validateScope(entries, allowed, func(sha string) (string, error) {
+		return s.git.ReadBlob(ctx, workspace, sha)
+	})
+	if total == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(violations))
+	for _, v := range violations {
+		paths = append(paths, v.Path+": "+v.Reason)
+	}
+	return &scopeRejection{
+		code:    "PIPELINE_SCOPE_VIOLATION",
+		message: fmt.Sprintf("%d changed path(s) are outside stage %q's allowed scope. The commits are preserved; make the net change since %s stay within the allowed paths (for example, commit a revert) and submit again. Path validation is a hand-off constraint, not a sandbox", total, stage.ID, shortCommit(attempt.InputCommit)),
+		paths:   paths,
+	}
+}
+
+// recordProductionDefect closes a specialist attempt that found a defect in
+// production code. The defect is reported for return to Build; nothing here
+// fixes it. Until repair routing exists the run pauses with an actionable,
+// retained result, and the repair budget is untouched.
+func (s *Service) recordProductionDefect(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, in SubmitInput, head string, noChange bool) (SubmitResult, error) {
+	now := s.clock()
+	detail := fmt.Sprintf("Stage %q found %d production defect(s) for Build to fix", attempt.StageID, len(in.Report.Defects))
+	if len(in.Report.Defects) > 0 {
+		detail += ": " + in.Report.Defects[0].Description
+	}
+	_, err := s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
+		RunID: run.ID, ExpectedRevision: run.Revision, At: now,
+		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, OutputCommit: head, NoChange: noChange, Outcome: OutcomeProductionDefect, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now},
+		Run:     &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: PauseProductionDefect, PauseDetail: detail, CurrentStageID: run.CurrentStageID},
+		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventProductionDefect, Detail: eventDetail{Code: OutcomeProductionDefect, Message: detail}.marshal()}},
+	})
+	return s.finishSubmit(ctx, run, attempt, in, err, false)
 }

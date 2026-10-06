@@ -29,6 +29,11 @@ type Git interface {
 	Inspect(ctx context.Context, workspace string) (GitState, error)
 	// IsAncestor reports whether ancestor is reachable from descendant.
 	IsAncestor(ctx context.Context, workspace, ancestor, descendant string) (bool, error)
+	// DiffEntries lists every path changed between two commits, with renames
+	// split into delete + add so both ends are scope-checked.
+	DiffEntries(ctx context.Context, workspace, base, head string) ([]DiffEntry, error)
+	// ReadBlob returns the content of a blob (used for symlink targets).
+	ReadBlob(ctx context.Context, workspace, sha string) (string, error)
 }
 
 // ExecGit shells out to the git binary.
@@ -112,4 +117,27 @@ func exitCode(err error) int {
 		return ec.ExitCode()
 	}
 	return -1
+}
+
+// DiffEntries implements Git.
+func (ExecGit) DiffEntries(ctx context.Context, workspace, base, head string) ([]DiffEntry, error) {
+	out, err := gitOutput(ctx, workspace, "diff", "--raw", "-z", "-r", "--no-renames", "--no-ext-diff", "--no-textconv", base, head)
+	if err != nil {
+		return nil, err
+	}
+	parts := strings.Split(out, "\x00")
+	var entries []DiffEntry
+	for i := 0; i+1 < len(parts); i += 2 {
+		meta := strings.Fields(strings.TrimPrefix(parts[i], ":"))
+		if len(meta) < 5 {
+			return nil, fmt.Errorf("unexpected git diff output %q", parts[i])
+		}
+		entries = append(entries, DiffEntry{SrcMode: meta[0], DstMode: meta[1], DstSHA: meta[3], Status: meta[4][:1], Path: parts[i+1]})
+	}
+	return entries, nil
+}
+
+// ReadBlob implements Git.
+func (ExecGit) ReadBlob(ctx context.Context, workspace, sha string) (string, error) {
+	return gitOutput(ctx, workspace, "cat-file", "blob", sha)
 }

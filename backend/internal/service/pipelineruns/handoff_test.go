@@ -235,6 +235,7 @@ func TestBuildThenTestHandoffRunsInTheSameWorktreeWithItsOwnConversation(t *test
 	done, err := s.svc.Submit(ctx, pipelineruns.SubmitInput{
 		SessionID: spec, RunID: view.ID, AttemptID: test.ID, ControllerGeneration: test.ControllerGeneration,
 		IdempotencyKey: "test-key", Outcome: "succeeded", ExpectedInputCommit: test.InputCommit, OutputCommit: newHead, Summary: "added tests",
+		Report: passReport(),
 	})
 	if err != nil {
 		t.Fatal(err)

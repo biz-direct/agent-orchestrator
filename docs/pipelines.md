@@ -11,7 +11,8 @@ Status by delivery slice (parent design: issue #1):
 | Discover/validate definitions, project-default selection | shipped |
 | Single-stage Build run on an existing Chat worker, snapshots, verified results | shipped |
 | Attached Chat specialists run sequentially in the same worktree | shipped |
-| Tester scope/result contract, validation, Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
+| Specialist scope enforcement and structured result contract | shipped |
+| Validation commands, Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
 
 A valid workflow that this build cannot execute (one with a `review` stage today) can be selected but is shown as **unavailable**. AO never silently
 substitutes a normal worker for a selected workflow that cannot run, and a
@@ -171,3 +172,43 @@ executor: messages, nudges, steering, approvals, restores, and resumes for the
 worker (during a specialist stage), for a finished specialist, or for anyone
 during a handoff are refused with `PIPELINE_EXECUTION_OWNED`. Ordinary sessions
 are never affected.
+
+## Specialist scope and result contract
+
+A specialist's result is a **claim the daemon verifies**, never a bare "done".
+
+```bash
+ao pipeline submit --outcome succeeded --summary "added tests" --report-file report.json
+```
+
+`report.json` (written outside the worktree) has this shape; a passing report needs
+at least one finding and none `unmet`, and a `production_defect` report must describe
+at least one defect:
+
+```json
+{
+  "findings": [{"criterion": "…", "status": "met|unmet|not_applicable|unverified", "evidence": "…"}],
+  "commands": [{"command": "go test ./...", "exitCode": 0, "summary": "ok"}],
+  "remainingIssues": ["…"],
+  "defects": [{"description": "…", "paths": ["src/main.go"]}]
+}
+```
+
+Outcomes: `succeeded` (advances), `production_defect` (a bug in production code,
+reported for return to Build and never fixed under specialist authority; until
+repair routing lands the run pauses with the retained report), `failed`.
+
+**Scope.** Before accepting, the daemon lists the stage's *entire* diff from the
+accepted input checkpoint (every commit since, with renames split into
+delete + add) and checks each path against the profile's snapshotted
+`allowedPaths`. A profile that lists no `allowedPaths` may change nothing.
+Out-of-scope paths, symlinks that point outside scope or the repository, absolute
+symlinks, and submodule changes are refused with the offending paths. The
+commits and files are **preserved** (never reset or amended); the stage stays
+active and can advance once the *net* change is back in scope (for example by
+committing a revert). Path validation is a hand-off constraint, not a filesystem
+or process sandbox: it cannot stop a process writing elsewhere, only refuse to
+advance a stage whose commits do.
+
+Specialist results are listed as **evidence bound to the exact revision they
+cover**; they are never presented as validation of a later head.

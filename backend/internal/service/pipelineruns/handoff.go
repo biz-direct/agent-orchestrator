@@ -24,6 +24,9 @@ const (
 	// PauseStageUnsupported: the stage's harness/mode cannot run as a Chat
 	// specialist. There is no Terminal fallback.
 	PauseStageUnsupported domain.PipelinePauseReason = "stage_unsupported"
+	// PauseProductionDefect: a specialist reported a defect in production code
+	// for Build to fix; an actionable result until repair routing runs it.
+	PauseProductionDefect domain.PipelinePauseReason = "production_defect"
 	// PauseStageStartFailed: the specialist's controller could not be started.
 	PauseStageStartFailed domain.PipelinePauseReason = "stage_start_failed"
 )
@@ -276,8 +279,10 @@ func specialistPrompt(owner domain.SessionRecord, run domain.PipelineRun, pred, 
 		b.WriteString("(no summary was provided)\n")
 	}
 	b.WriteString("You did not inherit the previous stage's reasoning or conversation; rely on the repository and this brief.\n\n")
-	b.WriteString("When you are done, commit your work so the tree is clean, then run:\n")
-	b.WriteString("  ao pipeline submit --outcome succeeded --summary \"<what you verified or changed>\"\n")
-	b.WriteString("Use --outcome failed if you cannot complete the stage. `ao report` does not complete a stage.\n")
+	b.WriteString("When you are done, commit your work so the tree is clean, write your structured report as JSON, then run:\n")
+	b.WriteString("  ao pipeline submit --outcome succeeded --summary \"<what you verified or changed>\" --report-file report.json\n")
+	b.WriteString("Report shape: {\"findings\":[{\"criterion\":\"...\",\"status\":\"met|unmet|not_applicable|unverified\",\"evidence\":\"...\"}],\"commands\":[{\"command\":\"...\",\"exitCode\":0,\"summary\":\"...\"}],\"remainingIssues\":[\"...\"],\"defects\":[]}.\n")
+	b.WriteString("A passing report needs at least one finding and none unmet. If you find a bug in production code, do NOT fix it: commit only your allowed changes and submit --outcome production_defect with each defect described under \"defects\". Use --outcome failed if you cannot complete the stage. `ao report` does not complete a stage.\n")
+	b.WriteString("Keep report.json out of your commits (write it outside the worktree, for example in the system temp directory).\n")
 	return b.String()
 }

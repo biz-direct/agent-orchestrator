@@ -13,6 +13,8 @@ import { Button } from "./ui/button";
 
 type RunView = components["schemas"]["PipelineRunView"];
 type StageView = components["schemas"]["PipelineStageView"];
+type AttemptView = components["schemas"]["PipelineAttemptView"];
+type EvidenceView = components["schemas"]["PipelineEvidenceView"];
 type Catalog = components["schemas"]["PipelinesCatalogResponse"];
 
 export const sessionPipelineQueryKey = (sessionId: string, hostId?: string) =>
@@ -148,11 +150,13 @@ function RunSummary({ run, session, hostId }: { run: RunView; session: Workspace
 						<StageRow
 							key={stage.id}
 							stage={stage}
+							report={latestReport(run.attempts, stage.id)}
 							onOpenConversation={conversation ? () => setOpenStage({ stageId: stage.id, sessionId: conversation, provider: stage.harness }) : undefined}
 						/>
 					);
 				})}
 			</ul>
+			{run.evidence.length > 0 ? <EvidenceList evidence={run.evidence} /> : null}
 			{run.checkpoint ? (
 				<p className="text-xs text-settings-muted">
 					{run.checkpoint.noChange
@@ -188,10 +192,33 @@ function RunSummary({ run, session, hostId }: { run: RunView; session: Workspace
 	);
 }
 
-function StageRow({ stage, onOpenConversation }: { stage: StageView; onOpenConversation?: () => void }) {
+function latestReport(attempts: AttemptView[], stageId: string) {
+	const withReport = attempts.filter((a) => a.stageId === stageId && a.report);
+	return withReport[withReport.length - 1]?.report;
+}
+
+function EvidenceList({ evidence }: { evidence: EvidenceView[] }) {
 	const { t } = useTranslation();
 	return (
-		<li className="flex items-baseline justify-between gap-2 py-1.5 text-sm" data-stage-state={stage.state}>
+		<ul className="flex flex-col gap-0.5 text-xs text-settings-muted">
+			{evidence.map((item) => (
+				<li key={item.attemptId} className="text-pretty">
+					{t("inspector.pipeline.evidence", {
+						stage: item.stageId,
+						outcome: t(`inspector.pipeline.outcome.${item.outcome}`, { defaultValue: item.outcome }),
+						revision: item.revision.slice(0, 7),
+					})}
+				</li>
+			))}
+		</ul>
+	);
+}
+
+function StageRow({ stage, report, onOpenConversation }: { stage: StageView; report?: AttemptView["report"]; onOpenConversation?: () => void }) {
+	const { t } = useTranslation();
+	return (
+		<li className="py-1.5 text-sm" data-stage-state={stage.state}>
+			<div className="flex items-baseline justify-between gap-2">
 			<span className="min-w-0 truncate">
 				{onOpenConversation ? (
 					<button
@@ -210,6 +237,28 @@ function StageRow({ stage, onOpenConversation }: { stage: StageView; onOpenConve
 			<span className={cn("shrink-0 text-xs", stage.state === "failed" ? "text-error" : stage.state === "accepted" ? "text-success" : "text-settings-muted")}>
 				{t(`inspector.pipeline.stageState.${stage.state}`)}
 			</span>
+			</div>
+			{stage.allowedPaths?.length ? (
+				<p className="mt-0.5 text-pretty text-2xs leading-normal text-settings-muted" title={t("inspector.pipeline.scopeNote")}>
+					{t("inspector.pipeline.scope", { paths: stage.allowedPaths.join(", ") })}
+				</p>
+			) : null}
+			{report ? (
+				<div className="mt-0.5 text-pretty text-2xs leading-normal text-settings-muted">
+					<p>
+						{t("inspector.pipeline.reportSummary", {
+							findings: report.findings.length,
+							commands: report.commands.length,
+							issues: report.remainingIssues.length,
+						})}
+					</p>
+					{report.defects.map((defect) => (
+						<p key={defect.description} className="text-error">
+							{defect.description}
+						</p>
+					))}
+				</div>
+			) : null}
 		</li>
 	);
 }
