@@ -16,6 +16,8 @@ type StageView = components["schemas"]["PipelineStageView"];
 type AttemptView = components["schemas"]["PipelineAttemptView"];
 type EvidenceView = components["schemas"]["PipelineEvidenceView"];
 type CommandResult = components["schemas"]["PipelineCommandResultView"];
+type ReviewGate = components["schemas"]["PipelineReviewGateView"];
+type ReviewEvidence = components["schemas"]["PipelineReviewEvidenceView"];
 type Catalog = components["schemas"]["PipelinesCatalogResponse"];
 
 export const sessionPipelineQueryKey = (sessionId: string, hostId?: string) =>
@@ -177,6 +179,8 @@ function RunSummary({ run, session, hostId }: { run: RunView; session: Workspace
 					))}
 				</ul>
 			) : null}
+			{run.reviewGate ? <ReviewGatePanel gate={run.reviewGate} /> : null}
+			{run.reviews.length > 0 ? <ReviewEvidenceList reviews={run.reviews} /> : null}
 			{run.evidence.length > 0 ? <EvidenceList evidence={run.evidence} /> : null}
 			{run.checkpoint ? (
 				<p className="text-xs text-settings-muted">
@@ -250,6 +254,59 @@ function ValidationList({ checks }: { checks: CommandResult[] }) {
 					</li>
 				);
 			})}
+		</ul>
+	);
+}
+
+/**
+ * Current-head review readiness: what AO is waiting for, or what a person has
+ * to do. Review stays AO's existing reviewer; this only reports where the run
+ * stands for the revision under review, and never implies a merge.
+ */
+function ReviewGatePanel({ gate }: { gate: ReviewGate }) {
+	const { t } = useTranslation();
+	return (
+		<div className="flex flex-col gap-0.5 text-xs" data-testid="review-gate" data-review-gate-state={gate.state} data-review-gate-code={gate.code}>
+			<div className="flex items-baseline justify-between gap-2">
+				<span className="font-medium">{t("inspector.pipeline.reviewGate.title")}</span>
+				<span className={cn("shrink-0", gate.state === "ready" ? "text-success" : gate.state === "blocked" ? "text-warning" : "text-settings-muted")}>
+					{t(`inspector.pipeline.reviewGate.state.${gate.state}`)}
+				</span>
+			</div>
+			<p className="text-pretty text-settings-muted" role="status">
+				{t(`inspector.pipeline.reviewGate.code.${gate.code}`, { defaultValue: gate.message })}
+			</p>
+			{gate.manual ? <p className="text-pretty text-settings-muted">{t("inspector.pipeline.reviewGate.manual")}</p> : null}
+			<p className="text-2xs text-settings-muted">{t("inspector.pipeline.reviewGate.revision", { revision: shortCommit(gate.checkpoint) })}</p>
+			{gate.headSha ? <p className="text-2xs text-settings-muted">{t("inspector.pipeline.reviewGate.head", { revision: shortCommit(gate.headSha) })}</p> : null}
+			{gate.reviewStatus ? (
+				<p className="text-2xs text-settings-muted">
+					{gate.verdict
+						? t("inspector.pipeline.reviewGate.reviewRunVerdict", { status: gate.reviewStatus, verdict: gate.verdict.replace("_", " ") })
+						: t("inspector.pipeline.reviewGate.reviewRun", { status: gate.reviewStatus })}
+				</p>
+			) : null}
+			{gate.ci ? (
+				<p className="text-pretty text-2xs text-settings-muted" title={gate.ciDetail}>
+					{t("inspector.pipeline.reviewGate.ci", { state: t(`inspector.pipeline.reviewGate.ciState.${gate.ci}`, { defaultValue: gate.ci }) })}
+				</p>
+			) : null}
+		</div>
+	);
+}
+
+function ReviewEvidenceList({ reviews }: { reviews: ReviewEvidence[] }) {
+	const { t } = useTranslation();
+	return (
+		<ul className="flex flex-col gap-0.5 text-xs text-settings-muted">
+			{reviews.map((item) => (
+				<li key={item.attemptId} className="text-pretty">
+					{t(item.current ? "inspector.pipeline.reviewEvidence" : "inspector.pipeline.reviewEvidenceSuperseded", {
+						revision: shortCommit(item.headSha || item.revision),
+						outcome: t(`inspector.pipeline.outcome.${item.outcome ?? ""}`, { defaultValue: item.outcome || t("inspector.pipeline.stageState.interrupted") }),
+					})}
+				</li>
+			))}
 		</ul>
 	);
 }

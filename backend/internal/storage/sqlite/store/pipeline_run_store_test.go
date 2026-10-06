@@ -280,3 +280,37 @@ func TestPipelineRepairIsCountedExactlyOncePerSourceAttempt(t *testing.T) {
 		t.Fatalf("the repair attempt keeps its source, return stage and feedback: %+v", last)
 	}
 }
+
+func TestPipelineReviewLinkIsBoundToOneHead(t *testing.T) {
+	ctx := context.Background()
+	s, sid := seedPipelineSession(t, "prl")
+	at := time.Now().UTC().Truncate(time.Second)
+	run, attempt := newRun("run-l", sid, "prl", at)
+	if _, _, err := s.CreatePipelineRun(ctx, run, attempt); err != nil {
+		t.Fatal(err)
+	}
+	link := domain.PipelineReviewLink{AttemptID: attempt.ID, RunID: run.ID, PRURL: "https://x/pr/1", HeadSHA: "aaa111", LinkedAt: at, UpdatedAt: at}
+	got, err := s.LinkPipelineReview(ctx, link)
+	if err != nil || got.HeadSHA != "aaa111" || got.ReviewRunID != "" {
+		t.Fatalf("first link = %+v, %v", got, err)
+	}
+	// Filling in the review run id is allowed for the same head.
+	link.ReviewRunID, link.UpdatedAt = "rrun-1", at.Add(time.Second)
+	got, err = s.LinkPipelineReview(ctx, link)
+	if err != nil || got.ReviewRunID != "rrun-1" {
+		t.Fatalf("fill run id = %+v, %v", got, err)
+	}
+	// A different head can never replace the recorded one.
+	other := link
+	other.HeadSHA, other.ReviewRunID, other.UpdatedAt = "bbb222", "rrun-2", at.Add(2*time.Second)
+	got, err = s.LinkPipelineReview(ctx, other)
+	if err != nil || got.HeadSHA != "aaa111" || got.ReviewRunID != "rrun-1" {
+		t.Fatalf("a link must not move to another head: %+v, %v", got, err)
+	}
+	if links, err := s.ListPipelineReviewLinks(ctx, run.ID); err != nil || len(links) != 1 {
+		t.Fatalf("links = %+v, %v", links, err)
+	}
+	if _, ok, err := s.GetPipelineReviewLink(ctx, "missing"); err != nil || ok {
+		t.Fatalf("missing link ok=%v err=%v", ok, err)
+	}
+}

@@ -17,6 +17,15 @@ type PipelineGuard interface {
 	SuppressesLifecycleShortcuts(ctx context.Context, id domain.SessionID) bool
 }
 
+// PipelineReviewGuard is the optional second half of a PipelineGuard: it decides
+// whether a review pass may be started for a session right now. A task whose
+// pipeline run has not reached its Review stage must not be reviewed early, so
+// a manual or idle-worker trigger cannot bypass Build and Test. A session with
+// no unfinished run is always allowed, so ordinary review is unchanged.
+type PipelineReviewGuard interface {
+	ReviewTriggerAllowed(ctx context.Context, id domain.SessionID) (allowed bool, reason string)
+}
+
 // PipelineExecutionGate decides whether a session may currently act for its
 // pipeline run: receive new input, restart its controller, or be restored.
 // Only the active stage's executor is admitted; the owner worker during an
@@ -103,4 +112,7 @@ var (
 	ErrPipelineStageUnsupported = errors.New("pipeline stage is not supported by this harness or mode")
 	// ErrPipelineExecutionOwned is returned to callers refused by the gate.
 	ErrPipelineExecutionOwned = errors.New("the task's pipeline run is executing another stage")
+	// ErrPipelineReviewNotReady means a review pass was requested before the
+	// task's pipeline reached its Review stage.
+	ErrPipelineReviewNotReady = errors.New("the task's pipeline has not reached its review stage")
 )

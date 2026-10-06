@@ -468,3 +468,60 @@ func (s *Store) ListPipelineRepairs(ctx context.Context, runID string) ([]domain
 	}
 	return out, nil
 }
+
+// LinkPipelineReview records which pull request head a Review attempt evaluates
+// and, when known, the AO review run for it. It is idempotent: a link can gain a
+// review run id but never moves to another pull request or head, and the stored
+// link is returned so callers can detect a conflicting head.
+func (s *Store) LinkPipelineReview(ctx context.Context, l domain.PipelineReviewLink) (domain.PipelineReviewLink, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var out gen.PipelineReviewLink
+	err := s.inTx(ctx, "link pipeline review", func(q *gen.Queries) error {
+		if err := q.UpsertPipelineReviewLink(ctx, gen.UpsertPipelineReviewLinkParams{
+			AttemptID: l.AttemptID, RunID: l.RunID, PRURL: l.PRURL, HeadSha: l.HeadSHA,
+			ReviewRunID: l.ReviewRunID, LinkedAt: l.LinkedAt, UpdatedAt: l.UpdatedAt,
+		}); err != nil {
+			return err
+		}
+		var err error
+		out, err = q.GetPipelineReviewLink(ctx, l.AttemptID)
+		return err
+	})
+	if err != nil {
+		return domain.PipelineReviewLink{}, fmt.Errorf("link pipeline review: %w", err)
+	}
+	return reviewLinkFromRow(out), nil
+}
+
+// GetPipelineReviewLink returns the link for a Review attempt, if any.
+func (s *Store) GetPipelineReviewLink(ctx context.Context, attemptID string) (domain.PipelineReviewLink, bool, error) {
+	row, err := s.qr.GetPipelineReviewLink(ctx, attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PipelineReviewLink{}, false, nil
+	}
+	if err != nil {
+		return domain.PipelineReviewLink{}, false, fmt.Errorf("get pipeline review link: %w", err)
+	}
+	return reviewLinkFromRow(row), true, nil
+}
+
+// ListPipelineReviewLinks returns a run's Review links in link order.
+func (s *Store) ListPipelineReviewLinks(ctx context.Context, runID string) ([]domain.PipelineReviewLink, error) {
+	rows, err := s.qr.ListPipelineReviewLinks(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list pipeline review links: %w", err)
+	}
+	out := make([]domain.PipelineReviewLink, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, reviewLinkFromRow(r))
+	}
+	return out, nil
+}
+
+func reviewLinkFromRow(r gen.PipelineReviewLink) domain.PipelineReviewLink {
+	return domain.PipelineReviewLink{
+		AttemptID: r.AttemptID, RunID: r.RunID, PRURL: r.PRURL, HeadSHA: r.HeadSha,
+		ReviewRunID: r.ReviewRunID, LinkedAt: r.LinkedAt, UpdatedAt: r.UpdatedAt,
+	}
+}

@@ -81,7 +81,7 @@ func apiCode(t *testing.T, err error) string {
 	return ae.Code
 }
 
-func TestCatalogReportsValidAndUnavailable(t *testing.T) {
+func TestCatalogReportsValidAndExecutable(t *testing.T) {
 	svc, _ := newFixture(t, map[string]string{
 		pipeline.ProfilesDir + "/tester.yaml": profileYAML,
 		pipeline.WorkflowsDir + "/bt.yaml":    workflowYAML,
@@ -93,8 +93,8 @@ func TestCatalogReportsValidAndUnavailable(t *testing.T) {
 	if len(got.Profiles) != 1 || len(got.Workflows) != 1 || !got.Workflows[0].Valid {
 		t.Fatalf("catalog: %+v", got)
 	}
-	if got.Workflows[0].Executable || got.Workflows[0].UnavailableReason == "" {
-		t.Fatal("valid workflows must be reported unavailable until execution ships")
+	if !got.Workflows[0].Executable || got.Workflows[0].UnavailableReason != "" {
+		t.Fatalf("a valid workflow is executable: %+v", got.Workflows[0])
 	}
 	if got.Default.State != pipelines.StateUnset {
 		t.Fatalf("default: %+v", got.Default)
@@ -111,8 +111,8 @@ func TestSetDefaultPersistsWithoutReplacingOtherSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != pipelines.StateWorkflowUnavailable || status.Executable {
-		t.Fatalf("selected workflow must read as visibly unavailable: %+v", status)
+	if status.State != pipelines.StateWorkflowAvailable || !status.Executable {
+		t.Fatalf("a valid selected workflow reads as available: %+v", status)
 	}
 	if st.row.Config.AgentRules != "keep" || st.row.Config.DefaultPipeline == nil {
 		t.Fatalf("config: %+v", st.row.Config)

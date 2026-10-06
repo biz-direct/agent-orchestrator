@@ -51,12 +51,19 @@ type RunView struct {
 	Evidence []EvidenceView `json:"evidence"`
 	// Repairs are the counted automatic returns to Build, in order. They share
 	// one budget across every source of repair.
-	Repairs     []RepairView `json:"repairs"`
-	Events      []EventView  `json:"events"`
-	Revision    int64        `json:"revision"`
-	CreatedAt   time.Time    `json:"createdAt"`
-	UpdatedAt   time.Time    `json:"updatedAt"`
-	CompletedAt *time.Time   `json:"completedAt,omitempty"`
+	Repairs []RepairView `json:"repairs"`
+	// ReviewGate is the live readiness of the Review stage for the current
+	// head: what AO is waiting for, or what a person has to do. It is present
+	// only while the run is at a Review stage.
+	ReviewGate *ReviewGateView `json:"reviewGate,omitempty"`
+	// Reviews records, per Review attempt, the pull request head and AO review
+	// run it was bound to and how it ended.
+	Reviews     []ReviewEvidenceView `json:"reviews"`
+	Events      []EventView          `json:"events"`
+	Revision    int64                `json:"revision"`
+	CreatedAt   time.Time            `json:"createdAt"`
+	UpdatedAt   time.Time            `json:"updatedAt"`
+	CompletedAt *time.Time           `json:"completedAt,omitempty"`
 }
 
 // StageView is one workflow stage with its derived state and resolved settings.
@@ -160,6 +167,45 @@ type EvidenceView struct {
 	Current bool `json:"current"`
 }
 
+// ReviewGateView is the current-head readiness of a Review stage.
+type ReviewGateView struct {
+	State   string `json:"state" enum:"waiting,ready,blocked"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	// Manual is true while the run waits for a person to trigger the review
+	// because Auto review is off.
+	Manual     bool `json:"manual"`
+	AutoReview bool `json:"autoReview"`
+	// Checkpoint is the revision the pipeline is reviewing; HeadSHA is the
+	// pull request's head as AO last observed it. They must match.
+	Checkpoint  string `json:"checkpoint"`
+	HeadSHA     string `json:"headSha,omitempty"`
+	PRURL       string `json:"prUrl,omitempty"`
+	PRNumber    int    `json:"prNumber,omitempty"`
+	ReviewRunID string `json:"reviewRunId,omitempty"`
+	// ReviewStatus and Verdict describe the review pass for this exact head.
+	ReviewStatus string `json:"reviewStatus,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	// CI is AO's judgement of required CI for this head; CIDetail explains it.
+	CI       string `json:"ci,omitempty" enum:"passing,no_checks,non_required_failing,pending,failing,unknown"`
+	CIDetail string `json:"ciDetail,omitempty"`
+}
+
+// ReviewEvidenceView is one Review attempt bound to the head it evaluated.
+type ReviewEvidenceView struct {
+	StageID     string `json:"stageId"`
+	AttemptID   string `json:"attemptId"`
+	Revision    string `json:"revision"`
+	PRURL       string `json:"prUrl,omitempty"`
+	HeadSHA     string `json:"headSha,omitempty"`
+	ReviewRunID string `json:"reviewRunId,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	// Current is true while the evaluated revision is still the run's latest
+	// accepted checkpoint.
+	Current bool `json:"current"`
+}
+
 // RepairView is one counted return to Build.
 type RepairView struct {
 	Ordinal         int       `json:"ordinal"`
@@ -206,14 +252,14 @@ func parseEventDetail(raw string) eventDetail {
 }
 
 // buildRunView derives the presentation from durable facts.
-func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.PipelineStageAttempt, events []domain.PipelineEvent, commands map[string][]domain.PipelineCommandResult, repairs []domain.PipelineRepair) RunView {
+func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.PipelineStageAttempt, events []domain.PipelineEvent, commands map[string][]domain.PipelineCommandResult, repairs []domain.PipelineRepair, links []domain.PipelineReviewLink) RunView {
 	v := RunView{
 		ID: run.ID, SessionID: string(run.SessionID), ProjectID: string(run.ProjectID), WorkflowID: run.WorkflowID,
 		State: string(run.State), PauseReason: string(run.PauseReason), PauseDetail: run.PauseDetail,
 		CurrentStageID: run.CurrentStageID, RequestedBy: string(run.RequestedBy), ExpectedBranch: run.ExpectedBranch,
 		RepairBudget: run.RepairBudget, RepairsUsed: run.RepairsUsed, RepairsRemaining: max(run.RepairBudget-run.RepairsUsed, 0),
 		SnapshotSHA256: run.SnapshotSHA256, SnapshotCaptured: snap.CapturedAt.Format(time.RFC3339),
-		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Repairs: []RepairView{}, Events: []EventView{},
+		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Repairs: []RepairView{}, Reviews: []ReviewEvidenceView{}, Events: []EventView{},
 		Revision: run.Revision, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, CompletedAt: run.CompletedAt,
 	}
 	latestByStage := map[string]domain.PipelineStageAttempt{}
@@ -249,6 +295,7 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 	for i := range v.Evidence {
 		v.Evidence[i].Current = v.Checkpoint != nil && v.Evidence[i].Revision == v.Checkpoint.OutputCommit
 	}
+	v.Reviews = reviewEvidence(attempts, links, v.Checkpoint)
 	for _, r := range repairs {
 		v.Repairs = append(v.Repairs, RepairView{Ordinal: r.Ordinal, Kind: string(r.Kind), SourceStageID: r.SourceStageID, SourceAttemptID: r.SourceAttemptID, TargetStageID: r.TargetStageID, ReturnStageID: r.ReturnStageID, CreatedAt: r.CreatedAt})
 	}

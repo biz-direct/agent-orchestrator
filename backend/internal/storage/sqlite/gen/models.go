@@ -574,6 +574,16 @@ type PipelineRepair struct {
 	CreatedAt       time.Time
 }
 
+type PipelineReviewLink struct {
+	AttemptID   string
+	RunID       string
+	PRURL       string
+	HeadSha     string
+	ReviewRunID string
+	LinkedAt    time.Time
+	UpdatedAt   time.Time
+}
+
 type PipelineRun struct {
 	ID             string
 	SessionID      string

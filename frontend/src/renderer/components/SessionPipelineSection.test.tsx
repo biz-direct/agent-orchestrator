@@ -27,7 +27,7 @@ const multi = { id: "build-test", file: "f", valid: true, executable: false, una
 
 const run = (overrides: Record<string, unknown> = {}) => ({
 	id: "prun_1", sessionId: "w-1", projectId: "proj", workflowId: "build-only", state: "running", currentStageId: "build", requestedBy: "user",
-	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], repairs: [], revision: 1,
+	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], repairs: [], reviews: [], revision: 1,
 	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 	stages: [{ id: "build", kind: "build", state: "active", model: "opus", settingsSource: "worker" }],
 	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] }],
@@ -243,5 +243,50 @@ describe("SessionPipelineSection", () => {
 		expect(screen.getByText("Return 1: test → build (production defect)")).toBeInTheDocument();
 		expect(screen.getByText("test: production defect at aaaaaaa (a newer commit exists; this no longer applies)")).toBeInTheDocument();
 		expect(screen.getByText("test: passed at bbbbbbb")).toBeInTheDocument();
+	});
+	it("shows manual review waiting for the current head without implying a merge", async () => {
+		mockGets(
+			run({
+				currentStageId: "review",
+				stages: [
+					{ id: "build", kind: "build", state: "accepted", settingsSource: "worker" },
+					{ id: "review", kind: "review", state: "active", settingsSource: "reviewer" },
+				],
+				reviewGate: {
+					state: "waiting", code: "awaiting_manual_review", message: "Auto review is off", manual: true, autoReview: false,
+					checkpoint: "aaaaaaaaaaaaaaaa", headSha: "aaaaaaaaaaaaaaaa", prUrl: "https://github.com/o/r/pull/1", ci: "no_checks", ciDetail: "none",
+				},
+			}),
+		);
+		renderSection();
+		const gate = await screen.findByTestId("review-gate");
+		expect(gate).toHaveAttribute("data-review-gate-state", "waiting");
+		expect(gate).toHaveTextContent("Waiting for a manual review");
+		expect(gate).toHaveTextContent("Auto review is off. Trigger the review from this task's review controls.");
+		expect(gate).toHaveTextContent("Reviewing revision aaaaaaa");
+		expect(gate).toHaveTextContent("Required checks: none to wait for");
+	});
+
+	it("explains a blocked review and keeps earlier review evidence labelled by revision", async () => {
+		mockGets(
+			run({
+				state: "paused", pauseReason: "review_changes_requested", pauseDetail: "The built-in review requested changes on revision aaaaaaaaaa.",
+				currentStageId: "review",
+				stages: [{ id: "review", kind: "review", state: "paused", settingsSource: "reviewer" }],
+				reviewGate: {
+					state: "blocked", code: "review_changes_requested", message: "x", manual: false, autoReview: true,
+					checkpoint: "aaaaaaaaaaaaaaaa", headSha: "aaaaaaaaaaaaaaaa", reviewRunId: "rr1", reviewStatus: "complete", verdict: "changes_requested",
+				},
+				reviews: [
+					{ stageId: "review", attemptId: "a9", revision: "bbbbbbbbbbbb", headSha: "bbbbbbbbbbbb", outcome: "changes_requested", current: false },
+				],
+			}),
+		);
+		renderSection();
+		const gate = await screen.findByTestId("review-gate");
+		expect(gate).toHaveAttribute("data-review-gate-state", "blocked");
+		expect(gate).toHaveTextContent("The review requested changes");
+		expect(gate).toHaveTextContent("AO review: complete, changes requested");
+		expect(screen.getByText(/Review of bbbbbbb: changes requested \(a newer revision exists/)).toBeInTheDocument();
 	});
 });

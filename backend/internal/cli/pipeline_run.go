@@ -38,6 +38,34 @@ type pipelineRunDTO struct {
 	Checkpoint       *pipelineCheckpointDTO   `json:"checkpoint,omitempty"`
 	LastRejection    *pipelineRejectionDTO    `json:"lastRejection,omitempty"`
 	Repairs          []pipelineRepairDTO      `json:"repairs"`
+	ReviewGate       *pipelineReviewGateDTO   `json:"reviewGate,omitempty"`
+	Reviews          []pipelineReviewEvidence `json:"reviews"`
+}
+
+type pipelineReviewGateDTO struct {
+	State        string `json:"state"`
+	Code         string `json:"code"`
+	Message      string `json:"message"`
+	Manual       bool   `json:"manual"`
+	AutoReview   bool   `json:"autoReview"`
+	Checkpoint   string `json:"checkpoint"`
+	HeadSHA      string `json:"headSha,omitempty"`
+	PRURL        string `json:"prUrl,omitempty"`
+	ReviewRunID  string `json:"reviewRunId,omitempty"`
+	ReviewStatus string `json:"reviewStatus,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	CI           string `json:"ci,omitempty"`
+	CIDetail     string `json:"ciDetail,omitempty"`
+}
+
+type pipelineReviewEvidence struct {
+	StageID     string `json:"stageId"`
+	Revision    string `json:"revision"`
+	PRURL       string `json:"prUrl,omitempty"`
+	HeadSHA     string `json:"headSha,omitempty"`
+	ReviewRunID string `json:"reviewRunId,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
+	Current     bool   `json:"current"`
 }
 
 type pipelineStageViewDTO struct {
@@ -372,6 +400,9 @@ func writePipelineRun(w io.Writer, run *pipelineRunDTO) error {
 			}
 		}
 	}
+	if err := writePipelineReview(w, run); err != nil {
+		return err
+	}
 	if r := run.LastRejection; r != nil {
 		if _, err := fmt.Fprintf(w, "last submission rejected [%s]: %s\n", r.Code, r.Message); err != nil {
 			return err
@@ -380,6 +411,45 @@ func writePipelineRun(w io.Writer, run *pipelineRunDTO) error {
 			if _, err := fmt.Fprintf(w, "  %s\n", p); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// writePipelineReview prints the Review stage's current-head readiness and the
+// evidence of earlier Review attempts.
+func writePipelineReview(w io.Writer, run *pipelineRunDTO) error {
+	if g := run.ReviewGate; g != nil {
+		mode := "auto review off"
+		if g.AutoReview {
+			mode = "auto review on"
+		}
+		if _, err := fmt.Fprintf(w, "review: %s [%s] (%s) at %s\n  %s\n", g.State, g.Code, mode, shortHash(g.Checkpoint), g.Message); err != nil {
+			return err
+		}
+		if g.PRURL != "" {
+			if _, err := fmt.Fprintf(w, "  pull request %s head %s\n", g.PRURL, shortHash(g.HeadSHA)); err != nil {
+				return err
+			}
+		}
+		if g.ReviewRunID != "" {
+			if _, err := fmt.Fprintf(w, "  AO review %s: %s %s\n", g.ReviewRunID, g.ReviewStatus, g.Verdict); err != nil {
+				return err
+			}
+		}
+		if g.CI != "" {
+			if _, err := fmt.Fprintf(w, "  required CI: %s - %s\n", g.CI, g.CIDetail); err != nil {
+				return err
+			}
+		}
+	}
+	for _, r := range run.Reviews {
+		freshness := "superseded"
+		if r.Current {
+			freshness = "current"
+		}
+		if _, err := fmt.Fprintf(w, "review of %s (%s): %s head %s run %s [%s]\n", shortHash(r.Revision), r.StageID, r.Outcome, shortHash(r.HeadSHA), r.ReviewRunID, freshness); err != nil {
+			return err
 		}
 	}
 	return nil

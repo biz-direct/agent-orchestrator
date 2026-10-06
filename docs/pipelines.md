@@ -14,10 +14,11 @@ Status by delivery slice (parent design: issue #1):
 | Specialist scope enforcement and structured result contract | shipped |
 | Independent validation commands with revision-bound evidence | shipped |
 | Test repair through the original worker (shared three-attempt budget) | shipped |
-| Review, review repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
+| Built-in Review stage with current-revision approval and CI gates | shipped |
+| Review repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
 
-A valid workflow that this build cannot execute (one with a `review` stage today) can be selected but is shown as **unavailable**. AO never silently
-substitutes a normal worker for a selected workflow that cannot run, and a
+A valid workflow that this build cannot execute can be selected but is shown as
+**unavailable**. AO never silently substitutes a normal worker for a selected workflow that cannot run, and a
 project default never changes what an ordinary spawn launches.
 
 ## Where definitions live
@@ -296,3 +297,73 @@ applying; it never counts as validation of the new head.
 in its place: the run pauses with `recovery_decision_required`. Recovery tooling
 arrives with the recovery slice. Nothing in this flow resets or rolls back the
 worktree.
+
+## Review: AO's built-in reviewer with current-revision gates
+
+A `kind: review` stage is an **adapter** over AO's existing review subsystem, not
+a new worker role and not a second reviewer. It uses the task's pull request, the
+configured reviewer and its interface (terminal or chat), and the same review
+runs, controls, and Review panel as an ordinary task. There is no per-stage
+harness or model: a stage override on a review stage is refused; change the
+reviewer in the task's review settings.
+
+**Handoff.** After the previous stage is accepted, the writer (the worker or the
+Tester) is fenced and proven stopped and the worktree is verified to be exactly
+the accepted checkpoint. The Review attempt then becomes `active` with no
+executor. It is evaluated from durable facts by the same background driver that
+runs handoffs, every few seconds and at every wake, so a daemon restart simply
+continues it.
+
+**What it waits for**, in this order, always for the exact checkpoint revision:
+
+1. The workspace is on the expected branch at the checkpoint with no tracked
+   edits (untracked files cannot change the head). Anything else pauses
+   (`head_changed`, `unexpected_changes`, `review_unverifiable`).
+2. The task's own open pull request for the branch. None yet → waits
+   (`awaiting_pull_request`); merged/closed → pauses (`pull_request_closed`);
+   several → pauses (`pull_request_ambiguous`). A pull request head that has not
+   reached the checkpoint waits (`awaiting_pull_request_head`); once the review
+   is linked, a head that moves pauses (`head_changed`).
+3. An AO review pass **for that head**. With **Auto review on** the run starts
+   the built-in review itself, through the same service auto-review uses
+   (subject to its eligibility, for example idle time, which only waits). With
+   it **off**, the run shows `awaiting_manual_review` and the existing review
+   controls stay available. A pass for any other head never counts.
+4. The pass's result. Approved continues; `changes_requested` pauses the run
+   (`review_changes_requested`) with the verdict kept as the attempt's result,
+   spends no repair budget, and **does not nudge the worker** (review repair
+   routing is a later slice); a failed or cancelled reviewer, or one that ended
+   without a verdict, pauses (`review_operational`) and is not retried behind
+   the run's back.
+5. Required CI for that head. AO has no per-check "required" flag, so it uses the
+   provider's merge state: passing → ok; failing or pending with merge state
+   `UNSTABLE` → only non-required checks are affected, ok; failing otherwise →
+   pauses (`ci_failing`) because AO cannot prove the check is not required;
+   pending otherwise waits (`awaiting_ci`); results for another commit, or CI
+   that has not been observed, wait (`awaiting_ci_status`). A repository whose
+   provider reports **no checks** after CI was observed has no CI requirement and
+   AO does not invent one. Limitation: a required check that has not reported
+   yet cannot be told apart from "no checks"; the review itself normally takes
+   long enough for checks to appear.
+
+Only when approval **and** CI hold for the current head does the run complete.
+Completing a pipeline never merges, never publishes, and never implies that
+repository-host approvals, branch protection, or explicit merge authorization
+were satisfied: those stay independent requirements.
+
+**Exclusivity.** While a run is unfinished, a manual review request is refused
+(`409 PIPELINE_REVIEW_NOT_READY`) unless the run is at its Review stage, and
+idle-worker automatic review stays suppressed for the task; only the Review stage
+starts a pass. Direct review-feedback nudges to the worker are deferred while a
+run owns the task. An agent can never approve its own review: `ao pipeline
+submit` on a Review attempt is refused (`PIPELINE_STAGE_NOT_SUBMITTABLE`).
+Non-pipeline tasks are unchanged.
+
+**Visibility.** `GET /sessions/{id}/pipeline` returns `reviewGate` (state
+`waiting`, `ready`, or `blocked`, a machine `code`, the explanation, the
+checkpoint and pull request head, the review run and verdict, and the CI
+judgement) while the run is at Review, plus `reviews`: each Review attempt's
+linked head, review run, and outcome. `ao pipeline status` and the task view
+render the same facts. The durable link (`pipeline_review_links`) records the
+exact pull request head and review run once the head matches and can never move
+to another head.

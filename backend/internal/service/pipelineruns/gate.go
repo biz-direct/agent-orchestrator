@@ -83,6 +83,9 @@ func (g *StoreGate) AdmitSessionExecution(ctx context.Context, id domain.Session
 		if current.ExecutorSessionID == id {
 			return true, ""
 		}
+		if current.StageKind == "review" {
+			return false, fmt.Sprintf("this task is in pipeline stage %q: AO's review is evaluating the current revision and nothing may change it", current.StageID)
+		}
 		return false, fmt.Sprintf("this task is running pipeline stage %q in a different conversation", current.StageID)
 	case domain.PipelineAttemptValidating:
 		return false, fmt.Sprintf("AO is running independent validation checks for stage %q; nothing may write the worktree meanwhile", current.StageID)

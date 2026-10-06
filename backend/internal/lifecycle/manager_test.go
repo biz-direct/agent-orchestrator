@@ -3857,6 +3857,41 @@ func TestApplyReviewBatchSuppressedByJITGuardIsNotDelivered(t *testing.T) {
 	}
 }
 
+// A task owned by an unfinished pipeline run takes review feedback through the
+// run: the direct review nudge must neither reach nor wake the worker.
+func TestApplyReviewBatchDefersToUnfinishedPipeline(t *testing.T) {
+	for name, tc := range map[string]struct {
+		guard    ports.PipelineGuard
+		wantSent bool
+	}{
+		"no pipelines":        {guard: nil, wantSent: true},
+		"finished pipeline":   {guard: fakePipelineGuard{suppress: false}, wantSent: true},
+		"unfinished pipeline": {guard: fakePipelineGuard{suppress: true}, wantSent: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := newFakeStore()
+			st.sessions["mer-1"] = working("mer-1")
+			msg := &fakeMessenger{}
+			opts := []Option{}
+			if tc.guard != nil {
+				opts = append(opts, WithPipelineGuard(tc.guard))
+			}
+			m := New(st, msg, opts...)
+			result := ReviewResult{RunID: "run-1", BatchID: "batch-1", WorkerID: "mer-1", PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1", Verdict: domain.VerdictChangesRequested, Body: "fix the bug"}
+			outcome, err := m.ApplyReviewBatch(ctx, "mer-1", "batch-1", []ReviewResult{result})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantSent && (outcome != ReviewDeliverySent || len(msg.msgs) != 1) {
+				t.Fatalf("outcome=%q msgs=%v, want one delivery", outcome, msg.msgs)
+			}
+			if !tc.wantSent && (outcome != ReviewDeliveryNoop || len(msg.msgs) != 0) {
+				t.Fatalf("outcome=%q msgs=%v, want no delivery so the run stays undelivered", outcome, msg.msgs)
+			}
+		})
+	}
+}
+
 func TestApplyReviewBatchSendsCombinedAndDedups(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = working("mer-1")

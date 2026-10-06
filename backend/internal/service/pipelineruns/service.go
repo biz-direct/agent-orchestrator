@@ -76,6 +76,9 @@ type Store interface {
 	FinishPipelineCommandResult(ctx context.Context, id int64, r domain.PipelineCommandResult) error
 	ListPipelineCommandResults(ctx context.Context, attemptID string) ([]domain.PipelineCommandResult, error)
 	ListPipelineRepairs(ctx context.Context, runID string) ([]domain.PipelineRepair, error)
+	LinkPipelineReview(ctx context.Context, l domain.PipelineReviewLink) (domain.PipelineReviewLink, error)
+	GetPipelineReviewLink(ctx context.Context, attemptID string) (domain.PipelineReviewLink, bool, error)
+	ListPipelineReviewLinks(ctx context.Context, runID string) ([]domain.PipelineReviewLink, error)
 	MarkRunningPipelineCommandsUnknown(ctx context.Context, runID string, at time.Time, detail string) (int, error)
 }
 
@@ -134,6 +137,9 @@ type Deps struct {
 	// Executor starts, quiesces, and stops stage executors. Without it only
 	// single-stage Build workflows can run.
 	Executor ports.PipelineExecutor
+	// Reviews adapts AO's built-in review subsystem for Review stages. Without
+	// it a workflow with a Review stage cannot start.
+	Reviews ReviewGateway
 	// Runner executes validation commands; defaults to ExecRunner.
 	Runner CommandRunner
 	Clock  func() time.Time
@@ -148,6 +154,8 @@ type Service struct {
 	messenger Messenger
 	executor  ports.PipelineExecutor
 	runner    CommandRunner
+	reviews   ReviewGateway
+	waits     sync.Map // review attempt id -> last recorded waiting code
 	wakeCh    chan struct{}
 	driving   sync.Map // run id -> struct{}: at most one handoff driver per run
 	clock     func() time.Time
@@ -160,7 +168,7 @@ var _ Manager = (*Service)(nil)
 
 // New returns a pipeline run service.
 func New(d Deps) *Service {
-	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, executor: d.Executor, runner: d.Runner, wakeCh: make(chan struct{}, 1), clock: d.Clock, newID: d.NewID, logger: d.Logger}
+	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, executor: d.Executor, runner: d.Runner, reviews: d.Reviews, wakeCh: make(chan struct{}, 1), clock: d.Clock, newID: d.NewID, logger: d.Logger}
 	if s.git == nil {
 		s.git = ExecGit{}
 	}
@@ -279,6 +287,9 @@ func (s *Service) Start(ctx context.Context, in StartInput) (RunView, error) {
 	// visibly, when this build or a stage's harness cannot do that; there is no
 	// Terminal fallback.
 	for _, st := range entry.Workflow.Stages {
+		if st.Kind == pipeline.StageReview && s.reviews == nil {
+			return RunView{}, apierr.Conflict("PIPELINE_WORKFLOW_UNAVAILABLE", fmt.Sprintf("Stage %q needs AO's built-in review, which this build cannot drive.", st.ID), nil)
+		}
 		if st.Kind != pipeline.StageSpecialist {
 			continue
 		}
@@ -447,7 +458,13 @@ func (s *Service) view(ctx context.Context, runID string) (RunView, error) {
 	if err != nil {
 		return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load pipeline repairs")
 	}
-	return buildRunView(run, snap, attempts, events, commands, repairs), nil
+	links, err := s.store.ListPipelineReviewLinks(ctx, runID)
+	if err != nil {
+		return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load review evidence")
+	}
+	v := buildRunView(run, snap, attempts, events, commands, repairs, links)
+	v.ReviewGate = s.reviewGateFor(ctx, run, attempts)
+	return v, nil
 }
 
 // Submit implements Manager.
@@ -478,6 +495,11 @@ func (s *Service) Submit(ctx context.Context, in SubmitInput) (SubmitResult, err
 	}
 	if !ok || attempt.RunID != run.ID {
 		return SubmitResult{}, apierr.NotFound("PIPELINE_ATTEMPT_NOT_FOUND", "Unknown stage attempt for this run")
+	}
+	// A Review attempt has no executor: AO's built-in reviewer and the facts the
+	// daemon reads decide it, never an agent's report.
+	if attempt.StageKind == string(pipeline.StageReview) {
+		return SubmitResult{}, apierr.Forbidden("PIPELINE_STAGE_NOT_SUBMITTABLE", "The Review stage is decided by AO's built-in review and the pull request's checks; it does not take a submitted result")
 	}
 	// Only the attempt's own executor may report its result. A worker cannot
 	// answer for the specialist (or the reverse): that would be a stale or
@@ -802,6 +824,9 @@ func (s *Service) reconcileRun(ctx context.Context, run domain.PipelineRun) erro
 	if active == nil {
 		return nil // a handoff in flight has no executor yet; the driver owns it
 	}
+	if active.StageKind == string(pipeline.StageReview) {
+		return nil // Review has no executor; the review driver evaluates it from durable facts
+	}
 	session, ok, err := s.store.GetSession(ctx, active.ExecutorSessionID)
 	if err != nil {
 		return err
@@ -862,6 +887,8 @@ func branchLabel(b string) string {
 // UnfinishedRunChecker is the single store query the guard needs.
 type UnfinishedRunChecker interface {
 	HasUnfinishedPipelineRun(ctx context.Context, id domain.SessionID) (bool, error)
+	GetActivePipelineRunBySession(ctx context.Context, id domain.SessionID) (domain.PipelineRun, bool, error)
+	ListPipelineStageAttempts(ctx context.Context, runID string) ([]domain.PipelineStageAttempt, error)
 }
 
 // StoreGuard implements ports.PipelineGuard directly over the store, so
@@ -890,6 +917,11 @@ func (g *StoreGuard) SuppressesLifecycleShortcuts(ctx context.Context, id domain
 		return true
 	}
 	return has
+}
+
+// ReviewTriggerAllowed implements ports.PipelineReviewGuard.
+func (g *StoreGuard) ReviewTriggerAllowed(ctx context.Context, id domain.SessionID) (bool, string) {
+	return reviewTriggerAllowed(ctx, g.store, id, g.logger.Error)
 }
 
 // stageHarness resolves the harness a specialist stage will use at start: an

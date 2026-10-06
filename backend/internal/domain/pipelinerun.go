@@ -260,3 +260,16 @@ type PipelineTransition struct {
 	Events []PipelineEvent
 	At     time.Time
 }
+
+// PipelineReviewLink binds a Review stage attempt to the exact pull request head
+// it evaluates and the AO review run for that head. Once recorded, the head and
+// pull request never change: a later head means a different revision.
+type PipelineReviewLink struct {
+	AttemptID   string
+	RunID       string
+	PRURL       string
+	HeadSHA     string
+	ReviewRunID string
+	LinkedAt    time.Time
+	UpdatedAt   time.Time
+}

@@ -115,6 +115,9 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
+	if activeReviewAttempt(run, attempts) != nil {
+		return s.driveReviewAttempt(ctx, run.ID)
+	}
 	var pending, validating *domain.PipelineStageAttempt
 	byID := map[string]domain.PipelineStageAttempt{}
 	for i := range attempts {
@@ -158,7 +161,10 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	if s.executor == nil {
 		return s.pauseHandoff(ctx, run, pending, PauseStageUnsupported, "This build has no executor for attached specialist stages")
 	}
-	if stage.Kind != pipeline.StageBuild {
+	if stage.Kind == pipeline.StageReview && s.reviews == nil {
+		return s.pauseHandoff(ctx, run, pending, PauseStageUnsupported, "This build cannot drive AO's built-in review")
+	}
+	if stage.Kind == pipeline.StageSpecialist {
 		if err := s.executor.PreflightStage(ctx, domain.AgentHarness(stage.Harness)); err != nil {
 			return s.pauseHandoff(ctx, run, pending, PauseStageUnsupported, fmt.Sprintf("Stage %q cannot run as a Chat specialist: %v", stage.ID, err))
 		}
@@ -207,6 +213,9 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	var started ports.PipelineStageStarted
 	resumed := false
 	switch existing := s.retainedStageSession(attempts, stage.ID); {
+	case stage.Kind == pipeline.StageReview:
+		// Review has no executor: it becomes active once the writer stopped and
+		// the worktree is the checkpoint, and AO's reviewer takes it from there.
 	case stage.Kind == pipeline.StageBuild:
 		resumed = true
 		started, err = s.executor.ResumeExecutor(ctx, run.SessionID, s.repairPromptFor(ctx, run, *pending))
@@ -245,6 +254,9 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 		// The run was paused or cancelled while we were starting the executor.
 		// A conversation we just created is stopped; one we only resumed is fenced
 		// again. Either way the workspace is never touched.
+		if stage.Kind == pipeline.StageReview {
+			return nil
+		}
 		cleanup := context.WithoutCancel(ctx)
 		var cleanErr error
 		if resumed {
@@ -262,6 +274,9 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	}
 	if err := s.store.SetPipelineAttemptInstructionDelivery(ctx, pending.ID, "delivered"); err != nil {
 		s.logger.Error("pipeline: record stage prompt delivery failed", "run_id", run.ID, "err", err)
+	}
+	if stage.Kind == pipeline.StageReview {
+		s.wake() // evaluate the Review gate now instead of at the next poll
 	}
 	return nil
 }

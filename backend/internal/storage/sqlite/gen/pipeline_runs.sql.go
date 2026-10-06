@@ -476,6 +476,25 @@ func (q *Queries) GetLatestPipelineRunBySession(ctx context.Context, sessionID s
 	return i, err
 }
 
+const getPipelineReviewLink = `-- name: GetPipelineReviewLink :one
+SELECT attempt_id, run_id, pr_url, head_sha, review_run_id, linked_at, updated_at FROM pipeline_review_links WHERE attempt_id = ?
+`
+
+func (q *Queries) GetPipelineReviewLink(ctx context.Context, attemptID string) (PipelineReviewLink, error) {
+	row := q.db.QueryRowContext(ctx, getPipelineReviewLink, attemptID)
+	var i PipelineReviewLink
+	err := row.Scan(
+		&i.AttemptID,
+		&i.RunID,
+		&i.PRURL,
+		&i.HeadSha,
+		&i.ReviewRunID,
+		&i.LinkedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPipelineRun = `-- name: GetPipelineRun :one
 SELECT id, session_id, project_id, workflow_id, state, pause_reason, pause_detail, current_stage_id, requested_by, expected_branch, repair_budget, repairs_used, snapshot, snapshot_sha256, revision, created_at, updated_at, completed_at FROM pipeline_runs WHERE id = ?
 `
@@ -658,6 +677,41 @@ func (q *Queries) ListPipelineRepairs(ctx context.Context, runID string) ([]Pipe
 			&i.TargetStageID,
 			&i.ReturnStageID,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPipelineReviewLinks = `-- name: ListPipelineReviewLinks :many
+SELECT attempt_id, run_id, pr_url, head_sha, review_run_id, linked_at, updated_at FROM pipeline_review_links WHERE run_id = ? ORDER BY linked_at
+`
+
+func (q *Queries) ListPipelineReviewLinks(ctx context.Context, runID string) ([]PipelineReviewLink, error) {
+	rows, err := q.db.QueryContext(ctx, listPipelineReviewLinks, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PipelineReviewLink{}
+	for rows.Next() {
+		var i PipelineReviewLink
+		if err := rows.Scan(
+			&i.AttemptID,
+			&i.RunID,
+			&i.PRURL,
+			&i.HeadSha,
+			&i.ReviewRunID,
+			&i.LinkedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -965,4 +1019,39 @@ func (q *Queries) StartPipelineAttemptValidation(ctx context.Context, arg StartP
 		&i.FeedbackJson,
 	)
 	return i, err
+}
+
+const upsertPipelineReviewLink = `-- name: UpsertPipelineReviewLink :exec
+INSERT INTO pipeline_review_links (attempt_id, run_id, pr_url, head_sha, review_run_id, linked_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (attempt_id) DO UPDATE SET
+    review_run_id = CASE WHEN excluded.review_run_id <> '' THEN excluded.review_run_id ELSE pipeline_review_links.review_run_id END,
+    updated_at = excluded.updated_at
+WHERE pipeline_review_links.pr_url = excluded.pr_url
+  AND pipeline_review_links.head_sha = excluded.head_sha
+  AND pipeline_review_links.review_run_id IS NOT excluded.review_run_id
+  AND excluded.review_run_id <> ''
+`
+
+type UpsertPipelineReviewLinkParams struct {
+	AttemptID   string
+	RunID       string
+	PRURL       string
+	HeadSha     string
+	ReviewRunID string
+	LinkedAt    time.Time
+	UpdatedAt   time.Time
+}
+
+func (q *Queries) UpsertPipelineReviewLink(ctx context.Context, arg UpsertPipelineReviewLinkParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPipelineReviewLink,
+		arg.AttemptID,
+		arg.RunID,
+		arg.PRURL,
+		arg.HeadSha,
+		arg.ReviewRunID,
+		arg.LinkedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }

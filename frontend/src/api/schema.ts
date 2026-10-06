@@ -4724,6 +4724,35 @@ export interface components {
             /** @enum {string} */
             status: "met" | "unmet" | "not_applicable" | "unverified";
         };
+        PipelineReviewEvidenceView: {
+            attemptId: string;
+            current: boolean;
+            headSha?: string;
+            outcome?: string;
+            prUrl?: string;
+            reviewRunId?: string;
+            revision: string;
+            stageId: string;
+            summary?: string;
+        };
+        PipelineReviewGateView: {
+            autoReview: boolean;
+            checkpoint: string;
+            /** @enum {string} */
+            ci?: "passing" | "no_checks" | "non_required_failing" | "pending" | "failing" | "unknown";
+            ciDetail?: string;
+            code: string;
+            headSha?: string;
+            manual: boolean;
+            message: string;
+            prNumber?: number;
+            prUrl?: string;
+            reviewRunId?: string;
+            reviewStatus?: string;
+            /** @enum {string} */
+            state: "waiting" | "ready" | "blocked";
+            verdict?: string;
+        };
         PipelineRunEnvelope: {
             run: null | components["schemas"]["PipelineRunView"];
         };
@@ -4749,6 +4778,8 @@ export interface components {
             repairsUsed: number;
             /** @enum {string} */
             requestedBy: "user" | "orchestrator";
+            reviewGate?: components["schemas"]["PipelineReviewGateView"];
+            reviews: components["schemas"]["PipelineReviewEvidenceView"][];
             /** Format: int64 */
             revision: number;
             sessionId: string;

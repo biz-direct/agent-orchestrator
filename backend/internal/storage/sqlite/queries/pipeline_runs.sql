@@ -138,3 +138,20 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListPipelineRepairs :many
 SELECT * FROM pipeline_repairs WHERE run_id = ? ORDER BY ordinal;
+
+-- name: UpsertPipelineReviewLink :exec
+INSERT INTO pipeline_review_links (attempt_id, run_id, pr_url, head_sha, review_run_id, linked_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (attempt_id) DO UPDATE SET
+    review_run_id = CASE WHEN excluded.review_run_id <> '' THEN excluded.review_run_id ELSE pipeline_review_links.review_run_id END,
+    updated_at = excluded.updated_at
+WHERE pipeline_review_links.pr_url = excluded.pr_url
+  AND pipeline_review_links.head_sha = excluded.head_sha
+  AND pipeline_review_links.review_run_id IS NOT excluded.review_run_id
+  AND excluded.review_run_id <> '';
+
+-- name: GetPipelineReviewLink :one
+SELECT * FROM pipeline_review_links WHERE attempt_id = ?;
+
+-- name: ListPipelineReviewLinks :many
+SELECT * FROM pipeline_review_links WHERE run_id = ? ORDER BY linked_at;

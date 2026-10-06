@@ -62,6 +62,12 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 	if m.guard == nil {
 		return ReviewDeliveryNoop, nil
 	}
+	// A task owned by an unfinished pipeline run takes review feedback through
+	// the run, not through a direct nudge that could wake a session the run has
+	// deliberately stopped. The run stays undelivered so nothing is lost.
+	if m.pipelines != nil && m.pipelines.SuppressesLifecycleShortcuts(ctx, workerID) {
+		return ReviewDeliveryNoop, nil
+	}
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].PRURL != results[j].PRURL {
 			return results[i].PRURL < results[j].PRURL

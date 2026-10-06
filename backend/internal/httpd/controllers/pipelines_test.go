@@ -82,7 +82,7 @@ func TestPipelinesAPI_DiscoveryValidationAndDefaultPersistence(t *testing.T) {
 		t.Fatalf("add project = %d", status)
 	}
 
-	// Discovery: one valid (but not yet executable) and one invalid workflow.
+	// Discovery: one valid (executable) and one invalid workflow.
 	body, status, headers := doRequest(t, srv, "GET", "/api/v1/projects/pipes/pipelines", "")
 	if status != http.StatusOK {
 		t.Fatalf("catalog = %d body=%s", status, body)
@@ -116,8 +116,8 @@ func TestPipelinesAPI_DiscoveryValidationAndDefaultPersistence(t *testing.T) {
 		byID[w.ID] = i
 	}
 	good, bad := cat.Workflows[byID["build-test"]], cat.Workflows[byID["broken"]]
-	if !good.Valid || good.Executable || good.UnavailableReason == "" {
-		t.Fatalf("valid workflow must be visibly unavailable: %+v", good)
+	if !good.Valid || !good.Executable || good.UnavailableReason != "" {
+		t.Fatalf("a valid workflow is executable: %+v", good)
 	}
 	if bad.Valid || len(bad.Diagnostics) == 0 || !strings.Contains(bad.Diagnostics[0].Message, `unknown profile "ghost"`) || !strings.HasSuffix(bad.Diagnostics[0].File, "broken.yaml") {
 		t.Fatalf("invalid workflow diagnostics: %+v", bad)
@@ -129,9 +129,9 @@ func TestPipelinesAPI_DiscoveryValidationAndDefaultPersistence(t *testing.T) {
 	body, status, _ = doRequest(t, srv, "PUT", "/api/v1/projects/pipes/pipelines/default", `{"selection":{"mode":"workflow","workflowId":"ghost"}}`)
 	assertErrorCode(t, body, status, http.StatusBadRequest, "PIPELINE_WORKFLOW_NOT_FOUND")
 
-	// Saving a valid selection persists it and reports it as unavailable.
+	// Saving a valid selection persists it and reports it as available.
 	body, status, _ = doRequest(t, srv, "PUT", "/api/v1/projects/pipes/pipelines/default", `{"selection":{"mode":"workflow","workflowId":"build-test"}}`)
-	if status != http.StatusOK || !strings.Contains(string(body), `"state":"workflow_unavailable"`) || !strings.Contains(string(body), `"executable":false`) {
+	if status != http.StatusOK || !strings.Contains(string(body), `"state":"workflow_available"`) || !strings.Contains(string(body), `"executable":true`) {
 		t.Fatalf("set default = %d body=%s", status, body)
 	}
 	body, status, _ = doRequest(t, srv, "GET", "/api/v1/projects/pipes/pipelines/default", "")

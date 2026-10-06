@@ -13820,6 +13820,81 @@ components:
       - criterion
       - status
       type: object
+    PipelineReviewEvidenceView:
+      properties:
+        attemptId:
+          type: string
+        current:
+          type: boolean
+        headSha:
+          type: string
+        outcome:
+          type: string
+        prUrl:
+          type: string
+        reviewRunId:
+          type: string
+        revision:
+          type: string
+        stageId:
+          type: string
+        summary:
+          type: string
+      required:
+      - stageId
+      - attemptId
+      - revision
+      - current
+      type: object
+    PipelineReviewGateView:
+      properties:
+        autoReview:
+          type: boolean
+        checkpoint:
+          type: string
+        ci:
+          enum:
+          - passing
+          - no_checks
+          - non_required_failing
+          - pending
+          - failing
+          - unknown
+          type: string
+        ciDetail:
+          type: string
+        code:
+          type: string
+        headSha:
+          type: string
+        manual:
+          type: boolean
+        message:
+          type: string
+        prNumber:
+          type: integer
+        prUrl:
+          type: string
+        reviewRunId:
+          type: string
+        reviewStatus:
+          type: string
+        state:
+          enum:
+          - waiting
+          - ready
+          - blocked
+          type: string
+        verdict:
+          type: string
+      required:
+      - state
+      - code
+      - message
+      - manual
+      - autoReview
+      - checkpoint
+      type: object
     PipelineRunEnvelope:
       properties:
         run:
@@ -13883,6 +13958,12 @@ components:
           - user
           - orchestrator
           type: string
+        reviewGate:
+          $ref: '#/components/schemas/PipelineReviewGateView'
+        reviews:
+          items:
+            $ref: '#/components/schemas/PipelineReviewEvidenceView'
+          type: array
         revision:
           format: int64
           type: integer
@@ -13924,6 +14005,7 @@ components:
       - attempts
       - evidence
       - repairs
+      - reviews
       - events
       - revision
       - createdAt

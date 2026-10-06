@@ -23,6 +23,9 @@ const (
 	SourceProfile = "profile"
 	// SourceWorker is the regular worker's own pinned harness/model (Build).
 	SourceWorker = "worker"
+	// SourceReviewer marks a Review stage: it runs AO's built-in reviewer with
+	// the task's or project's reviewer configuration, not a stage setting.
+	SourceReviewer = "reviewer"
 )
 
 // Snapshot is the frozen input of one run. Repository edits made after the run
@@ -137,6 +140,9 @@ func buildSnapshot(in snapshotInput) (Snapshot, string, string, error) {
 			if st.Kind == pipeline.StageBuild {
 				return Snapshot{}, "", "", fmt.Errorf("stage %q is the regular worker and keeps its own harness and model", st.ID)
 			}
+			if st.Kind == pipeline.StageReview {
+				return Snapshot{}, "", "", fmt.Errorf("stage %q is AO's built-in review and uses the configured reviewer; change the reviewer in the task's review settings", st.ID)
+			}
 			if ov.Harness != "" {
 				ss.Harness = ov.Harness
 			}
@@ -175,6 +181,8 @@ func stageExists(stages []pipeline.Stage, id string) bool {
 // profile defaults.
 func resolveStageSettings(ss *SnapshotStage, profile *pipeline.Profile, worker domain.SessionRecord) {
 	switch {
+	case ss.Kind == pipeline.StageReview:
+		ss.SettingsSource = SourceReviewer
 	case ss.Kind == pipeline.StageBuild:
 		ss.Harness, ss.Model, ss.SettingsSource = string(worker.Harness), worker.Metadata.Model, SourceWorker
 	case profile != nil:

@@ -190,3 +190,23 @@ func TestPipelineSubmitSendsASpecialistReportVerbatim(t *testing.T) {
 		t.Fatalf("a non-object report is a usage error: %v", err)
 	}
 }
+
+func TestPipelineStatusShowsCurrentHeadReviewReadiness(t *testing.T) {
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"run":{"id":"prun_1","workflowId":"wf","state":"running","currentStageId":"review","requestedBy":"user","expectedBranch":"task","repairBudget":3,"repairsUsed":0,"repairsRemaining":3,
+ "stages":[{"id":"build","kind":"build","state":"accepted","settingsSource":"worker"},{"id":"review","kind":"review","state":"active","settingsSource":"reviewer"}],
+ "attempts":[],"repairs":[],
+ "reviewGate":{"state":"waiting","code":"awaiting_manual_review","message":"Auto review is off. Trigger the review for this revision from the task's review controls","manual":true,"autoReview":false,"checkpoint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","headSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","prUrl":"https://github.com/o/r/pull/1","ci":"no_checks","ciDetail":"no CI requirement"},
+ "reviews":[{"stageId":"review","revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","headSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","reviewRunId":"rr0","outcome":"changes_requested","current":false}]}}`)
+	})
+	t.Setenv("AO_SESSION_ID", "w-1")
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "pipeline", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"review: waiting [awaiting_manual_review] (auto review off) at aaaaaaaaaa", "Trigger the review", "pull request https://github.com/o/r/pull/1 head aaaaaaaaaa", "required CI: no_checks", "review of bbbbbbbbbb (review): changes_requested head bbbbbbbbbb run rr0 [superseded]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output missing %q:\n%s", want, out)
+		}
+	}
+}

@@ -239,6 +239,8 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"PipelinerunsReportCommand":       "PipelineReportCommand",
 	"PipelinerunsReportDefect":        "PipelineReportDefect",
 	"PipelinerunsEvidenceView":        "PipelineEvidenceView",
+	"PipelinerunsReviewGateView":      "PipelineReviewGateView",
+	"PipelinerunsReviewEvidenceView":  "PipelineReviewEvidenceView",
 	"PipelinerunsAttemptView":         "PipelineAttemptView",
 	"PipelinerunsCheckpointView":      "PipelineCheckpointView",
 	"PipelinerunsEventView":           "PipelineEventView",

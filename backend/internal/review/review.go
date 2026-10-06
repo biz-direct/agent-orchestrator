@@ -273,8 +273,20 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 		if reason := autoReviewSessionReason(worker, e.clock()); reason != "" {
 			return TriggerResult{SkipReason: reason}, nil
 		}
-		if e.pipelines != nil && e.pipelines.SuppressesLifecycleShortcuts(ctx, workerID) {
+		// A pipeline's own Review stage passes the bypass marker; every other
+		// automatic trigger stays out of the way of an unfinished run.
+		if e.pipelines != nil && !ports.PipelineBypass(ctx) && e.pipelines.SuppressesLifecycleShortcuts(ctx, workerID) {
 			return TriggerResult{SkipReason: "pipeline_active"}, nil
+		}
+	}
+	// Manual passes are gated too: a task whose pipeline run is still in Build or
+	// Test must not be reviewed early, or an idle worker's trigger would bypass
+	// the stages in front of Review.
+	if source == domain.ReviewTriggerManual && e.pipelines != nil && !ports.PipelineBypass(ctx) {
+		if g, ok := e.pipelines.(ports.PipelineReviewGuard); ok {
+			if allowed, reason := g.ReviewTriggerAllowed(ctx, workerID); !allowed {
+				return TriggerResult{}, fmt.Errorf("%w: %s", ports.ErrPipelineReviewNotReady, reason)
+			}
 		}
 	}
 	if worker.IsTerminated {

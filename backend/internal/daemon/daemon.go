@@ -802,7 +802,7 @@ func Run() error {
 		gated.SetPipelineGate(pipelineGate)
 	}
 	executor, _ := sessMgr.(ports.PipelineExecutor)
-	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Executor: executor, Logger: log})
+	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Executor: executor, Reviews: pipelineReviewGateway{store: store, reviews: reviewSvc}, Logger: log})
 	if reconcileErr := pipelineRunSvc.ReconcileAll(ctx); reconcileErr != nil {
 		log.Warn("pipeline run reconcile deferred", "err", reconcileErr)
 	}
