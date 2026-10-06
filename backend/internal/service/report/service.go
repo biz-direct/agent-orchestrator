@@ -10,6 +10,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // Store is the report service's persistence and ownership boundary.
@@ -33,6 +34,7 @@ type Service struct {
 	now       func() time.Time
 	newID     func() string
 	onCreated func(domain.ReportRecord)
+	pipelines ports.PipelineGuard
 }
 
 // Deps configures a Service.
@@ -41,6 +43,9 @@ type Deps struct {
 	Now       func() time.Time
 	NewID     func() string
 	OnCreated func(domain.ReportRecord)
+	// Pipelines, when set, keeps a worker's own "done" from reading as task
+	// completion while a pipeline run still owns the task.
+	Pipelines ports.PipelineGuard
 }
 
 // New constructs a report Service.
@@ -51,7 +56,7 @@ func New(d Deps) *Service {
 	if d.NewID == nil {
 		d.NewID = func() string { return "rpt_" + uuid.NewString() }
 	}
-	return &Service{store: d.Store, now: d.Now, newID: d.NewID, onCreated: d.OnCreated}
+	return &Service{store: d.Store, now: d.Now, newID: d.NewID, onCreated: d.OnCreated, pipelines: d.Pipelines}
 }
 
 // ListProject returns persisted report facts ordered by created_at then id,
@@ -92,6 +97,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.ReportR
 	if input.SessionID == "" {
 		return domain.ReportRecord{}, apierr.Invalid("INVALID_REPORT_SESSION", "Worker session id is required", nil)
 	}
+	// A worker's "done" is a coordination claim, never task completion, and while
+	// its pipeline run is unfinished it is not even a candidate for completion:
+	// AO reports completion itself when the pipeline validates. The claim is kept
+	// as an ordinary checkpoint so the orchestrator still sees what the worker said.
+	if input.State == domain.ReportDone && s.pipelines != nil && !ports.PipelineBypass(ctx) && s.pipelines.SuppressesLifecycleShortcuts(ctx, input.SessionID) {
+		input.State = domain.ReportCheckpoint
+		input.Note = pipelineDoneNote(input.Note)
+	}
 	if err := domain.ValidateReportContent(input.State, input.Note, input.Message, input.Outputs); err != nil {
 		return domain.ReportRecord{}, apierr.Invalid("INVALID_REPORT", "Report state, note, message, or outputs are invalid", nil)
 	}
@@ -129,4 +142,16 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (domain.ReportR
 		s.onCreated(created)
 	}
 	return created, err
+}
+
+const pipelineDoneNotePrefix = "[Worker says it is done, but its pipeline is still running: this is not task completion. AO reports completion when the pipeline validates.] "
+
+// pipelineDoneNote keeps the worker's own words under the explanatory prefix,
+// within the report note limit.
+func pipelineDoneNote(note string) string {
+	out := pipelineDoneNotePrefix + note
+	if r := []rune(out); len(r) > domain.MaxReportTextCharacters {
+		out = string(r[:domain.MaxReportTextCharacters])
+	}
+	return out
 }

@@ -2622,5 +2622,12 @@
 	"inspector.pipeline.control.restoreTitle": "Restore the stage's conversation?",
 	"inspector.pipeline.control.restoreDescription": "The stage's conversation lost its controller, for example after a restart. AO can bring the same conversation back and continue it. It will not start a fresh conversation in its place.",
 	"inspector.pipeline.control.restoreConfirm": "Restore and continue",
-	"inspector.pipeline.control.recovery": "After restart: {{message}}"
+	"inspector.pipeline.control.recovery": "After restart: {{message}}",
+	"inspector.pipeline.intent.pending": "Workflow {{workflow}} starts as soon as this task is ready.",
+	"inspector.pipeline.intent.failed": "Workflow {{workflow}} could not start: {{detail}}",
+	"inspector.pipeline.intent.skipped": "{{detail}}",
+	"newTask.pipeline.label": "Pipeline",
+	"newTask.pipeline.projectDefault": "Project default ({{workflow}})",
+	"newTask.pipeline.projectDefaultNone": "Project default (normal worker)",
+	"newTask.pipeline.normalWorker": "Normal worker"
 }

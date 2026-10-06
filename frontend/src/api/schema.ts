@@ -4072,12 +4072,14 @@ export interface components {
             /** @enum {string} */
             mode?: "tui" | "chat";
             model?: string;
+            pipeline?: components["schemas"]["PipelineSelection"];
             projectId: string;
             taskPreparation?: string;
         };
         DelegateTaskResponse: {
             ok: boolean;
             orchestratorId?: string;
+            pipeline?: components["schemas"]["PipelineIntentView"];
             workerId: string;
         };
         DesktopWorkspaceLocationResponse: {
@@ -4722,6 +4724,16 @@ export interface components {
             output?: string;
             revision: string;
         };
+        PipelineIntentView: {
+            detail?: string;
+            normalWorker: boolean;
+            runId?: string;
+            /** @enum {string} */
+            source: "explicit" | "default";
+            /** @enum {string} */
+            state: "pending" | "started" | "skipped" | "failed";
+            workflowId?: string;
+        };
         PipelineProfile: {
             allowedPaths: string[];
             definitionSha256: string;
@@ -4810,6 +4822,7 @@ export interface components {
             verdict?: string;
         };
         PipelineRunEnvelope: {
+            intent?: components["schemas"]["PipelineIntentView"];
             run: null | components["schemas"]["PipelineRunView"];
         };
         PipelineRunView: {
@@ -5591,12 +5604,14 @@ export interface components {
             mode?: "chat" | "tui";
             model?: string;
             parentSessionId?: string;
+            pipeline?: components["schemas"]["PipelineSelection"];
             projectId?: string;
             prompt?: string;
             /** @enum {string} */
             trackerProvider?: "github" | "gitlab";
         };
         SpawnSessionResponse: {
+            pipeline?: components["schemas"]["PipelineIntentView"];
             promptBytes: number;
             session: components["schemas"]["ControllersSessionView"];
             systemPromptBytes: number;

@@ -18,7 +18,38 @@ import (
 
 // These DTOs mirror the daemon's pipeline run API without importing service types.
 type pipelineRunEnvelopeDTO struct {
-	Run *pipelineRunDTO `json:"run"`
+	Run    *pipelineRunDTO    `json:"run"`
+	Intent *pipelineIntentDTO `json:"intent,omitempty"`
+}
+
+type pipelineIntentDTO struct {
+	WorkflowID   string `json:"workflowId,omitempty"`
+	NormalWorker bool   `json:"normalWorker"`
+	Source       string `json:"source"`
+	State        string `json:"state"`
+	Detail       string `json:"detail,omitempty"`
+	RunID        string `json:"runId,omitempty"`
+}
+
+// writePipelineEnvelope prints a task's run, or - when it has none - the
+// pipeline selected for it at creation and what became of that selection.
+func writePipelineEnvelope(w io.Writer, env pipelineRunEnvelopeDTO) error {
+	if env.Run == nil && env.Intent != nil {
+		in := env.Intent
+		label := fmt.Sprintf("workflow %s", in.WorkflowID)
+		if in.NormalWorker {
+			label = "a normal worker"
+		}
+		if _, err := fmt.Fprintf(w, "no pipeline run yet: %s was selected at creation (%s): %s\n", label, in.Source, in.State); err != nil {
+			return err
+		}
+		if in.Detail != "" {
+			_, err := fmt.Fprintf(w, "  %s\n", in.Detail)
+			return err
+		}
+		return nil
+	}
+	return writePipelineRun(w, env.Run)
 }
 
 type pipelineRunDTO struct {
@@ -289,7 +320,7 @@ func newPipelineStatusCommand(ctx *commandContext) *cobra.Command {
 			if jsonOutput {
 				return writeJSON(cmd.OutOrStdout(), res)
 			}
-			return writePipelineRun(cmd.OutOrStdout(), res.Run)
+			return writePipelineEnvelope(cmd.OutOrStdout(), res)
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "Worker session id (default: AO_SESSION_ID)")

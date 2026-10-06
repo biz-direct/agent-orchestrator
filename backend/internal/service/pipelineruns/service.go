@@ -63,6 +63,10 @@ type Store interface {
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
 	GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (domain.SessionID, error)
 	FindAttachedSessionForAttempt(ctx context.Context, attemptID string) (domain.SessionID, bool, error)
+	CreatePipelineIntent(ctx context.Context, in domain.PipelineIntent) error
+	GetPipelineIntent(ctx context.Context, id domain.SessionID) (domain.PipelineIntent, bool, error)
+	ListPendingPipelineIntents(ctx context.Context) ([]domain.PipelineIntent, error)
+	SettlePipelineIntent(ctx context.Context, id domain.SessionID, state domain.PipelineIntentState, detail, runID string, at time.Time) (bool, error)
 	CreatePipelineRun(ctx context.Context, run domain.PipelineRun, first domain.PipelineStageAttempt) (domain.PipelineRun, domain.PipelineStageAttempt, error)
 	GetPipelineRun(ctx context.Context, id string) (domain.PipelineRun, bool, error)
 	GetActivePipelineRunBySession(ctx context.Context, id domain.SessionID) (domain.PipelineRun, bool, error)
@@ -91,12 +95,22 @@ type Messenger interface {
 	Send(ctx context.Context, id domain.SessionID, message string, attachment *ports.SpawnAttachment) error
 }
 
+// Reporter lets the run tell the task's orchestrator what happened as AO's own
+// report: completion only when the pipeline validated, and an actionable pause.
+type Reporter interface {
+	Report(ctx context.Context, id domain.SessionID, state domain.ReportState, note string) error
+}
+
 // Manager is the controller-facing contract.
 type Manager interface {
 	Start(ctx context.Context, in StartInput) (RunView, error)
 	Get(ctx context.Context, id domain.SessionID) (RunEnvelope, error)
 	Submit(ctx context.Context, in SubmitInput) (SubmitResult, error)
 	Control(ctx context.Context, in ControlInput) (ControlResult, error)
+	// ValidateSelection refuses an unusable explicit selection before a task is
+	// created; RecordIntent then records what the new task should run.
+	ValidateSelection(ctx context.Context, projectID domain.ProjectID, sel *domain.PipelineSelection) error
+	RecordIntent(ctx context.Context, in IntentInput) (*IntentView, error)
 }
 
 // StartInput starts a run on an existing worker.
@@ -142,6 +156,9 @@ type Deps struct {
 	// Executor starts, quiesces, and stops stage executors. Without it only
 	// single-stage Build workflows can run.
 	Executor ports.PipelineExecutor
+	// Reporter delivers AO-authored completion and attention reports to the
+	// task's orchestrator. Without it runs simply stay quiet.
+	Reporter Reporter
 	// Reviews adapts AO's built-in review subsystem for Review stages. Without
 	// it a workflow with a Review stage cannot start.
 	Reviews ReviewGateway
@@ -160,6 +177,7 @@ type Service struct {
 	executor  ports.PipelineExecutor
 	runner    CommandRunner
 	reviews   ReviewGateway
+	reporter  Reporter
 	waits     sync.Map // review attempt id -> last recorded waiting code
 	// validations holds the cancel function of each run's in-flight validation
 	// round so a pause or cancel can kill its commands.
@@ -177,6 +195,10 @@ var _ Manager = (*Service)(nil)
 // New returns a pipeline run service.
 func New(d Deps) *Service {
 	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, executor: d.Executor, runner: d.Runner, reviews: d.Reviews, wakeCh: make(chan struct{}, 1), clock: d.Clock, newID: d.NewID, logger: d.Logger}
+	s.reporter = d.Reporter
+	if s.reporter != nil {
+		s.store = &notifyingStore{Store: d.Store, svc: s}
+	}
 	if s.git == nil {
 		s.git = ExecGit{}
 	}
@@ -421,18 +443,22 @@ func (s *Service) Get(ctx context.Context, id domain.SessionID) (RunEnvelope, er
 	if err := s.reconcileSession(ctx, id); err != nil {
 		s.logger.Error("pipeline: reconcile failed", "session_id", id, "err", err)
 	}
+	var intent *IntentView
+	if in, found, ierr := s.store.GetPipelineIntent(ctx, id); ierr == nil && found {
+		intent = intentView(in)
+	}
 	run, ok, err := s.store.GetLatestPipelineRunBySession(ctx, id)
 	if err != nil {
 		return RunEnvelope{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load pipeline run")
 	}
 	if !ok {
-		return RunEnvelope{}, nil
+		return RunEnvelope{Intent: intent}, nil
 	}
 	view, err := s.view(ctx, run.ID)
 	if err != nil {
 		return RunEnvelope{}, err
 	}
-	return RunEnvelope{Run: &view}, nil
+	return RunEnvelope{Run: &view, Intent: intent}, nil
 }
 
 func (s *Service) view(ctx context.Context, runID string) (RunView, error) {

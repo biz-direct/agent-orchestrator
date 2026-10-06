@@ -12100,6 +12100,8 @@ components:
         model:
           maxLength: 256
           type: string
+        pipeline:
+          $ref: '#/components/schemas/PipelineSelection'
         projectId:
           type: string
         taskPreparation:
@@ -12114,6 +12116,8 @@ components:
           type: boolean
         orchestratorId:
           type: string
+        pipeline:
+          $ref: '#/components/schemas/PipelineIntentView'
         workerId:
           type: string
       required:
@@ -13817,6 +13821,33 @@ components:
       - exitCode
       - revision
       type: object
+    PipelineIntentView:
+      properties:
+        detail:
+          type: string
+        normalWorker:
+          type: boolean
+        runId:
+          type: string
+        source:
+          enum:
+          - explicit
+          - default
+          type: string
+        state:
+          enum:
+          - pending
+          - started
+          - skipped
+          - failed
+          type: string
+        workflowId:
+          type: string
+      required:
+      - normalWorker
+      - source
+      - state
+      type: object
     PipelineProfile:
       properties:
         allowedPaths:
@@ -14051,6 +14082,8 @@ components:
       type: object
     PipelineRunEnvelope:
       properties:
+        intent:
+          $ref: '#/components/schemas/PipelineIntentView'
         run:
           anyOf:
           - type: "null"
@@ -16114,6 +16147,8 @@ components:
           type: string
         parentSessionId:
           type: string
+        pipeline:
+          $ref: '#/components/schemas/PipelineSelection'
         projectId:
           type: string
         prompt:
@@ -16127,6 +16162,8 @@ components:
       type: object
     SpawnSessionResponse:
       properties:
+        pipeline:
+          $ref: '#/components/schemas/PipelineIntentView'
         promptBytes:
           type: integer
         session:

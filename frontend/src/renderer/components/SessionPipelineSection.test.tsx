@@ -382,4 +382,27 @@ describe("SessionPipelineSection", () => {
 			),
 		);
 	});
+	it("explains a workflow selected at creation that is waiting or could not start", async () => {
+		getMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/pipeline") {
+				return { data: { run: null, intent: { workflowId: "build-test-review", normalWorker: false, source: "default", state: "failed", detail: "Workflow is invalid" } } };
+			}
+			return { data: catalog([]) };
+		});
+		renderSection();
+		const note = await screen.findByText("Workflow build-test-review could not start: Workflow is invalid");
+		expect(note).toHaveAttribute("data-intent-state", "failed");
+	});
+
+	it("stays quiet for an explicit normal-worker choice", async () => {
+		getMock.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/pipeline") {
+				return { data: { run: null, intent: { workflowId: "", normalWorker: true, source: "explicit", state: "skipped", detail: "A normal worker was selected for this task" } } };
+			}
+			return { data: catalog([]) };
+		});
+		const { container } = renderSection();
+		await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
+		expect(container).toBeEmptyDOMElement();
+	});
 });

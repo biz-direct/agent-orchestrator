@@ -301,3 +301,38 @@ type PipelineRepairGrant struct {
 
 // ErrPipelineGrantDuplicate means a grant with this request key already exists.
 var ErrPipelineGrantDuplicate = errors.New("pipeline repair authorization already recorded")
+
+// PipelineIntentState is the lifecycle of a pipeline selected at task creation.
+type PipelineIntentState string
+
+// Pipeline intent states. Only pending intents are acted on.
+const (
+	PipelineIntentPending PipelineIntentState = "pending"
+	PipelineIntentStarted PipelineIntentState = "started"
+	PipelineIntentSkipped PipelineIntentState = "skipped"
+	PipelineIntentFailed  PipelineIntentState = "failed"
+)
+
+// PipelineIntentSource says where the selection came from.
+type PipelineIntentSource string
+
+// Pipeline intent sources.
+const (
+	PipelineIntentExplicit PipelineIntentSource = "explicit"
+	PipelineIntentDefault  PipelineIntentSource = "default"
+)
+
+// PipelineIntent is a pipeline selected when a task was created. An empty
+// WorkflowID with an explicit source is the explicit normal-worker override.
+type PipelineIntent struct {
+	SessionID   SessionID
+	ProjectID   ProjectID
+	WorkflowID  string
+	Source      PipelineIntentSource
+	RequestedBy PipelineRequester
+	State       PipelineIntentState
+	Detail      string
+	RunID       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}

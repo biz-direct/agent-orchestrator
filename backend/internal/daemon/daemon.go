@@ -607,7 +607,7 @@ func Run() error {
 		return errors.New("wire report delivery: session manager lacks semantic send support")
 	}
 	var reportCoordinator *reportsvc.Coordinator
-	reportSvc := reportsvc.New(reportsvc.Deps{Store: store, OnCreated: func(domain.ReportRecord) {
+	reportSvc := reportsvc.New(reportsvc.Deps{Store: store, Pipelines: pipelineruns.NewStoreGuard(store, log), OnCreated: func(domain.ReportRecord) {
 		if reportCoordinator != nil {
 			reportCoordinator.Wake()
 		}
@@ -802,7 +802,7 @@ func Run() error {
 		gated.SetPipelineGate(pipelineGate)
 	}
 	executor, _ := sessMgr.(ports.PipelineExecutor)
-	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Executor: executor, Reviews: pipelineReviewGateway{store: store, reviews: reviewSvc}, Logger: log})
+	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Executor: executor, Reviews: pipelineReviewGateway{store: store, reviews: reviewSvc}, Reporter: pipelineReporter{reports: reportSvc}, Logger: log})
 	if reconcileErr := pipelineRunSvc.ReconcileAll(ctx); reconcileErr != nil {
 		log.Warn("pipeline run reconcile deferred", "err", reconcileErr)
 	}

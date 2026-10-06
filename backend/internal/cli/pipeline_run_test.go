@@ -273,3 +273,19 @@ func TestPipelineControlCommandsSendConditionalIdempotentRequests(t *testing.T) 
 		t.Fatalf("authorizing repairs is user-only and must not reach the daemon: %v", err)
 	}
 }
+
+func TestPipelineStatusExplainsASelectionThatHasNotStartedOrCouldNot(t *testing.T) {
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"run":null,"intent":{"workflowId":"build-test-review","normalWorker":false,"source":"default","state":"failed","detail":"Workflow \"build-test-review\" could not start: Workflow is invalid"}}`)
+	})
+	t.Setenv("AO_SESSION_ID", "w-1")
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "pipeline", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"no pipeline run yet: workflow build-test-review was selected at creation (default): failed", "could not start"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q:\n%s", want, out)
+		}
+	}
+}

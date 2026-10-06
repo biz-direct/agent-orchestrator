@@ -35,6 +35,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	previewutil "github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/previewserver"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	usagesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/usage"
 	"github.com/aoagents/agent-orchestrator/backend/internal/workspacewatch"
@@ -180,6 +181,9 @@ type UsageHookRecorder interface {
 // SessionsController owns the session routes. Nil keeps routes registered but
 // returns OpenAPI-backed 501s.
 type SessionsController struct {
+	// Pipelines applies a task's creation-time pipeline selection (explicit or
+	// the project default). Nil leaves every spawn an ordinary worker.
+	Pipelines                PipelineSelector
 	Svc                      SessionService
 	Activity                 ActivityRecorder
 	Usage                    UsageHookRecorder
@@ -322,6 +326,25 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 	if in.Kind == "" {
 		in.Kind = domain.KindWorker
 	}
+	if in.Pipeline != nil {
+		switch {
+		case in.Kind != domain.KindWorker:
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PIPELINE_WORKER_ONLY", "Only worker tasks run pipelines", nil)
+			return
+		case c.Pipelines == nil:
+			envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "PIPELINE_WORKFLOW_UNAVAILABLE", "This build cannot run pipelines", nil)
+			return
+		case in.ProjectID == "" && in.Pipeline.Mode == domain.PipelineModeWorkflow:
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PIPELINE_PROJECT_REQUIRED", "A pipeline needs a project; standalone workers are ordinary workers", nil)
+			return
+		}
+		if in.ProjectID != "" {
+			if err := c.Pipelines.ValidateSelection(r.Context(), in.ProjectID, in.Pipeline); err != nil {
+				envelope.WriteError(w, r, err)
+				return
+			}
+		}
+	}
 	attachments, attachErr := decodeSpawnAttachments(in.Attachments)
 	if attachErr != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", attachErr.code, attachErr.message, nil)
@@ -339,7 +362,28 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusCreated, SpawnSessionResponse{Session: sessionView(sess), PromptBytes: promptBytes, SystemPromptBytes: systemPromptBytes})
+	resp := SpawnSessionResponse{Session: sessionView(sess), PromptBytes: promptBytes, SystemPromptBytes: systemPromptBytes}
+	if c.Pipelines != nil && in.Kind == domain.KindWorker && sess.ProjectID != "" {
+		requester := domain.PipelineRequestedByUser
+		if in.ParentSessionID != "" {
+			requester = domain.PipelineRequestedByOrchestrator
+		}
+		intent, ierr := c.Pipelines.RecordIntent(r.Context(), pipelineruns.IntentInput{SessionID: sess.ID, ProjectID: sess.ProjectID, Explicit: in.Pipeline, RequestedBy: requester})
+		if ierr != nil {
+			// The task exists either way; say that its pipeline could not be recorded.
+			slog.Default().Error("spawn: record pipeline selection failed", "session_id", sess.ID, "err", ierr)
+		}
+		resp.Pipeline = intent
+	}
+	envelope.WriteJSON(w, http.StatusCreated, resp)
+}
+
+// PipelineSelector is the slice of the pipeline run service a task creation
+// needs: refuse an unusable explicit choice up front, then record what the new
+// task should run.
+type PipelineSelector interface {
+	ValidateSelection(ctx context.Context, projectID domain.ProjectID, sel *domain.PipelineSelection) error
+	RecordIntent(ctx context.Context, in pipelineruns.IntentInput) (*pipelineruns.IntentView, error)
 }
 
 // attachmentError carries a client-facing API error code + message for a
@@ -1838,6 +1882,16 @@ func (c *SessionsController) delegateTask(w http.ResponseWriter, r *http.Request
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_APPROVAL_MODE", "approvalMode is invalid", nil)
 		return
 	}
+	if in.Pipeline != nil {
+		if c.Pipelines == nil {
+			envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "PIPELINE_WORKFLOW_UNAVAILABLE", "This build cannot run pipelines", nil)
+			return
+		}
+		if err := c.Pipelines.ValidateSelection(r.Context(), in.ProjectID, in.Pipeline); err != nil {
+			envelope.WriteError(w, r, err)
+			return
+		}
+	}
 	attachments, attachErr := decodeSpawnAttachments(in.Attachments)
 	if attachErr != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", attachErr.code, attachErr.message, nil)
@@ -1869,7 +1923,15 @@ func (c *SessionsController) delegateTask(w http.ResponseWriter, r *http.Request
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusAccepted, DelegateTaskResponse{OK: true, WorkerID: out.WorkerID, OrchestratorID: out.OrchestratorID})
+	resp := DelegateTaskResponse{OK: true, WorkerID: out.WorkerID, OrchestratorID: out.OrchestratorID}
+	if c.Pipelines != nil && out.WorkerID != "" {
+		intent, ierr := c.Pipelines.RecordIntent(r.Context(), pipelineruns.IntentInput{SessionID: out.WorkerID, ProjectID: in.ProjectID, Explicit: in.Pipeline, RequestedBy: domain.PipelineRequestedByUser})
+		if ierr != nil {
+			slog.Default().Error("delegate: record pipeline selection failed", "session_id", out.WorkerID, "err", ierr)
+		}
+		resp.Pipeline = intent
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, resp)
 }
 
 func validClientRequestID(id string) bool {

@@ -162,6 +162,84 @@ afterEach(() => {
 });
 
 describe("TaskComposer", () => {
+	it("offers the project's executable workflows per task and sends only an explicit choice", async () => {
+		h.agentCatalog = { agents: [agentReadiness("opencode", "OpenCode", { authentication: "unknown" })] };
+		const onCreated = vi.fn();
+		h.remoteGet.mockImplementation(async (path: string) => {
+			if (path.includes("/models")) return { data: { agent: "opencode", selectionMode: "text", models: [], allowCustom: true } };
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "chat", chatHarnesses: ["opencode"] } };
+			if (path === "/api/v1/projects/{id}/pipelines") {
+				return {
+					data: {
+						projectId: "project-a", profiles: [], diagnostics: [],
+						workflows: [
+							{ id: "build-test-review", valid: true, executable: true, file: "f", diagnostics: [] },
+							{ id: "broken", valid: false, executable: false, file: "g", diagnostics: [] },
+						],
+						default: { selection: { mode: "workflow", workflowId: "build-test-review" }, state: "workflow_available", executable: true, message: "" },
+					},
+				};
+			}
+			return { data: { status: "ok", project: { id: "project-a", config: { worker: { agent: "opencode" } } } } };
+		});
+		h.remotePost.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/agents/readiness/ensure") return { data: { agents: [agentReadiness("opencode", "OpenCode", { authentication: "unknown" })] } };
+			if (path === "/api/v1/projects/{id}/tasks/prepare") return { data: { taskPreparation: "" } };
+			if (path === "/api/v1/orchestrators/delegate") return { data: { workerId: "remote-task" } };
+			return { data: {} };
+		});
+		render(<Wrap><TaskComposer hostId="box-a" projectId="project-a" onCreated={onCreated} /></Wrap>);
+		await waitFor(() => expect(startTask()).toBeEnabled());
+		// The control reflects the project default; nothing is sent while it is untouched.
+		const menu = await screen.findByRole("button", { name: "Pipeline" });
+		expect(menu).toHaveTextContent("Project default (build-test-review)");
+		await userEvent.type(task(), "Ship it");
+		await userEvent.click(startTask());
+		await waitFor(() => expect(onCreated).toHaveBeenCalledWith("remote-task"));
+		const first = h.remotePost.mock.calls.find(([path]) => path === "/api/v1/orchestrators/delegate");
+		expect(first?.[1].body).not.toHaveProperty("pipeline");
+	});
+
+	it("sends the explicit normal-worker choice", async () => {
+		h.agentCatalog = { agents: [agentReadiness("opencode", "OpenCode", { authentication: "unknown" })] };
+		const onCreated = vi.fn();
+		h.remoteGet.mockImplementation(async (path: string) => {
+			if (path.includes("/models")) return { data: { agent: "opencode", selectionMode: "text", models: [], allowCustom: true } };
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "chat", chatHarnesses: ["opencode"] } };
+			if (path === "/api/v1/projects/{id}/pipelines") {
+				return {
+					data: {
+						projectId: "project-a", profiles: [], diagnostics: [],
+						workflows: [{ id: "build-test-review", valid: true, executable: true, file: "f", diagnostics: [] }],
+						default: { selection: null, state: "unset", executable: false, message: "" },
+					},
+				};
+			}
+			return { data: { status: "ok", project: { id: "project-a", config: { worker: { agent: "opencode" } } } } };
+		});
+		h.remotePost.mockImplementation(async (path: string) => {
+			if (path === "/api/v1/agents/readiness/ensure") return { data: { agents: [agentReadiness("opencode", "OpenCode", { authentication: "unknown" })] } };
+			if (path === "/api/v1/projects/{id}/tasks/prepare") return { data: { taskPreparation: "" } };
+			if (path === "/api/v1/orchestrators/delegate") return { data: { workerId: "remote-task" } };
+			return { data: {} };
+		});
+		render(<Wrap><TaskComposer hostId="box-a" projectId="project-a" onCreated={onCreated} /></Wrap>);
+		await waitFor(() => expect(startTask()).toBeEnabled());
+		await userEvent.click(await screen.findByRole("button", { name: "Pipeline" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: "Normal worker" }));
+		await userEvent.type(task(), "Tiny fix");
+		await userEvent.click(startTask());
+		await waitFor(() => expect(onCreated).toHaveBeenCalled());
+		const call = h.remotePost.mock.calls.find(([path]) => path === "/api/v1/orchestrators/delegate");
+		expect(call?.[1].body).toMatchObject({ pipeline: { mode: "normal_worker" } });
+	});
+
+	it("shows no pipeline control for a project without executable workflows", async () => {
+		render(<Wrap><TaskComposer projectId="project-a" onCreated={vi.fn()} /></Wrap>);
+		await screen.findByRole("textbox", { name: "Task" });
+		expect(screen.queryByRole("button", { name: "Pipeline" })).not.toBeInTheDocument();
+	});
+
 	it("does not launch a remote project task without a ready agent", async () => {
 		h.agentCatalog = { agents: [] };
 		h.remoteGet.mockImplementation(async (path: string) => path === "/api/v1/settings"

@@ -224,7 +224,7 @@ func resolveDefault(sel *domain.PipelineSelection, cat pipeline.Catalog) Default
 		return DefaultStatus{Selection: sel, State: StateWorkflowUnavailable, Message: reason}
 	}
 	return DefaultStatus{Selection: sel, State: StateWorkflowAvailable, Executable: true,
-		Message: fmt.Sprintf("Workflow %q can be started on a task. New tasks do not start it automatically yet.", sel.WorkflowID)}
+		Message: fmt.Sprintf("Workflow %q starts automatically on new worker tasks created through spawn. Choose a different workflow, or the normal worker, for a single task with --pipeline / --no-pipeline.", sel.WorkflowID)}
 }
 
 // SetCommandTrust implements Manager.

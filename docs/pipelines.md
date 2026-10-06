@@ -18,10 +18,14 @@ Status by delivery slice (parent design: issue #1):
 | Review repair through Build back to Review (shared budget) | shipped |
 | Pause, resume, cancel, human-authorized extra repairs | shipped |
 | Recovery after daemon/desktop replacement | shipped |
+| Orchestrator discovery/start/supervision, project default and per-task choice at creation | shipped |
 
 A valid workflow that this build cannot execute can be selected but is shown as
-**unavailable**. AO never silently substitutes a normal worker for a selected workflow that cannot run, and a
-project default never changes what an ordinary spawn launches.
+**unavailable**. AO never silently substitutes a normal worker for a selected
+workflow that cannot run. The project default applies to **new worker tasks created
+through spawn** (desktop, `ao spawn`, orchestrators); an explicit per-task choice
+(`--pipeline <id>` or `--no-pipeline`) wins, and tasks created some other way
+(automations, existing workers) are never started on a default.
 
 ## Where definitions live
 
@@ -491,3 +495,69 @@ stays paused and nothing is started in its place. Otherwise cancel the run.
 Worktree, conversations, evidence, and the original worker's ownership are retained
 throughout. Stale events from a source controller after a handoff are rejected
 (`PIPELINE_ATTEMPT_STALE`, `PIPELINE_NOT_ATTEMPT_EXECUTOR`).
+
+## Orchestrators: discover, start, supervise
+
+Everything an orchestrator needs is typed API/CLI, and the daemon enforces the
+rules; nothing depends on the orchestrator's prompt.
+
+**Discover.** `ao pipeline ls --project <id> --json` returns profiles and workflows
+with stable ids, descriptions, validity diagnostics, whether each workflow is
+`executable`, and the project default. The orchestrator's standing instructions and
+the `using-ao` skill (`commands/pipeline.md`) say to read this before choosing and to
+select only executable workflows.
+
+**Select at task creation.** `ao spawn ... --pipeline <workflow-id>` runs that
+workflow, `--no-pipeline` runs an ordinary worker even when the project has a
+default, and omitting both applies the project default (if it is a workflow).
+Resolution is `explicit > project default > ordinary worker`. An unusable explicit
+choice (unknown, invalid, or not executable) **fails the spawn** instead of
+producing a normal worker. The choice is persisted as a *pipeline intent*
+(`session_pipeline_intents`): the daemon starts the run once the worker is
+provisioned with a controller, exactly once, and records why it did not (the task
+ended, it never became ready within 15 minutes, the workflow became invalid, the
+task is a Terminal session). A failed or waiting intent is shown in the task view
+and `ao pipeline status`; it never degrades silently. `GET /sessions/{id}/pipeline`
+returns `intent` alongside `run`. For an existing worker use
+`ao pipeline start <workflow-id> --session <id>`.
+
+**Defaults and overrides.** Orchestrator and default starts use the snapshotted
+profile harness/model; only an explicit user at a shell may override a stage's
+harness or model (`403 PIPELINE_OVERRIDE_USER_ONLY` otherwise). Instructions, path
+constraints, and gates are mandatory either way.
+
+**Supervise.** `ao pipeline status --session <id> [--json]` exposes the current
+stage, attempts, commit evidence, validation results, review readiness, pause
+reasons, remaining repair budget, and the last restart recovery, without credentials
+or runtime internals. The orchestrator also receives AO-authored reports: a
+`needs_input` report for any pause that needs a decision (with the reason and where
+to look) and a `done` report **only** from validated pipeline completion.
+
+**Control, with limits.** An orchestrator may pause, resume, and cancel. It cannot
+wake an inactive stage, force a gate to pass, resume a human-only pause (recovery,
+spent budget), authorize extra repairs, or override harness/model; stale requests
+are refused. A worker's `ao report --done` mid-pipeline is recorded as a labelled
+checkpoint, never as completion: reports are coordination signals, not stage
+authority.
+
+### Demonstration
+
+`TestOrchestratorDrivenDemonstration` (backend/internal/service/pipelineruns)
+plays this role end to end against the real service and SQLite store:
+
+1. validates and selects an executable workflow at task creation;
+2. lets the daemon start it and reads progress through `Get`;
+3. shows the refusals (override, repair authorization, worker report as authority);
+4. pauses and resumes an operational pause, and shows a stale control refused.
+
+To reproduce it by hand against a scratch daemon:
+
+```bash
+ao pipeline ls --project demo --json                         # discover
+ao spawn --project demo --name add-login --prompt "..." \
+  --pipeline build-test-review                               # select + start when ready
+ao pipeline status --session demo-1                          # supervise
+ao pipeline pause --session demo-1 --reason "waiting on API keys"
+ao pipeline resume --session demo-1
+AO_SESSION_ID=orch-1 ao pipeline authorize-repairs --session demo-1   # refused: user-only
+```

@@ -250,6 +250,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"PipelinerunsStageOverride":       "PipelineStageOverride",
 	"PipelinerunsStageView":           "PipelineStageView",
 	"PipelinerunsStartInput":          "StartPipelineRequest",
+	"PipelinerunsIntentView":          "PipelineIntentView",
 	"PipelinerunsControlInput":        "PipelineControlRequest",
 	"PipelinerunsControlResult":       "PipelineControlResponse",
 	"PipelinerunsControlView":         "PipelineControlView",

@@ -512,6 +512,28 @@ func (q *Queries) GetLatestPipelineRunBySession(ctx context.Context, sessionID s
 	return i, err
 }
 
+const getPipelineIntent = `-- name: GetPipelineIntent :one
+SELECT session_id, project_id, workflow_id, source, requested_by, state, detail, run_id, created_at, updated_at FROM session_pipeline_intents WHERE session_id = ?
+`
+
+func (q *Queries) GetPipelineIntent(ctx context.Context, sessionID string) (SessionPipelineIntent, error) {
+	row := q.db.QueryRowContext(ctx, getPipelineIntent, sessionID)
+	var i SessionPipelineIntent
+	err := row.Scan(
+		&i.SessionID,
+		&i.ProjectID,
+		&i.WorkflowID,
+		&i.Source,
+		&i.RequestedBy,
+		&i.State,
+		&i.Detail,
+		&i.RunID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPipelineReviewLink = `-- name: GetPipelineReviewLink :one
 SELECT attempt_id, run_id, pr_url, head_sha, review_run_id, linked_at, updated_at FROM pipeline_review_links WHERE attempt_id = ?
 `
@@ -607,6 +629,77 @@ func (q *Queries) HasUnfinishedPipelineRun(ctx context.Context, sessionID string
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const insertPipelineIntent = `-- name: InsertPipelineIntent :exec
+INSERT INTO session_pipeline_intents (session_id, project_id, workflow_id, source, requested_by, state, detail, run_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+ON CONFLICT (session_id) DO NOTHING
+`
+
+type InsertPipelineIntentParams struct {
+	SessionID   string
+	ProjectID   string
+	WorkflowID  string
+	Source      string
+	RequestedBy string
+	State       string
+	Detail      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (q *Queries) InsertPipelineIntent(ctx context.Context, arg InsertPipelineIntentParams) error {
+	_, err := q.db.ExecContext(ctx, insertPipelineIntent,
+		arg.SessionID,
+		arg.ProjectID,
+		arg.WorkflowID,
+		arg.Source,
+		arg.RequestedBy,
+		arg.State,
+		arg.Detail,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const listPendingPipelineIntents = `-- name: ListPendingPipelineIntents :many
+SELECT session_id, project_id, workflow_id, source, requested_by, state, detail, run_id, created_at, updated_at FROM session_pipeline_intents WHERE state = 'pending' ORDER BY created_at, session_id
+`
+
+func (q *Queries) ListPendingPipelineIntents(ctx context.Context) ([]SessionPipelineIntent, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingPipelineIntents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SessionPipelineIntent{}
+	for rows.Next() {
+		var i SessionPipelineIntent
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.ProjectID,
+			&i.WorkflowID,
+			&i.Source,
+			&i.RequestedBy,
+			&i.State,
+			&i.Detail,
+			&i.RunID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPipelineCommandResults = `-- name: ListPipelineCommandResults :many
@@ -969,6 +1062,34 @@ type SetPipelineAttemptInstructionDeliveryParams struct {
 func (q *Queries) SetPipelineAttemptInstructionDelivery(ctx context.Context, arg SetPipelineAttemptInstructionDeliveryParams) error {
 	_, err := q.db.ExecContext(ctx, setPipelineAttemptInstructionDelivery, arg.InstructionDelivery, arg.ID)
 	return err
+}
+
+const setPipelineIntentState = `-- name: SetPipelineIntentState :execrows
+UPDATE session_pipeline_intents
+SET state = ?1, detail = ?2, run_id = ?3, updated_at = ?4
+WHERE session_id = ?5 AND state = 'pending'
+`
+
+type SetPipelineIntentStateParams struct {
+	State     string
+	Detail    string
+	RunID     string
+	UpdatedAt time.Time
+	SessionID string
+}
+
+func (q *Queries) SetPipelineIntentState(ctx context.Context, arg SetPipelineIntentStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPipelineIntentState,
+		arg.State,
+		arg.Detail,
+		arg.RunID,
+		arg.UpdatedAt,
+		arg.SessionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setPipelineRunState = `-- name: SetPipelineRunState :one

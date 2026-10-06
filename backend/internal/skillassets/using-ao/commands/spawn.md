@@ -21,6 +21,8 @@ ao spawn [flags]
 | `--model string` | Agent model override for this session only; overrides project/role config | - |
 | `--name string` | Display name shown in the sidebar (max 100 characters) | Required |
 | `--mode chat\|tui` | Initial session interface; Chat requires harness support | Daemon default, otherwise Terminal UI |
+| `--pipeline string` | Run this repository workflow on the new task (see `ao pipeline ls`); overrides the project default for this task | - |
+| `--no-pipeline` | Run this task as an ordinary worker even when the project has a default workflow | - |
 | `--no-takeover` | Refuse if another active session owns the claimed PR (requires `--claim-pr`) | - |
 | `--project string` | Project id to spawn the session in | Optional when `--standalone` is used; defaults to `AO_PROJECT_ID` or the current repo's registered project |
 | `--standalone` | Spawn a projectless worker session in an AO-managed directory | Disabled when `--project` is set |

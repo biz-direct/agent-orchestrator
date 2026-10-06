@@ -50,7 +50,9 @@ export function SessionPipelineSection({ session, hostId }: { session: Workspace
 		// Unfinished runs change without a user action (a worker submits a result).
 		refetchInterval: (query) => {
 			const run = query.state.data?.run;
-			return run && !FINISHED_STATES.has(run.state) ? 4000 : false;
+			if (run && !FINISHED_STATES.has(run.state)) return 4000;
+			// A selected workflow that has not started yet is about to.
+			return !run && query.state.data?.intent?.state === "pending" ? 4000 : false;
 		},
 		queryFn: async () => {
 			const { data, error } = await client.GET("/api/v1/sessions/{sessionId}/pipeline", { params: { path: { sessionId: session.id } } });
@@ -59,6 +61,7 @@ export function SessionPipelineSection({ session, hostId }: { session: Workspace
 		},
 	});
 	const run: RunView | null | undefined = runQuery.data?.run;
+	const intent = runQuery.data?.intent;
 	const unfinished = run != null && !FINISHED_STATES.has(run.state);
 
 	const catalogQuery = useQuery({
@@ -98,6 +101,17 @@ export function SessionPipelineSection({ session, hostId }: { session: Workspace
 		);
 	}
 	if (!run) {
+		// A workflow selected at creation that has not started (or could not) is
+		// explained here instead of silently leaving an ordinary-looking task.
+		if (intent && intent.state !== "started" && (intent.state !== "skipped" || !intent.normalWorker)) {
+			return (
+				<Section title={t("inspector.pipeline.title")}>
+					<p className={cn("text-pretty text-xs leading-normal", intent.state === "failed" ? "text-error" : "text-settings-muted")} role="status" data-intent-state={intent.state}>
+						{t(`inspector.pipeline.intent.${intent.state}`, { workflow: intent.workflowId ?? "", detail: intent.detail ?? "" })}
+					</p>
+				</Section>
+			);
+		}
 		if (startable.length === 0) return null;
 		return (
 			<Section title={t("inspector.pipeline.title")}>

@@ -175,6 +175,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		pipelines:    &controllers.PipelinesController{Mgr: deps.Pipelines},
 		pipelineRuns: &controllers.PipelineRunsController{Mgr: deps.PipelineRuns},
 		sessions: &controllers.SessionsController{
+			Pipelines:                pipelineSelector(deps.PipelineRuns),
 			Svc:                      deps.Sessions,
 			Activity:                 deps.Activity,
 			Usage:                    deps.UsageHooks,
@@ -328,4 +329,13 @@ func memoryPressure(svc controllers.SessionMemoryService) controllers.MemoryPres
 		return p
 	}
 	return nil
+}
+
+// pipelineSelector returns the run service as the spawn path's pipeline
+// selector, or a true nil interface when pipelines are not wired.
+func pipelineSelector(m pipelineruns.Manager) controllers.PipelineSelector {
+	if m == nil {
+		return nil
+	}
+	return m
 }

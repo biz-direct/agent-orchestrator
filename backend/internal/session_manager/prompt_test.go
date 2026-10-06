@@ -280,3 +280,23 @@ func TestBuildTaskPromptPreservesExplicitPublishingScope(t *testing.T) {
 		}
 	}
 }
+
+func TestOrchestratorPromptTeachesPipelinesAndTheirBoundaries(t *testing.T) {
+	got := orchestratorSystemPrompt(promptProject{ID: "demo"})
+	for _, want := range []string{
+		"ao pipeline ls --project demo --json",
+		"--pipeline <workflow-id>",
+		"--no-pipeline",
+		"ao pipeline status --session",
+		"you cannot override a stage's harness or model",
+		"resume a pause that needs a person's decision",
+		"not completion",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("orchestrator prompt missing %q", want)
+		}
+	}
+	if strings.Contains(workerSystemPrompt(promptProject{ID: "demo"}, true), "ao pipeline ls") {
+		t.Fatal("pipeline selection guidance belongs to orchestrators only")
+	}
+}

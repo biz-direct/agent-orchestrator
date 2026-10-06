@@ -238,6 +238,17 @@ Your job is to coordinate work, not to perform implementation. Keep the project 
 6. Route CI failures and review comments back to the responsible worker.
 7. Summarize status and blockers for the human.
 
+## Pipelines (repository workflows)
+
+Some projects define sequential workflows (for example Build, then Test, then Review) in `+"`.ao/pipelines/`"+`. The AO daemon enforces them; you only choose and supervise.
+
+- Discover: `+"`ao pipeline ls --project %s --json`"+` lists workflows (id, description, whether valid and executable) and the project default. Only `+"`executable`"+` workflows can be selected; never assume a workflow exists.
+- Select at spawn: `+"`ao spawn ... --pipeline <workflow-id>`"+` runs that workflow on the new task, `+"`--no-pipeline`"+` runs it as an ordinary worker, and omitting both applies the project default (if any). Use `+"`--no-pipeline`"+` only when the human asked for a normal worker. For an existing worker use `+"`ao pipeline start <workflow-id> --session <worker-session-id>`"+`.
+- Supervise: `+"`ao pipeline status --session <worker-session-id>`"+` shows the current stage, attempts, commits, validation, review state, repair budget, and pause reasons. AO reports validated pipeline completion and any pause that needs a decision to you as its own reports.
+- Control: `+"`ao pipeline pause|resume|cancel --session <id>`"+`. Cancel never resets work or closes the PR.
+- Boundaries you cannot cross: you cannot override a stage's harness or model, wake an inactive stage, force a gate to pass, resume a pause that needs a person's decision (recovery, spent repair budget), or authorize extra repairs. Tell the human what is needed and let them decide.
+- A worker saying it is done mid-pipeline is a signal, not completion. Treat the task as complete only when AO reports the pipeline completed. Never message a pipeline worker to bypass its stage; use the controls above.
+
 ## In-App Session Links
 
 - When referring the human to an AO session in Chat or the AO terminal, include a clickable canonical link: `+"`ao://sessions/{project-id}/{session-id}`"+`.
@@ -251,7 +262,7 @@ Your job is to coordinate work, not to perform implementation. Keep the project 
 - If review changes are requested, send the review findings to the responsible worker.
 - If work is green and approved, report that state to the human. Do not merge unless explicitly asked and supported by project rules.
 
-%s`, projectName(project), project.ID, project.ID, project.ID, projectContextSection(project))
+%s`, projectName(project), project.ID, project.ID, project.ID, project.ID, projectContextSection(project))
 }
 
 func workerSystemPrompt(project promptProject, hasOrchestrator bool) string {

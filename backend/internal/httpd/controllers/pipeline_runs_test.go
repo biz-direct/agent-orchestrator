@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/sqlitetest"
@@ -222,4 +223,116 @@ func TestPipelineRunsRoutes_DefaultToStubsWithoutManager(t *testing.T) {
 	t.Cleanup(srv.Close)
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/s/pipeline", "")
 	assertErrorCode(t, body, status, http.StatusNotImplemented, "NOT_IMPLEMENTED")
+}
+
+// fakeSelector records what a task creation asked of the pipeline service.
+type fakeSelector struct {
+	pipelineruns.Manager
+	validated []*domain.PipelineSelection
+	intents   []pipelineruns.IntentInput
+	validErr  error
+}
+
+func (f *fakeSelector) ValidateSelection(_ context.Context, _ domain.ProjectID, sel *domain.PipelineSelection) error {
+	f.validated = append(f.validated, sel)
+	return f.validErr
+}
+
+func (f *fakeSelector) RecordIntent(_ context.Context, in pipelineruns.IntentInput) (*pipelineruns.IntentView, error) {
+	f.intents = append(f.intents, in)
+	if in.Explicit != nil && in.Explicit.Mode == domain.PipelineModeNormalWorker {
+		return &pipelineruns.IntentView{NormalWorker: true, Source: "explicit", State: "skipped"}, nil
+	}
+	wfID := "build-test"
+	if in.Explicit != nil {
+		wfID = in.Explicit.WorkflowID
+	}
+	return &pipelineruns.IntentView{WorkflowID: wfID, Source: "default", State: "pending"}, nil
+}
+
+func TestSessionsAPI_SpawnAppliesTheTasksPipelineSelection(t *testing.T) {
+	sel := &fakeSelector{}
+	svc := newFakeSessionService()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{Sessions: svc, PipelineRuns: sel}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	// An explicit workflow is validated up front, then recorded for the new task.
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","harness":"codex","prompt":"x","pipeline":{"mode":"workflow","workflowId":"build-test-review"}}`)
+	if status != http.StatusCreated || !strings.Contains(string(body), `"pipeline":{"workflowId":"build-test-review"`) {
+		t.Fatalf("explicit: %d %s", status, body)
+	}
+	if len(sel.validated) != 1 || sel.validated[0].WorkflowID != "build-test-review" || len(sel.intents) != 1 || sel.intents[0].RequestedBy != domain.PipelineRequestedByUser {
+		t.Fatalf("validated=%v intents=%+v", sel.validated, sel.intents)
+	}
+
+	// No choice: nothing to validate, and the project default decides.
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","harness":"codex","prompt":"x","parentSessionId":"orch-1"}`)
+	if status != http.StatusCreated || !strings.Contains(string(body), `"state":"pending"`) {
+		t.Fatalf("default: %d %s", status, body)
+	}
+	if len(sel.validated) != 1 || sel.intents[1].Explicit != nil || sel.intents[1].RequestedBy != domain.PipelineRequestedByOrchestrator {
+		t.Fatalf("a spawn from inside an AO session is an orchestrator's: %+v", sel.intents[1])
+	}
+
+	// The explicit normal worker.
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","harness":"codex","prompt":"x","pipeline":{"mode":"normal_worker"}}`)
+	if status != http.StatusCreated || !strings.Contains(string(body), `"normalWorker":true`) {
+		t.Fatalf("normal worker: %d %s", status, body)
+	}
+
+	// An unusable choice fails the request and creates no task.
+	before := len(svc.sessions)
+	sel.validErr = apierr.Invalid("PIPELINE_WORKFLOW_NOT_FOUND", "no such workflow", nil)
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","harness":"codex","prompt":"x","pipeline":{"mode":"workflow","workflowId":"ghost"}}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PIPELINE_WORKFLOW_NOT_FOUND")
+	if len(svc.sessions) != before {
+		t.Fatal("a rejected pipeline choice must not create a task")
+	}
+	// Orchestrators and standalone workers never run pipelines.
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"orchestrator","harness":"codex","pipeline":{"mode":"normal_worker"}}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PIPELINE_WORKER_ONLY")
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"kind":"worker","harness":"codex","prompt":"x","pipeline":{"mode":"workflow","workflowId":"build-test"}}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PIPELINE_PROJECT_REQUIRED")
+}
+
+func TestSessionsAPI_SpawnWithoutPipelinesIsUnchanged(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","harness":"codex","prompt":"x"}`)
+	if status != http.StatusCreated || strings.Contains(string(body), `"pipeline"`) {
+		t.Fatalf("an ordinary spawn: %d %s", status, body)
+	}
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","kind":"worker","harness":"codex","prompt":"x","pipeline":{"mode":"workflow","workflowId":"x"}}`)
+	assertErrorCode(t, body, status, http.StatusConflict, "PIPELINE_WORKFLOW_UNAVAILABLE")
+}
+
+func TestSessionsAPI_DelegateAppliesTheTasksPipelineSelection(t *testing.T) {
+	sel := &fakeSelector{}
+	svc := newFakeSessionService()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{Sessions: svc, PipelineRuns: sel}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+
+	// The desktop composer delegates a task; the project default applies to the new worker.
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/orchestrators/delegate", `{"projectId":"ao","brief":"Fix it","agent":"cursor"}`)
+	if status != http.StatusAccepted || !strings.Contains(string(body), `"pipeline":{"workflowId":"build-test"`) {
+		t.Fatalf("default: %d %s", status, body)
+	}
+	if len(sel.validated) != 0 || len(sel.intents) != 1 || sel.intents[0].SessionID != "ao-worker" || sel.intents[0].Explicit != nil || sel.intents[0].RequestedBy != domain.PipelineRequestedByUser {
+		t.Fatalf("validated=%v intents=%+v", sel.validated, sel.intents)
+	}
+	// A per-task choice is validated first and recorded for the worker.
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/orchestrators/delegate", `{"projectId":"ao","brief":"Fix it","agent":"cursor","pipeline":{"mode":"normal_worker"}}`)
+	if status != http.StatusAccepted || !strings.Contains(string(body), `"normalWorker":true`) || len(sel.validated) != 1 {
+		t.Fatalf("normal worker: %d %s validated=%v", status, body, sel.validated)
+	}
+	// An unusable choice fails the request before any worker is created.
+	sel.validErr = apierr.Invalid("PIPELINE_WORKFLOW_NOT_FOUND", "no such workflow", nil)
+	before := svc.delegationInput
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/orchestrators/delegate", `{"projectId":"ao","brief":"Fix it","agent":"cursor","pipeline":{"mode":"workflow","workflowId":"ghost"}}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PIPELINE_WORKFLOW_NOT_FOUND")
+	if svc.delegationInput.Brief != before.Brief || len(sel.intents) != 2 {
+		t.Fatal("a rejected choice must not delegate")
+	}
 }

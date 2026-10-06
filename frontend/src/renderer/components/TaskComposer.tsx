@@ -68,7 +68,13 @@ type CreateTaskInput = {
 	approvalMode?: "bypass-permissions";
 	attachments?: FileAttachmentPayload[];
 	taskPreparation?: string;
+	/** Explicit per-task pipeline choice; omitted, the project default applies. */
+	pipeline?: components["schemas"]["PipelineSelection"];
 };
+
+/** Pipeline choices that are not workflow ids. */
+const PIPELINE_CHOICE_DEFAULT = "__default__";
+const PIPELINE_CHOICE_NORMAL = "__normal_worker__";
 
 const CHAT_PREFLIGHT_CODES = new Set([
 	"SESSION_MODE_UNSUPPORTED",
@@ -144,6 +150,7 @@ export function TaskComposer({
 	const [modelTouched, setModelTouched] = useState(false);
 	const [effortTouched, setEffortTouched] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [pipelineChoice, setPipelineChoice] = useState<string>(PIPELINE_CHOICE_DEFAULT);
 	const [error, setError] = useState<string | undefined>();
 	const [fallbackAction, setFallbackAction] = useState<FallbackAction>();
 	const taskPreparationRef = useRef("");
@@ -223,6 +230,7 @@ export function TaskComposer({
 						...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
 						...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}),
 						...(input.taskPreparation ? { taskPreparation: input.taskPreparation } : {}),
+						...(input.pipeline ? { pipeline: input.pipeline } : {}),
 					},
 				});
 				if (error) {
@@ -337,6 +345,30 @@ export function TaskComposer({
 		};
 	}, [hostId, projectQuery.data?.id]);
 	const agentsQuery = useAgentReadinessQuery(true, hostId);
+	// Workflows this project can run. A project with none (or a Terminal-only
+	// fallback) shows no pipeline control at all, so ordinary tasks look exactly
+	// as before.
+	const pipelinesQuery = useQuery({
+		queryKey: hostId ? ["project-pipelines", hostId, projectId] : ["project-pipelines", projectId],
+		enabled: Boolean(projectId) && !isCloudProject && !isStandalone,
+		queryFn: async () => {
+			const { data, error: apiError } = await (hostId ? clientForHost(hostId) : apiClient).GET("/api/v1/projects/{id}/pipelines", {
+				params: { path: { id: projectId ?? "" } },
+			});
+			if (apiError) throw new Error(apiErrorMessage(apiError));
+			return data;
+		},
+	});
+	const workflows = Array.isArray(pipelinesQuery.data?.workflows) ? pipelinesQuery.data.workflows : [];
+	const startableWorkflows = workflows.filter((workflow) => workflow.valid && workflow.executable);
+	const defaultSelection = pipelinesQuery.data?.default?.selection;
+	const projectDefaultWorkflow = defaultSelection?.mode === "workflow" ? defaultSelection.workflowId : undefined;
+	const pipelineSelection: components["schemas"]["PipelineSelection"] | undefined =
+		pipelineChoice === PIPELINE_CHOICE_DEFAULT
+			? undefined
+			: pipelineChoice === PIPELINE_CHOICE_NORMAL
+				? { mode: "normal_worker" }
+				: { mode: "workflow", workflowId: pipelineChoice };
 	const { settings, error: settingsError } = useSettings(hostId);
 	// The composer preselects the agent and model a spawn would actually use
 	// instead of parking the controls on a "default" label the user has to
@@ -595,6 +627,7 @@ export function TaskComposer({
 				approvalMode,
 				attachments: attachmentPayloads.length > 0 ? attachmentPayloads : undefined,
 				taskPreparation: submittedPreparation || undefined,
+				pipeline: startableWorkflows.length > 0 ? pipelineSelection : undefined,
 			};
 			const { taskPreparation: _, attachments: _attachments, ...requestPayload } = request;
 			const payload = JSON.stringify({ ...requestPayload, attachmentIds: attachments.map((attachment) => attachment.id) });
@@ -644,6 +677,30 @@ export function TaskComposer({
 		<TaskComposerView
 			autoFocusPrompt={autoFocusTitle}
 			canSubmit={canSubmit}
+			context={
+				startableWorkflows.length > 0 ? (
+					<div className="flex items-center justify-between gap-2 px-4 pt-3 text-xs text-settings-muted">
+						<span>{t("newTask.pipeline.label")}</span>
+						<SettingsOptionMenu
+							aria-label={t("newTask.pipeline.label")}
+							disabled={isSubmitting}
+							value={pipelineChoice}
+							options={[
+								{
+									value: PIPELINE_CHOICE_DEFAULT,
+									label: projectDefaultWorkflow
+										? t("newTask.pipeline.projectDefault", { workflow: projectDefaultWorkflow })
+										: t("newTask.pipeline.projectDefaultNone"),
+								},
+								{ value: PIPELINE_CHOICE_NORMAL, label: t("newTask.pipeline.normalWorker") },
+								...startableWorkflows.map((workflow) => ({ value: workflow.id, label: workflow.id })),
+							]}
+							onChange={setPipelineChoice}
+							menuAlign="end"
+						/>
+					</div>
+				) : undefined
+			}
 			onPromptChange={handlePromptChange}
 			labels={{
 				addFile: t("newTask.addFile"),

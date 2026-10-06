@@ -74,6 +74,9 @@ func (s *Service) Run(ctx context.Context) <-chan struct{} {
 			if err := s.DriveHandoffs(ctx); err != nil {
 				s.logger.Error("pipeline: handoff pass failed", "err", err)
 			}
+			if err := s.StartPendingIntents(ctx); err != nil && ctx.Err() == nil {
+				s.logger.Error("pipeline: starting selected pipelines failed", "err", err)
+			}
 		}
 	}()
 	return done

@@ -5,6 +5,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
+	reportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/report"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
@@ -47,4 +48,19 @@ func (g pipelineReviewGateway) TriggerAuto(ctx context.Context, id domain.Sessio
 		return "", err
 	}
 	return res.SkipReason, nil
+}
+
+// pipelineReporter delivers a pipeline run's AO-authored reports through the
+// ordinary worker-report outbox, so orchestrators see them exactly where they
+// see their workers' own reports.
+type pipelineReporter struct {
+	reports *reportsvc.Service
+}
+
+var _ pipelineruns.Reporter = pipelineReporter{}
+
+// Report implements pipelineruns.Reporter.
+func (r pipelineReporter) Report(ctx context.Context, id domain.SessionID, state domain.ReportState, note string) error {
+	_, err := r.reports.Create(ctx, reportsvc.CreateInput{SessionID: id, State: state, Note: note})
+	return err
 }

@@ -164,3 +164,19 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListPipelineRepairGrants :many
 SELECT * FROM pipeline_repair_grants WHERE run_id = ? ORDER BY created_at, id;
+
+-- name: InsertPipelineIntent :exec
+INSERT INTO session_pipeline_intents (session_id, project_id, workflow_id, source, requested_by, state, detail, run_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)
+ON CONFLICT (session_id) DO NOTHING;
+
+-- name: GetPipelineIntent :one
+SELECT * FROM session_pipeline_intents WHERE session_id = ?;
+
+-- name: ListPendingPipelineIntents :many
+SELECT * FROM session_pipeline_intents WHERE state = 'pending' ORDER BY created_at, session_id;
+
+-- name: SetPipelineIntentState :execrows
+UPDATE session_pipeline_intents
+SET state = sqlc.arg(state), detail = sqlc.arg(detail), run_id = sqlc.arg(run_id), updated_at = sqlc.arg(updated_at)
+WHERE session_id = sqlc.arg(session_id) AND state = 'pending';

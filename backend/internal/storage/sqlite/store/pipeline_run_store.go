@@ -582,3 +582,64 @@ func (s *Store) FindAttachedSessionForAttempt(ctx context.Context, attemptID str
 	}
 	return id, true, nil
 }
+
+// CreatePipelineIntent records the pipeline selected for a new task. It is
+// idempotent per session: a repeated spawn request keeps the original intent.
+func (s *Store) CreatePipelineIntent(ctx context.Context, in domain.PipelineIntent) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.inTx(ctx, "create pipeline intent", func(q *gen.Queries) error {
+		return q.InsertPipelineIntent(ctx, gen.InsertPipelineIntentParams{
+			SessionID: string(in.SessionID), ProjectID: string(in.ProjectID), WorkflowID: in.WorkflowID,
+			Source: string(in.Source), RequestedBy: string(in.RequestedBy), State: string(in.State), Detail: in.Detail,
+			CreatedAt: in.CreatedAt, UpdatedAt: in.UpdatedAt,
+		})
+	})
+}
+
+// GetPipelineIntent returns a task's creation-time pipeline selection, if any.
+func (s *Store) GetPipelineIntent(ctx context.Context, id domain.SessionID) (domain.PipelineIntent, bool, error) {
+	row, err := s.qr.GetPipelineIntent(ctx, string(id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.PipelineIntent{}, false, nil
+	}
+	if err != nil {
+		return domain.PipelineIntent{}, false, fmt.Errorf("get pipeline intent: %w", err)
+	}
+	return intentFromRow(row), true, nil
+}
+
+// ListPendingPipelineIntents returns the selections still waiting to start.
+func (s *Store) ListPendingPipelineIntents(ctx context.Context) ([]domain.PipelineIntent, error) {
+	rows, err := s.qr.ListPendingPipelineIntents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list pending pipeline intents: %w", err)
+	}
+	out := make([]domain.PipelineIntent, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, intentFromRow(r))
+	}
+	return out, nil
+}
+
+// SettlePipelineIntent moves a pending intent to its final state exactly once.
+// It reports false when the intent was already settled.
+func (s *Store) SettlePipelineIntent(ctx context.Context, id domain.SessionID, state domain.PipelineIntentState, detail, runID string, at time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var n int64
+	err := s.inTx(ctx, "settle pipeline intent", func(q *gen.Queries) error {
+		var err error
+		n, err = q.SetPipelineIntentState(ctx, gen.SetPipelineIntentStateParams{State: string(state), Detail: detail, RunID: runID, UpdatedAt: at, SessionID: string(id)})
+		return err
+	})
+	return n > 0, err
+}
+
+func intentFromRow(r gen.SessionPipelineIntent) domain.PipelineIntent {
+	return domain.PipelineIntent{
+		SessionID: domain.SessionID(r.SessionID), ProjectID: domain.ProjectID(r.ProjectID), WorkflowID: r.WorkflowID,
+		Source: domain.PipelineIntentSource(r.Source), RequestedBy: domain.PipelineRequester(r.RequestedBy),
+		State: domain.PipelineIntentState(r.State), Detail: r.Detail, RunID: r.RunID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}

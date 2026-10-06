@@ -267,6 +267,9 @@ type EventView struct {
 // RunEnvelope is the body of GET /sessions/{id}/pipeline.
 type RunEnvelope struct {
 	Run *RunView `json:"run"`
+	// Intent is the pipeline selected when the task was created, with what
+	// became of it (pending, started, skipped, or failed and why).
+	Intent *IntentView `json:"intent,omitempty"`
 }
 
 // eventDetail is the JSON stored in pipeline_events.detail.

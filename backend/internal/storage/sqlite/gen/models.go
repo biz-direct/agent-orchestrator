@@ -827,6 +827,19 @@ type SessionInterfaceTransitionMessage struct {
 	ClientMessageID string
 }
 
+type SessionPipelineIntent struct {
+	SessionID   string
+	ProjectID   string
+	WorkflowID  string
+	Source      string
+	RequestedBy string
+	State       string
+	Detail      string
+	RunID       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type SessionWorktree struct {
 	SessionID    domain.SessionID
 	RepoName     string
