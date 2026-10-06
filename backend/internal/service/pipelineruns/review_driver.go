@@ -15,6 +15,8 @@ const (
 	eventReviewTriggered = "review_triggered"
 	eventReviewWaiting   = "review_waiting"
 	eventReviewLinked    = "review_linked"
+
+	eventReviewChangesRequested = "review_changes_requested"
 )
 
 // activeReviewAttempt returns the executing Review attempt of the run's current
@@ -103,7 +105,7 @@ func (s *Service) driveReviewAttempt(ctx context.Context, runID string) error {
 		return nil
 	case gatePause:
 		if dec.FinishFailed {
-			return s.finishReviewFailed(ctx, run, attempt, dec)
+			return s.routeReviewFeedback(ctx, run, snap, attempt, dec)
 		}
 		return s.pause(ctx, run, &attempt, dec.Pause, dec.Detail)
 	case gateComplete:
@@ -164,19 +166,31 @@ func (s *Service) triggerReview(ctx context.Context, run domain.PipelineRun, att
 	return nil
 }
 
-// finishReviewFailed closes a Review attempt whose verdict was changes
-// requested, keeping the verdict as the attempt's result and pausing the run on
-// an actionable reason.
-func (s *Service) finishReviewFailed(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, dec gateDecision) error {
+// routeReviewFeedback closes a Review attempt whose verdict was changes
+// requested. When the stage declares a repair route and the shared budget has
+// room, the same atomic change counts the return and creates the Build attempt
+// that carries the revision-bound feedback to the original worker; Build then
+// goes straight back to Review, never through Test. Otherwise the run pauses on
+// an actionable reason with the verdict kept as the attempt's result.
+func (s *Service) routeReviewFeedback(ctx context.Context, run domain.PipelineRun, snap Snapshot, attempt domain.PipelineStageAttempt, dec gateDecision) error {
 	now := s.clock()
-	_, err := s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
+	t := domain.PipelineTransition{
 		RunID: run.ID, ExpectedRevision: run.Revision, At: now,
 		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, OutputCommit: attempt.InputCommit, NoChange: true, Outcome: dec.Outcome, Summary: dec.Detail, FinishedAt: now},
-		Run:     &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: dec.Pause, PauseDetail: dec.Detail, CurrentStageID: run.CurrentStageID},
-		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventRunPaused, Detail: eventDetail{Code: string(dec.Pause), Message: dec.Detail}.marshal()}},
-	})
+		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventReviewChangesRequested, Detail: eventDetail{Code: dec.Outcome, Message: dec.Detail}.marshal()}},
+	}
+	var fb Feedback
+	if dec.Run != nil {
+		fb = reviewFeedback(attempt, attempt.InputCommit, *dec.Run)
+	}
+	plan, exhausted := s.planRepair(ctx, run, snap, attempt, domain.PipelineRepairReviewFeedback, fb, attempt.InputCommit)
+	s.applyRepairOrPause(&t, run, plan, exhausted, dec.Pause, dec.Detail)
+	_, err := s.store.CommitPipelineTransition(ctx, t)
 	if errors.Is(err, domain.ErrPipelineConflict) {
-		return nil
+		return nil // another writer decided first; the next pass sees the result
+	}
+	if err == nil && plan != nil {
+		s.wake()
 	}
 	return err
 }

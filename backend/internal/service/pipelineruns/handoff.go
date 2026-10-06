@@ -181,12 +181,16 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	// 1. The predecessor must have relinquished execution. An idle-looking
 	// executor is not proof: the executor itself fences intake and verifies no
 	// turn, queue, approval, or background work remains.
-	if err := s.executor.RelinquishExecutor(ctx, pred.ExecutorSessionID); err != nil {
-		reason, detail := PauseHandoffUncertain, fmt.Sprintf("Could not prove stage %q stopped executing: %v", pred.StageID, err)
-		if errors.Is(err, ports.ErrPipelineExecutionUncertain) {
-			detail = fmt.Sprintf("Stage %q may still be executing (%v); the handoff is paused instead of risking two writers", pred.StageID, err)
+	// A Review predecessor has no executor to fence: the writer was stopped when
+	// Review began and stays stopped until the repair resumes it below.
+	if pred.StageKind != string(pipeline.StageReview) {
+		if err := s.executor.RelinquishExecutor(ctx, pred.ExecutorSessionID); err != nil {
+			reason, detail := PauseHandoffUncertain, fmt.Sprintf("Could not prove stage %q stopped executing: %v", pred.StageID, err)
+			if errors.Is(err, ports.ErrPipelineExecutionUncertain) {
+				detail = fmt.Sprintf("Stage %q may still be executing (%v); the handoff is paused instead of risking two writers", pred.StageID, err)
+			}
+			return s.pauseHandoff(ctx, run, pending, reason, detail)
 		}
-		return s.pauseHandoff(ctx, run, pending, reason, detail)
 	}
 
 	// 2. With the writer stopped, the worktree must still be exactly the

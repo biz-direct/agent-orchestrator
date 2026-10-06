@@ -13633,6 +13633,8 @@ components:
           items:
             $ref: '#/components/schemas/PipelineFeedbackCheck'
           type: array
+        githubReviewId:
+          type: string
         kind:
           enum:
           - production_defect
@@ -13643,6 +13645,10 @@ components:
           items:
             type: string
           type: array
+        reviewBody:
+          type: string
+        reviewRunId:
+          type: string
         revision:
           type: string
         sourceAttemptId:

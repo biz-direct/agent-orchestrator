@@ -23,6 +23,24 @@ stages:
   - {id: review, kind: review, repairTo: build}
 `
 
+const tightBudgetWorkflow = `version: 1
+id: tight-budget
+description: Build, Test, Review with two repairs
+repairBudget: 2
+stages:
+  - {id: build, kind: build}
+  - {id: test, kind: specialist, profile: tester, repairTo: build}
+  - {id: review, kind: review, repairTo: build}
+`
+
+const reviewNoRepairWorkflow = `version: 1
+id: review-norepair
+description: Build then Review without a repair route
+stages:
+  - {id: build, kind: build}
+  - {id: review, kind: review}
+`
+
 // fakeReviews stands in for the review subsystem and the SCM facts.
 type fakeReviews struct {
 	mu       sync.Mutex
@@ -81,6 +99,8 @@ func newReviewing(t *testing.T, auto bool) *reviewing {
 	f := newFixture(t, map[string]string{
 		".ao/pipelines/workflows/build-review.yaml":      reviewWorkflow,
 		".ao/pipelines/workflows/build-test-review.yaml": buildTestReviewWorkflow,
+		".ao/pipelines/workflows/review-norepair.yaml":   reviewNoRepairWorkflow,
+		".ao/pipelines/workflows/tight-budget.yaml":      tightBudgetWorkflow,
 		".ao/pipelines/profiles/tester.yaml":             testerProfileYAML,
 	})
 	exec := &fakeExecutor{store: f.store, repo: f.repo}
@@ -97,8 +117,12 @@ func newReviewing(t *testing.T, auto bool) *reviewing {
 // toReview runs build-review through Build and the handoff, leaving the Review
 // attempt active, and returns the reviewed head.
 func (r *reviewing) toReview() (pipelineruns.RunView, string) {
+	return r.toReviewVia("build-review")
+}
+
+func (r *reviewing) toReviewVia(workflow string) (pipelineruns.RunView, string) {
 	r.t.Helper()
-	run, err := r.svc.Start(context.Background(), pipelineruns.StartInput{SessionID: r.sessionID, WorkflowID: "build-review", RequestedBy: "user"})
+	run, err := r.svc.Start(context.Background(), pipelineruns.StartInput{SessionID: r.sessionID, WorkflowID: workflow, RequestedBy: "user"})
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -319,9 +343,9 @@ func TestReviewerOperationalFailurePausesWithoutRetry(t *testing.T) {
 	})
 }
 
-func TestReviewChangesRequestedPausesAndDoesNotWakeTheWorker(t *testing.T) {
+func TestReviewChangesRequestedWithoutARepairRoutePausesAndDoesNotWakeTheWorker(t *testing.T) {
 	r := newReviewing(t, false)
-	_, head := r.toReview()
+	_, head := r.toReviewVia("review-norepair")
 	r.setPR(head)
 	r.setRun(reviewRun("rr1", head, domain.ReviewRunComplete, domain.VerdictChangesRequested, time.Now()))
 	sent := len(r.messenger.sent)

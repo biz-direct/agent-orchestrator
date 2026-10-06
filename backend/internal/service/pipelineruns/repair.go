@@ -39,6 +39,11 @@ type Feedback struct {
 	Defects         []ReportDefect  `json:"defects"`
 	FailedChecks    []FeedbackCheck `json:"failedChecks"`
 	RemainingIssues []string        `json:"remainingIssues"`
+	// Review feedback only: the AO review pass that requested the changes, the
+	// provider review it posted (so the worker can reply to it), and its body.
+	ReviewRunID    string `json:"reviewRunId,omitempty"`
+	GithubReviewID string `json:"githubReviewId,omitempty"`
+	ReviewBody     string `json:"reviewBody,omitempty"`
 }
 
 // FeedbackCheck is one failed independent check.
@@ -92,6 +97,24 @@ func validationFeedback(src domain.PipelineStageAttempt, head string, results []
 	}
 	fb.Summary = fmt.Sprintf("%d mandatory check(s) failed against %s after stage %q.", len(fb.FailedChecks), shortCommit(head), src.StageID)
 	return fb
+}
+
+// maxReviewFeedbackRunes bounds the review body carried in repair feedback.
+const maxReviewFeedbackRunes = 8000
+
+// reviewFeedback builds feedback from the built-in review's changes-requested
+// verdict on exactly the head under review.
+func reviewFeedback(src domain.PipelineStageAttempt, head string, run domain.ReviewRun) Feedback {
+	body := domain.SanitizeControlChars(run.Body)
+	if utf8.RuneCountInString(body) > maxReviewFeedbackRunes {
+		body = string([]rune(body)[:maxReviewFeedbackRunes]) + "…"
+	}
+	return Feedback{
+		Kind: string(domain.PipelineRepairReviewFeedback), SourceStageID: src.StageID, SourceAttemptID: src.ID, Revision: head,
+		Summary: fmt.Sprintf("AO's built-in review requested changes on %s (review %s).", shortCommit(head), run.ID),
+		Defects: []ReportDefect{}, FailedChecks: []FeedbackCheck{}, RemainingIssues: []string{},
+		ReviewRunID: run.ID, GithubReviewID: domain.SanitizeControlChars(run.GithubReviewID), ReviewBody: body,
+	}
 }
 
 func tailRunes(s string, n int) string {
@@ -168,6 +191,18 @@ func repairPrompt(run domain.PipelineRun, repair domain.PipelineRepair, fb Feedb
 	}
 	for _, issue := range fb.RemainingIssues {
 		fmt.Fprintf(&b, "Known remaining issue: %s\n", issue)
+	}
+	if fb.Kind == string(domain.PipelineRepairReviewFeedback) {
+		if fb.GithubReviewID != "" {
+			fmt.Fprintf(&b, "\nGitHub review: %s\nOnce you have addressed it, reply on that review with how you addressed it, then resolve the review comment threads you addressed.\n", fb.GithubReviewID)
+		}
+		if fb.ReviewBody != "" {
+			fmt.Fprintf(&b, "\nReview body:\n%s\n", fb.ReviewBody)
+		}
+		b.WriteString("\nAddress the review, commit so the working tree is clean, push the commit to this task's pull request branch, and submit:\n")
+		b.WriteString("  ao pipeline submit --outcome succeeded --summary \"<what you changed>\"\n")
+		fmt.Fprintf(&b, "After you submit, AO's review runs again on your new commit (earlier test results do not cover it and are not re-run); stop working once you have submitted.\n")
+		return b.String()
 	}
 	b.WriteString("\nFix the production code, commit so the working tree is clean, and submit:\n")
 	b.WriteString("  ao pipeline submit --outcome succeeded --summary \"<what you fixed>\"\n")

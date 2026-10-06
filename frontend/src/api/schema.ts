@@ -4658,9 +4658,12 @@ export interface components {
         PipelineFeedback: {
             defects: components["schemas"]["PipelineReportDefect"][];
             failedChecks: components["schemas"]["PipelineFeedbackCheck"][];
+            githubReviewId?: string;
             /** @enum {string} */
             kind: "production_defect" | "validation_failed" | "review_feedback";
             remainingIssues: string[];
+            reviewBody?: string;
+            reviewRunId?: string;
             revision: string;
             sourceAttemptId: string;
             sourceStageId: string;

@@ -15,7 +15,8 @@ Status by delivery slice (parent design: issue #1):
 | Independent validation commands with revision-bound evidence | shipped |
 | Test repair through the original worker (shared three-attempt budget) | shipped |
 | Built-in Review stage with current-revision approval and CI gates | shipped |
-| Review repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
+| Review repair through Build back to Review (shared budget) | shipped |
+| Pause/resume/cancel, recovery | in flight, tracked by the subissues of #1 |
 
 A valid workflow that this build cannot execute can be selected but is shown as
 **unavailable**. AO never silently substitutes a normal worker for a selected workflow that cannot run, and a
@@ -282,7 +283,7 @@ restarts, and concurrent transitions cannot spend it twice or grant extras. When
 the budget is spent the run pauses (`repair_budget_exhausted`) *before* a fourth
 return and stays paused; ordinary resume never grants more attempts. Later
 Review feedback uses the same accounting (`planRepair` with kind
-`review_feedback`).
+`review_feedback`; see "Review repair" below).
 
 **Not repairs.** Operational failures (setup, credentials, launch, timeout,
 cancellation, unknown), policy violations (scope, dirty or stale submissions),
@@ -329,10 +330,11 @@ continues it.
    (subject to its eligibility, for example idle time, which only waits). With
    it **off**, the run shows `awaiting_manual_review` and the existing review
    controls stay available. A pass for any other head never counts.
-4. The pass's result. Approved continues; `changes_requested` pauses the run
-   (`review_changes_requested`) with the verdict kept as the attempt's result,
-   spends no repair budget, and **does not nudge the worker** (review repair
-   routing is a later slice); a failed or cancelled reviewer, or one that ended
+4. The pass's result. Approved continues; `changes_requested` is routed to
+   Build when the stage declares `repairTo` (see "Review repair"), otherwise it
+   pauses the run (`review_changes_requested`) with the verdict kept as the
+   attempt's result, spends no repair budget, and **does not nudge the worker**;
+   a failed or cancelled reviewer, or one that ended
    without a verdict, pauses (`review_operational`) and is not retried behind
    the run's back.
 5. Required CI for that head. AO has no per-check "required" flag, so it uses the
@@ -367,3 +369,34 @@ linked head, review run, and outcome. `ao pipeline status` and the task view
 render the same facts. The durable link (`pipeline_review_links`) records the
 exact pull request head and review run once the head matches and can never move
 to another head.
+
+### Review repair
+
+When the Review stage declares `repairTo: build`, a `changes_requested` verdict on
+the **current head** is routed through the run, never through a direct nudge:
+
+1. One atomic change closes the Review attempt (`changes_requested`), counts the
+   return against the **same budget Test repairs use**, and creates a Build
+   attempt holding revision-bound feedback: the review run, its GitHub review id
+   (so the worker can reply to it), and the review body.
+2. The original worker conversation is resumed once with that feedback and told
+   to commit, push to the task's pull request branch, and submit.
+3. When Build submits a clean committed checkpoint the run goes **directly back to
+   Review**, not through Test. A new Review attempt evaluates the new head:
+   Auto review on starts the built-in review again; off waits for a manual
+   trigger. It needs a fresh approval and fresh required CI for the repaired
+   revision; the previous verdict and any CI results for the old head never count.
+4. Earlier Test evidence stays visible but is labelled as covering an earlier
+   revision; it is never presented as validation of the repaired head.
+
+Feedback for any other head is ignored. Duplicate delivery, concurrent drivers,
+reconciliation, and daemon restarts cannot spend the budget twice (one repair
+record per failing attempt, written in the same transaction). When the budget is
+spent the run pauses (`repair_budget_exhausted`) before another return, and a
+dead original conversation asks for a recovery decision rather than starting a
+fresh one.
+
+While a pipeline run is unfinished, AO's automatic CI, review-comment, review
+feedback and merge-conflict nudges to the worker are held (nothing is recorded as
+sent, so a nudge that still applies fires once the run has finished); the run
+carries review feedback itself.

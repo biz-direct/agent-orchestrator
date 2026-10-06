@@ -2599,6 +2599,49 @@ func TestPRObservation_CIFailingNudgesAgentWithLogs(t *testing.T) {
 	}
 }
 
+// While a pipeline run owns the task, CI nudges must not wake or reach a stage
+// that is not executing; once the run is finished the same nudge fires normally.
+func TestPRObservation_CINudgeDefersToUnfinishedPipeline(t *testing.T) {
+	for name, tc := range map[string]struct {
+		guard ports.PipelineGuard
+		want  int
+	}{
+		"no pipelines":        {guard: nil, want: 1},
+		"finished pipeline":   {guard: fakePipelineGuard{suppress: false}, want: 1},
+		"unfinished pipeline": {guard: fakePipelineGuard{suppress: true}, want: 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := newFakeStore()
+			st.sessions["mer-1"] = working("mer-1")
+			msg := &fakeMessenger{}
+			opts := []Option{}
+			if tc.guard != nil {
+				opts = append(opts, WithPipelineGuard(tc.guard))
+			}
+			m := New(st, msg, opts...)
+			o := ports.PRObservation{Fetched: true, URL: "pr1", CI: domain.CIFailing, Checks: []ports.PRCheckObservation{
+				{Name: "build", CommitHash: "c1", Status: domain.PRCheckFailed, URL: "https://ci.example/build", LogTail: "boom"},
+			}}
+			if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+				t.Fatal(err)
+			}
+			if len(msg.msgs) != tc.want {
+				t.Fatalf("nudges = %d, want %d: %v", len(msg.msgs), tc.want, msg.msgs)
+			}
+			if tc.want == 0 {
+				// Nothing was recorded as sent, so the nudge re-fires after the run.
+				m2 := New(st, msg)
+				if err := m2.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+					t.Fatal(err)
+				}
+				if len(msg.msgs) != 1 {
+					t.Fatalf("a held nudge must fire once the pipeline finishes: %v", msg.msgs)
+				}
+			}
+		})
+	}
+}
+
 func TestPRObservation_CancelledChecksDoNotNudge(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")

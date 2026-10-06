@@ -362,6 +362,14 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// signature; rearmErr is surfaced at the end of this function alongside the
 	// other deferred read errors.
 
+	// An unfinished pipeline run owns the task's executors: a CI, review-comment,
+	// or merge-conflict nudge must not wake a session the run has stopped, or
+	// reach one that is not the active stage. The run carries review feedback
+	// itself, and nothing here is recorded as sent, so a nudge that still applies
+	// fires normally once the run has finished.
+	if len(nudges) > 0 && m.pipelines != nil && m.pipelines.SuppressesLifecycleShortcuts(ctx, id) {
+		nudges = nil
+	}
 	for _, n := range nudges {
 		if _, err := m.sendOnce(ctx, id, o.URL, n.key, n.sig, n.msg, n.maxAttempts, n.urgent); err != nil {
 			return err
