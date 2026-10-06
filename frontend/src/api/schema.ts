@@ -1158,6 +1158,41 @@ export interface paths {
         patch: operations["setProjectPermissions"];
         trace?: never;
     };
+    "/api/v1/projects/{id}/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover and validate the project's repository-defined profiles and pipelines */
+        get: operations["getProjectPipelines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/pipelines/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the project-default pipeline selection and its availability */
+        get: operations["getProjectDefaultPipeline"];
+        /** Save or clear the project-default pipeline without replacing other project settings */
+        put: operations["setProjectDefaultPipeline"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/tasks/prepare": {
         parameters: {
             query?: never;
@@ -4490,6 +4525,80 @@ export interface components {
             targetSha: string;
             title: string;
         };
+        PipelineDiagnostic: {
+            field?: string;
+            file?: string;
+            message: string;
+        };
+        PipelineProfile: {
+            allowedPaths: string[];
+            description: string;
+            harness?: string;
+            id: string;
+            instructionsSha256: string;
+            instructionsSource: string;
+            model?: string;
+            validation: components["schemas"]["PipelineValidationCommand"][];
+        };
+        PipelineProfileEntry: {
+            diagnostics: components["schemas"]["PipelineDiagnostic"][];
+            file: string;
+            id: string;
+            profile?: components["schemas"]["PipelineProfile"];
+            valid: boolean;
+        };
+        PipelineSelection: {
+            /** @enum {string} */
+            mode: "normal_worker" | "workflow";
+            workflowId?: string;
+        };
+        PipelineStage: {
+            description?: string;
+            id: string;
+            kind: string;
+            profile?: string;
+            repairTo?: string;
+        };
+        PipelineValidationCommand: {
+            command: string;
+            id: string;
+            required: boolean;
+            timeoutSeconds: number;
+        };
+        PipelineWorkflow: {
+            description: string;
+            id: string;
+            instructionsSha256?: string;
+            instructionsSource?: string;
+            repairBudget: number;
+            stages: components["schemas"]["PipelineStage"][];
+        };
+        PipelinesCatalogResponse: {
+            default: components["schemas"]["PipelinesDefaultStatus"];
+            diagnostics: components["schemas"]["PipelineDiagnostic"][];
+            profiles: components["schemas"]["PipelineProfileEntry"][];
+            projectId: string;
+            workflows: components["schemas"]["PipelinesWorkflowView"][];
+        };
+        PipelinesDefaultStatus: {
+            executable: boolean;
+            message: string;
+            selection: null | components["schemas"]["PipelineSelection"];
+            /** @enum {string} */
+            state: "unset" | "normal_worker" | "workflow_available" | "workflow_unavailable" | "workflow_invalid" | "workflow_missing";
+        };
+        PipelinesSetDefaultInput: {
+            selection: null | components["schemas"]["PipelineSelection"];
+        };
+        PipelinesWorkflowView: {
+            diagnostics: components["schemas"]["PipelineDiagnostic"][];
+            executable: boolean;
+            file: string;
+            id: string;
+            unavailableReason?: string;
+            valid: boolean;
+            workflow?: components["schemas"]["PipelineWorkflow"];
+        };
         PrepareTaskResponse: {
             ok: boolean;
             taskPreparation?: string;
@@ -4538,6 +4647,7 @@ export interface components {
             canonicalRepoURL?: string;
             containerReap?: components["schemas"]["ContainerReapConfig"];
             defaultBranch?: string;
+            defaultPipeline?: components["schemas"]["PipelineSelection"];
             env?: {
                 [key: string]: string;
             };
@@ -9570,6 +9680,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getProjectPipelines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesCatalogResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getProjectDefaultPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesDefaultStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setProjectDefaultPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinesSetDefaultInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesDefaultStatus"];
                 };
             };
             /** @description Bad Request */

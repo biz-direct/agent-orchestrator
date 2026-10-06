@@ -349,3 +349,35 @@ func (s *Store) SetProjectPermissions(ctx context.Context, id string, permission
 	})
 	return row, updated, err
 }
+
+// SetProjectDefaultPipeline sets or clears (nil) the project's default pipeline
+// selection as a focused read-modify-write so every other config field,
+// including ones a caller never loaded, is preserved.
+func (s *Store) SetProjectDefaultPipeline(ctx context.Context, id string, selection *domain.PipelineSelection) (domain.ProjectRecord, bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var row domain.ProjectRecord
+	var updated bool
+	err := s.inTx(ctx, "set project default pipeline", func(q *gen.Queries) error {
+		stored, err := q.GetProject(ctx, domain.ProjectID(id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		row = projectRowFromGen(stored)
+		if !row.ArchivedAt.IsZero() {
+			return nil
+		}
+		row.Config.DefaultPipeline = selection
+		config, err := marshalProjectConfig(row.Config)
+		if err != nil {
+			return err
+		}
+		rows, err := q.UpdateProjectSettings(ctx, gen.UpdateProjectSettingsParams{ID: domain.ProjectID(id), DisplayName: row.DisplayName, Config: config})
+		updated = rows > 0
+		return err
+	})
+	return row, updated, err
+}

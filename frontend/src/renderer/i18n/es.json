@@ -2507,5 +2507,18 @@
 	"standalone.archive.heading_other": "{{count}} sesiones archivadas",
 	"standalone.archive.newAgent": "Nuevo agente",
 	"standalone.archive.empty.title": "No hay agentes independientes archivados",
-	"standalone.archive.empty.body": "Los agentes independientes que archives desde el Bloc de notas aparecerán aquí. Los agentes independientes activos permanecen en la lista del Bloc de notas."
+	"standalone.archive.empty.body": "Los agentes independientes que archives desde el Bloc de notas aparecerán aquí. Los agentes independientes activos permanecen en la lista del Bloc de notas.",
+	"settings.project.pipeline.title": "Pipeline",
+	"settings.project.pipeline.default": "Default pipeline",
+	"settings.project.pipeline.unset": "Not set",
+	"settings.project.pipeline.normalWorker": "Normal worker",
+	"settings.project.pipeline.invalidSuffix": " (invalid)",
+	"settings.project.pipeline.unavailableSuffix": " (unavailable)",
+	"settings.project.pipeline.missingSuffix": " (not defined)",
+	"settings.project.pipeline.loading": "Loading pipelines…",
+	"settings.project.pipeline.loadFailed": "Couldn't load pipelines",
+	"settings.project.pipeline.saveFailed": "Couldn't save the default pipeline",
+	"settings.project.pipeline.problems_one": "{{count}} definition problem",
+	"settings.project.pipeline.problems_many": "{{count}} definition problems",
+	"settings.project.pipeline.problems_other": "{{count}} definition problems"
 }

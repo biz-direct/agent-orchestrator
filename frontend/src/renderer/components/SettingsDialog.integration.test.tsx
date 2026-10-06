@@ -63,6 +63,7 @@ beforeEach(() => {
 	catalog = { agents: [agentReadiness("claude-code", "Claude Code"), agentReadiness("codex", "Codex")] };
 	vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
 		if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project } } as never;
+		if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
 		if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
 		if (path === "/api/v1/agents/installers") return { data: { agents: [] } } as never;
 		if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;

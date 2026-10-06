@@ -2456,5 +2456,17 @@
 	"standalone.archive.heading_other": "{{count}} 个已归档会话",
 	"standalone.archive.newAgent": "新建代理",
 	"standalone.archive.empty.title": "没有已归档的独立代理",
-	"standalone.archive.empty.body": "从草稿区归档的独立代理会显示在这里。活跃的独立代理会保留在草稿区列表中。"
+	"standalone.archive.empty.body": "从草稿区归档的独立代理会显示在这里。活跃的独立代理会保留在草稿区列表中。",
+	"settings.project.pipeline.title": "Pipeline",
+	"settings.project.pipeline.default": "Default pipeline",
+	"settings.project.pipeline.unset": "Not set",
+	"settings.project.pipeline.normalWorker": "Normal worker",
+	"settings.project.pipeline.invalidSuffix": " (invalid)",
+	"settings.project.pipeline.unavailableSuffix": " (unavailable)",
+	"settings.project.pipeline.missingSuffix": " (not defined)",
+	"settings.project.pipeline.loading": "Loading pipelines…",
+	"settings.project.pipeline.loadFailed": "Couldn't load pipelines",
+	"settings.project.pipeline.saveFailed": "Couldn't save the default pipeline",
+	"settings.project.pipeline.problems_one": "{{count}} definition problem",
+	"settings.project.pipeline.problems_other": "{{count}} definition problems"
 }

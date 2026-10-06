@@ -2474,5 +2474,17 @@
 	"standalone.archive.heading_other": "보관된 세션 {{count}}개",
 	"standalone.archive.newAgent": "새 에이전트",
 	"standalone.archive.empty.title": "보관된 독립 실행형 에이전트가 없습니다",
-	"standalone.archive.empty.body": "스크래치패드에서 보관한 독립 실행형 에이전트가 여기에 표시됩니다. 활성 독립 실행형 에이전트는 스크래치패드 목록에 남아 있습니다."
+	"standalone.archive.empty.body": "스크래치패드에서 보관한 독립 실행형 에이전트가 여기에 표시됩니다. 활성 독립 실행형 에이전트는 스크래치패드 목록에 남아 있습니다.",
+	"settings.project.pipeline.title": "Pipeline",
+	"settings.project.pipeline.default": "Default pipeline",
+	"settings.project.pipeline.unset": "Not set",
+	"settings.project.pipeline.normalWorker": "Normal worker",
+	"settings.project.pipeline.invalidSuffix": " (invalid)",
+	"settings.project.pipeline.unavailableSuffix": " (unavailable)",
+	"settings.project.pipeline.missingSuffix": " (not defined)",
+	"settings.project.pipeline.loading": "Loading pipelines…",
+	"settings.project.pipeline.loadFailed": "Couldn't load pipelines",
+	"settings.project.pipeline.saveFailed": "Couldn't save the default pipeline",
+	"settings.project.pipeline.problems_one": "{{count}} definition problem",
+	"settings.project.pipeline.problems_other": "{{count}} definition problems"
 }

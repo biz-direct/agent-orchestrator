@@ -5354,6 +5354,34 @@ func TestSpawnWorker_ProjectRulesInSystemPrompt(t *testing.T) {
 	}
 }
 
+// A saved project-default pipeline is only a reference until execution ships:
+// it must not change what an ordinary spawn launches.
+func TestSpawnWorker_ProjectDefaultPipelineDoesNotChangeOrdinarySpawn(t *testing.T) {
+	spawn := func(selection *domain.PipelineSelection) (system, prompt string) {
+		cfg := testRoleAgents()
+		cfg.DefaultPipeline = selection
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+		agent := &recordingAgent{}
+		lookPath := func(string) (string, error) { return "/bin/true", nil }
+		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+		if _, _, _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "do it"}); err != nil {
+			t.Fatal(err)
+		}
+		return agent.lastLaunch.SystemPrompt, agent.lastLaunch.Prompt
+	}
+	baseSystem, basePrompt := spawn(nil)
+	for _, sel := range []*domain.PipelineSelection{
+		{Mode: domain.PipelineModeWorkflow, WorkflowID: "build-test-review"},
+		{Mode: domain.PipelineModeNormalWorker},
+	} {
+		system, prompt := spawn(sel)
+		if system != baseSystem || prompt != basePrompt {
+			t.Fatalf("selection %+v changed the ordinary worker launch", sel)
+		}
+	}
+}
+
 func TestSpawnWorker_IssueContextStaysInTaskPrompt(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}

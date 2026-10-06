@@ -2474,5 +2474,17 @@
 	"standalone.archive.heading_other": "{{count}} archivierte Sitzungen",
 	"standalone.archive.newAgent": "Neuer Agent",
 	"standalone.archive.empty.title": "Keine archivierten eigenständigen Agenten",
-	"standalone.archive.empty.body": "Eigenständige Agenten, die du aus dem Notizblock archivierst, erscheinen hier. Aktive eigenständige Agenten bleiben in der Notizblockliste."
+	"standalone.archive.empty.body": "Eigenständige Agenten, die du aus dem Notizblock archivierst, erscheinen hier. Aktive eigenständige Agenten bleiben in der Notizblockliste.",
+	"settings.project.pipeline.title": "Pipeline",
+	"settings.project.pipeline.default": "Default pipeline",
+	"settings.project.pipeline.unset": "Not set",
+	"settings.project.pipeline.normalWorker": "Normal worker",
+	"settings.project.pipeline.invalidSuffix": " (invalid)",
+	"settings.project.pipeline.unavailableSuffix": " (unavailable)",
+	"settings.project.pipeline.missingSuffix": " (not defined)",
+	"settings.project.pipeline.loading": "Loading pipelines…",
+	"settings.project.pipeline.loadFailed": "Couldn't load pipelines",
+	"settings.project.pipeline.saveFailed": "Couldn't save the default pipeline",
+	"settings.project.pipeline.problems_one": "{{count}} definition problem",
+	"settings.project.pipeline.problems_other": "{{count}} definition problems"
 }

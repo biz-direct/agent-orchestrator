@@ -3050,6 +3050,118 @@ paths:
       summary: Remember project permissions for future sessions
       tags:
       - projects
+  /api/v1/projects/{id}/pipelines:
+    get:
+      operationId: getProjectPipelines
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinesCatalogResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Discover and validate the project's repository-defined profiles and
+        pipelines
+      tags:
+      - projects
+  /api/v1/projects/{id}/pipelines/default:
+    get:
+      operationId: getProjectDefaultPipeline
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinesDefaultStatus'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read the project-default pipeline selection and its availability
+      tags:
+      - projects
+    put:
+      operationId: setProjectDefaultPipeline
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelinesSetDefaultInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinesDefaultStatus'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Save or clear the project-default pipeline without replacing other
+        project settings
+      tags:
+      - projects
   /api/v1/projects/{id}/tasks/prepare:
     post:
       operationId: prepareTask
@@ -13119,6 +13231,219 @@ components:
       - targetSha
       - status
       type: object
+    PipelineDiagnostic:
+      properties:
+        field:
+          type: string
+        file:
+          type: string
+        message:
+          type: string
+      required:
+      - message
+      type: object
+    PipelineProfile:
+      properties:
+        allowedPaths:
+          items:
+            type: string
+          type: array
+        description:
+          type: string
+        harness:
+          type: string
+        id:
+          type: string
+        instructionsSha256:
+          type: string
+        instructionsSource:
+          type: string
+        model:
+          type: string
+        validation:
+          items:
+            $ref: '#/components/schemas/PipelineValidationCommand'
+          type: array
+      required:
+      - id
+      - description
+      - instructionsSource
+      - instructionsSha256
+      - allowedPaths
+      - validation
+      type: object
+    PipelineProfileEntry:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/PipelineDiagnostic'
+          type: array
+        file:
+          type: string
+        id:
+          type: string
+        profile:
+          $ref: '#/components/schemas/PipelineProfile'
+        valid:
+          type: boolean
+      required:
+      - id
+      - file
+      - valid
+      - diagnostics
+      type: object
+    PipelineSelection:
+      properties:
+        mode:
+          enum:
+          - normal_worker
+          - workflow
+          type: string
+        workflowId:
+          type: string
+      required:
+      - mode
+      type: object
+    PipelineStage:
+      properties:
+        description:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        profile:
+          type: string
+        repairTo:
+          type: string
+      required:
+      - id
+      - kind
+      type: object
+    PipelineValidationCommand:
+      properties:
+        command:
+          type: string
+        id:
+          type: string
+        required:
+          type: boolean
+        timeoutSeconds:
+          type: integer
+      required:
+      - id
+      - command
+      - timeoutSeconds
+      - required
+      type: object
+    PipelineWorkflow:
+      properties:
+        description:
+          type: string
+        id:
+          type: string
+        instructionsSha256:
+          type: string
+        instructionsSource:
+          type: string
+        repairBudget:
+          type: integer
+        stages:
+          items:
+            $ref: '#/components/schemas/PipelineStage'
+          type: array
+      required:
+      - id
+      - description
+      - repairBudget
+      - stages
+      type: object
+    PipelinesCatalogResponse:
+      properties:
+        default:
+          $ref: '#/components/schemas/PipelinesDefaultStatus'
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/PipelineDiagnostic'
+          type: array
+        profiles:
+          items:
+            $ref: '#/components/schemas/PipelineProfileEntry'
+          type: array
+        projectId:
+          type: string
+        workflows:
+          items:
+            $ref: '#/components/schemas/PipelinesWorkflowView'
+          type: array
+      required:
+      - projectId
+      - profiles
+      - workflows
+      - diagnostics
+      - default
+      type: object
+    PipelinesDefaultStatus:
+      properties:
+        executable:
+          type: boolean
+        message:
+          type: string
+        selection:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/PipelineSelection'
+            type: object
+        state:
+          enum:
+          - unset
+          - normal_worker
+          - workflow_available
+          - workflow_unavailable
+          - workflow_invalid
+          - workflow_missing
+          type: string
+      required:
+      - selection
+      - state
+      - executable
+      - message
+      type: object
+    PipelinesSetDefaultInput:
+      properties:
+        selection:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/PipelineSelection'
+            type: object
+      required:
+      - selection
+      type: object
+    PipelinesWorkflowView:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/PipelineDiagnostic'
+          type: array
+        executable:
+          type: boolean
+        file:
+          type: string
+        id:
+          type: string
+        unavailableReason:
+          type: string
+        valid:
+          type: boolean
+        workflow:
+          $ref: '#/components/schemas/PipelineWorkflow'
+      required:
+      - id
+      - file
+      - valid
+      - diagnostics
+      - executable
+      type: object
     PrepareTaskResponse:
       properties:
         ok:
@@ -13243,6 +13568,8 @@ components:
           $ref: '#/components/schemas/ContainerReapConfig'
         defaultBranch:
           type: string
+        defaultPipeline:
+          $ref: '#/components/schemas/PipelineSelection'
         env:
           additionalProperties:
             type: string

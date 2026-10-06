@@ -2474,5 +2474,17 @@
 	"standalone.archive.heading_other": "{{count}} 件のアーカイブ済みセッション",
 	"standalone.archive.newAgent": "新しいエージェント",
 	"standalone.archive.empty.title": "アーカイブ済みのスタンドアロンエージェントはありません",
-	"standalone.archive.empty.body": "スクラッチパッドからアーカイブしたスタンドアロンエージェントがここに表示されます。アクティブなスタンドアロンエージェントはスクラッチパッドの一覧に残ります。"
+	"standalone.archive.empty.body": "スクラッチパッドからアーカイブしたスタンドアロンエージェントがここに表示されます。アクティブなスタンドアロンエージェントはスクラッチパッドの一覧に残ります。",
+	"settings.project.pipeline.title": "Pipeline",
+	"settings.project.pipeline.default": "Default pipeline",
+	"settings.project.pipeline.unset": "Not set",
+	"settings.project.pipeline.normalWorker": "Normal worker",
+	"settings.project.pipeline.invalidSuffix": " (invalid)",
+	"settings.project.pipeline.unavailableSuffix": " (unavailable)",
+	"settings.project.pipeline.missingSuffix": " (not defined)",
+	"settings.project.pipeline.loading": "Loading pipelines…",
+	"settings.project.pipeline.loadFailed": "Couldn't load pipelines",
+	"settings.project.pipeline.saveFailed": "Couldn't save the default pipeline",
+	"settings.project.pipeline.problems_one": "{{count}} definition problem",
+	"settings.project.pipeline.problems_other": "{{count}} definition problems"
 }

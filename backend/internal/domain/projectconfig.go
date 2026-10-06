@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -73,6 +74,50 @@ type ProjectConfig struct {
 	// new session at spawn time. Users can still override the per-session toggle
 	// after spawn.
 	AutoReview bool `json:"autoReview,omitempty"`
+
+	// DefaultPipeline is the project's default worker pipeline selection. Nil
+	// means the project never chose one and tasks start as normal workers.
+	// Definitions themselves live in repository files; this stores only the
+	// reference (see package pipeline).
+	DefaultPipeline *PipelineSelection `json:"defaultPipeline,omitempty"`
+}
+
+// PipelineMode is how a project (or task) chooses between a normal worker and a
+// repository-defined workflow. The explicit normal-worker choice is distinct
+// from an unset selection so a later change of default never overrides it.
+type PipelineMode string
+
+const (
+	// PipelineModeNormalWorker explicitly selects the ordinary single worker.
+	PipelineModeNormalWorker PipelineMode = "normal_worker"
+	// PipelineModeWorkflow selects the repository workflow named by WorkflowID.
+	PipelineModeWorkflow PipelineMode = "workflow"
+)
+
+// PipelineSelection is a persisted reference to a repository-defined workflow.
+type PipelineSelection struct {
+	Mode       PipelineMode `json:"mode" enum:"normal_worker,workflow"`
+	WorkflowID string       `json:"workflowId,omitempty"`
+}
+
+var pipelineWorkflowIDPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
+
+// Validate rejects selections that name no workflow, name one with an invalid
+// id, or attach a workflow id to the normal-worker choice.
+func (s PipelineSelection) Validate() error {
+	switch s.Mode {
+	case PipelineModeNormalWorker:
+		if s.WorkflowID != "" {
+			return fmt.Errorf("defaultPipeline: workflowId must be empty when mode is %q", s.Mode)
+		}
+	case PipelineModeWorkflow:
+		if !pipelineWorkflowIDPattern.MatchString(s.WorkflowID) {
+			return fmt.Errorf("defaultPipeline.workflowId %q must be 1-64 lowercase letters, digits, and hyphens", s.WorkflowID)
+		}
+	default:
+		return fmt.Errorf("defaultPipeline.mode %q: want %q or %q", s.Mode, PipelineModeNormalWorker, PipelineModeWorkflow)
+	}
+	return nil
 }
 
 // ContainerReapConfig is the project-level opt-out for #2652's Docker
@@ -210,6 +255,11 @@ func (c ProjectConfig) Validate() error {
 	}
 	if err := c.TrackerIntake.Validate(); err != nil {
 		return err
+	}
+	if c.DefaultPipeline != nil {
+		if err := c.DefaultPipeline.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

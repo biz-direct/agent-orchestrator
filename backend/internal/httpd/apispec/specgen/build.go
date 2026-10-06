@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/githubpat"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
+	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 )
 
@@ -225,6 +226,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainIssueID":                   "IssueID",
 	"DomainSession":                   "Session",
 	"DomainProjectConfig":             "ProjectConfig",
+	"DomainPipelineSelection":         "PipelineSelection",
 	"DomainTrackerIntakeConfig":       "TrackerIntakeConfig",
 	"ControllersTriggerReviewRequest": "TriggerReviewRequest",
 	"DomainContainerReapConfig":       "ContainerReapConfig",
@@ -2164,6 +2166,38 @@ func projectOperations() []operation {
 			reqBody:    projectsvc.SetPermissionsInput{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ProjectResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/pipelines", id: "getProjectPipelines", tag: "projects",
+			summary:    "Discover and validate the project's repository-defined profiles and pipelines",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, pipelinessvc.CatalogResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/pipelines/default", id: "getProjectDefaultPipeline", tag: "projects",
+			summary:    "Read the project-default pipeline selection and its availability",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, pipelinessvc.DefaultStatus{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/projects/{id}/pipelines/default", id: "setProjectDefaultPipeline", tag: "projects",
+			summary:    "Save or clear the project-default pipeline without replacing other project settings",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			reqBody:    pipelinessvc.SetDefaultInput{},
+			resps: []respUnit{
+				{http.StatusOK, pipelinessvc.DefaultStatus{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
