@@ -9,6 +9,7 @@ import { cn } from "../lib/utils";
 import type { WorkspaceSession } from "../types/workspace";
 import { SettingsOptionMenu } from "./settings/SettingsOptionMenu";
 import { StageConversationDialog } from "./StageConversationDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./ui/button";
 
 type RunView = components["schemas"]["PipelineRunView"];
@@ -18,6 +19,7 @@ type EvidenceView = components["schemas"]["PipelineEvidenceView"];
 type CommandResult = components["schemas"]["PipelineCommandResultView"];
 type ReviewGate = components["schemas"]["PipelineReviewGateView"];
 type ReviewEvidence = components["schemas"]["PipelineReviewEvidenceView"];
+type ControlRequest = components["schemas"]["PipelineControlRequest"];
 type Catalog = components["schemas"]["PipelinesCatalogResponse"];
 
 export const sessionPipelineQueryKey = (sessionId: string, hostId?: string) =>
@@ -146,6 +148,7 @@ function RunSummary({ run, session, hostId }: { run: RunView; session: Workspace
 					{run.pauseDetail}
 				</p>
 			) : null}
+			<RunControls run={run} session={session} hostId={hostId} />
 			<ul className="divide-y divide-(--color-border-settings-input)">
 				{run.stages.map((stage) => {
 					const conversation = conversationFor(stage.id);
@@ -255,6 +258,99 @@ function ValidationList({ checks }: { checks: CommandResult[] }) {
 				);
 			})}
 		</ul>
+	);
+}
+
+/**
+ * Pause, resume, and cancel for an unfinished run. The daemon decides what is
+ * allowed (`run.control`); this only offers it. Extra repairs after the budget
+ * is spent are a separate, explicit authorization: resume never grants them.
+ */
+function RunControls({ run, session, hostId }: { run: RunView; session: WorkspaceSession; hostId?: string }) {
+	const { t } = useTranslation();
+	const queryClient = useQueryClient();
+	const client = clientForSessionHost(hostId);
+	const [confirm, setConfirm] = useState<"cancel" | "authorize" | null>(null);
+	const control = useMutation({
+		mutationFn: async (input: Pick<ControlRequest, "action" | "additionalRepairs" | "requestKey">) => {
+			const { data, error } = await client.POST("/api/v1/sessions/{sessionId}/pipeline/control", {
+				params: { path: { sessionId: session.id } },
+				body: { runId: run.id, requestedBy: "user", expectedRevision: run.revision, ...input },
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data;
+		},
+		onSuccess: (data) => {
+			queryClient.setQueryData(sessionPipelineQueryKey(session.id, hostId), { run: data.run });
+			setConfirm(null);
+		},
+	});
+	const { control: state } = run;
+	const lastStop = state.lastStop;
+	if (!state.canPause && !state.canResume && !state.canCancel && !state.needsRepairAuthorization && run.repairGrants.length === 0) return null;
+	return (
+		<div className="flex flex-col gap-1.5" data-testid="pipeline-controls">
+			<div className="flex flex-wrap items-center gap-1.5">
+				{state.canPause ? (
+					<Button size="sm" variant="secondary" disabled={control.isPending} onClick={() => control.mutate({ action: "pause" })}>
+						{t("inspector.pipeline.control.pause")}
+					</Button>
+				) : null}
+				{state.canResume ? (
+					<Button size="sm" variant="secondary" disabled={control.isPending} onClick={() => control.mutate({ action: "resume" })}>
+						{t("inspector.pipeline.control.resume")}
+					</Button>
+				) : null}
+				{state.needsRepairAuthorization ? (
+					<Button size="sm" variant="secondary" disabled={control.isPending} onClick={() => setConfirm("authorize")}>
+						{t("inspector.pipeline.control.authorize")}
+					</Button>
+				) : null}
+				{state.canCancel ? (
+					<Button size="sm" variant="ghost" disabled={control.isPending} onClick={() => setConfirm("cancel")}>
+						{t("inspector.pipeline.control.cancel")}
+					</Button>
+				) : null}
+			</div>
+			{run.state === "paused" && state.resumeNeedsUser && !state.needsRepairAuthorization ? (
+				<p className="text-pretty text-2xs leading-normal text-settings-muted">{t("inspector.pipeline.control.humanOnly")}</p>
+			) : null}
+			{lastStop ? (
+				<p className={cn("text-pretty text-2xs leading-normal", lastStop.confirmed ? "text-settings-muted" : "text-warning")} role="status">
+					{lastStop.confirmed ? t("inspector.pipeline.control.stopConfirmed") : t("inspector.pipeline.control.stopUnconfirmed", { detail: lastStop.detail ?? "" })}
+				</p>
+			) : null}
+			{run.repairGrants.length > 0 ? (
+				<p className="text-2xs text-settings-muted">{t("inspector.pipeline.control.grants", { count: run.repairGrants.reduce((sum, g) => sum + g.amount, 0) })}</p>
+			) : null}
+			{control.isError ? (
+				<p className="text-pretty text-2xs leading-normal text-error" role="alert">
+					{control.error instanceof Error ? control.error.message : t("inspector.pipeline.control.failed")}
+				</p>
+			) : null}
+			<ConfirmDialog
+				open={confirm === "cancel"}
+				title={t("inspector.pipeline.control.cancelTitle")}
+				description={t("inspector.pipeline.control.cancelDescription")}
+				confirmLabel={t("inspector.pipeline.control.cancelConfirm")}
+				cancelLabel={t("inspector.pipeline.control.cancelKeep")}
+				destructive
+				busy={control.isPending}
+				error={control.isError ? (control.error instanceof Error ? control.error.message : t("inspector.pipeline.control.failed")) : null}
+				onConfirm={() => control.mutate({ action: "cancel" })}
+				onOpenChange={(open) => !open && setConfirm(null)}
+			/>
+			<ConfirmDialog
+				open={confirm === "authorize"}
+				title={t("inspector.pipeline.control.authorizeTitle")}
+				description={t("inspector.pipeline.control.authorizeDescription")}
+				confirmLabel={t("inspector.pipeline.control.authorizeConfirm")}
+				busy={control.isPending}
+				error={control.isError ? (control.error instanceof Error ? control.error.message : t("inspector.pipeline.control.failed")) : null}
+				onConfirm={() => control.mutate({ action: "authorize_repairs", additionalRepairs: 1, requestKey: `ui-${run.id}-${run.revision}` })}
+				onOpenChange={(open) => !open && setConfirm(null)}
+			/>
+		</div>
 	);
 }
 

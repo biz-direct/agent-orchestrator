@@ -16,7 +16,8 @@ Status by delivery slice (parent design: issue #1):
 | Test repair through the original worker (shared three-attempt budget) | shipped |
 | Built-in Review stage with current-revision approval and CI gates | shipped |
 | Review repair through Build back to Review (shared budget) | shipped |
-| Pause/resume/cancel, recovery | in flight, tracked by the subissues of #1 |
+| Pause, resume, cancel, human-authorized extra repairs | shipped |
+| Recovery after daemon/desktop replacement | in flight, tracked by the subissues of #1 |
 
 A valid workflow that this build cannot execute can be selected but is shown as
 **unavailable**. AO never silently substitutes a normal worker for a selected workflow that cannot run, and a
@@ -400,3 +401,62 @@ While a pipeline run is unfinished, AO's automatic CI, review-comment, review
 feedback and merge-conflict nudges to the worker are held (nothing is recorded as
 sent, so a nudge that still applies fires once the run has finished); the run
 carries review feedback itself.
+
+## Pause, resume, and cancel
+
+`ao pipeline pause|resume|cancel` (and the task view's controls, and
+`POST /sessions/{id}/pipeline/control`) operate on the task's current run. Requests
+name the run and may carry the revision the caller read; a request for an older
+run or a changed revision is refused (`409 PIPELINE_STALE_CONTROL`). Repeating a
+request that is already satisfied (pause a paused run, cancel a cancelled one,
+resume a running one) succeeds with `changed: false`.
+
+**Pause** persists first, which fences new stage starts and handoffs (the driver
+only advances running runs, and a paused run accepts no results), then stops the
+active execution:
+
+- executor stages (Build, specialists): the executor's turn is interrupted and AO
+  tries to prove it quiescent. A requested interrupt is **not** proof: if a turn,
+  background task, or pending permission/input request cannot be shown to be gone,
+  the pause is still recorded and the response says `stop.confirmed: false` with
+  the reason. AO never answers a permission prompt for you. The executor stays
+  reachable so a person can unblock it. Interrupting settles the executor's queued
+  turns as cancelled.
+- validation: the in-flight round is cancelled and its process groups are killed;
+  each command is recorded as `cancelled`.
+- Review: nothing executes; evaluation simply stops. AO's built-in reviewer keeps
+  its own lifecycle and the ordinary review controls.
+
+These three cases are the stage "hooks": a new stage kind adds its own case where
+the pause/cancel stop is dispatched instead of a new control path. Pauses are
+operational (`paused_by_user`, `paused_by_orchestrator`) and never spend the repair
+budget.
+
+**Resume** revalidates before restarting anything: the task must be live, the
+workspace must be on the expected branch, and history must still descend from the
+stage's input revision (a Review resume additionally needs HEAD to equal the
+accepted checkpoint with no tracked edits, otherwise `409 PIPELINE_RESUME_BLOCKED`
+says what to restore). It then creates a **new attempt** that continues the
+interrupted one (`retryOfAttemptId`), keeping the stage's input revision: the same
+conversation is resumed with a note that its earlier turn is not replayed. If that
+conversation's controller is gone, the run pauses for a recovery decision
+(`recovery_decision_required`) instead of starting a fresh one. A pending handoff or
+validation is simply handed back to the driver (validation runs a new round and
+keeps the earlier results). Pauses that are decisions for a person
+(`recovery_decision_required`, `repair_budget_exhausted`, `validation_interrupted`)
+cannot be resumed by an orchestrator.
+
+**Cancel** ends the run (`cancelled`) and stops active execution the same way. It
+never resets the worktree, deletes files, closes the pull request, or removes
+conversations: stage conversations are retained (but closed to input), the original
+worker keeps the task, and its fenced intake is reopened. A finished run (completed
+or cancelled) likewise hands the worker's conversation back. A cancelled run does
+not block starting a new one.
+
+**Extra repairs are a separate, human authorization.** When the budget is spent the
+run stays paused (`repair_budget_exhausted`) and resume refuses
+(`409 PIPELINE_REPAIR_AUTHORIZATION_REQUIRED`); an orchestrator cannot authorize
+(`403`). A person runs `ao pipeline authorize-repairs --count N` (or uses the task
+view), which persists one grant (`pipeline_repair_grants`, idempotent per request
+key) and raises the run's budget in the same transaction; `resume` then applies
+exactly one authorized repair from the failing attempt's retained feedback.

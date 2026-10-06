@@ -67,6 +67,8 @@ addresses change on restart.
 | `ao pipeline default get/set/clear` | `GET/PUT /api/v1/projects/{id}/pipelines/default` |
 | `ao pipeline start/status`          | `POST/GET /api/v1/sessions/{id}/pipeline`      |
 | `ao pipeline submit`                | `POST /api/v1/sessions/{id}/pipeline/results`  |
+| `ao pipeline pause/resume/cancel`   | `POST /api/v1/sessions/{id}/pipeline/control`  |
+| `ao pipeline authorize-repairs`     | `POST /api/v1/sessions/{id}/pipeline/control` (user only) |
 | `ao spawn`                          | Targeted launch ensure, then `POST /api/v1/sessions` |
 | `ao session ls`                     | `GET /api/v1/sessions` plus per-session PR summaries; shows branch, PR, CI, review, unresolved threads, activity, and age. |
 | `ao session get <id>`               | `GET /api/v1/sessions/{id}`                    |

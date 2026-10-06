@@ -215,8 +215,9 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 			Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, OutputCommit: attempt.OutputCommit, NoChange: attempt.NoChange, Outcome: "validation_failed", Summary: attempt.Summary, ResultKey: attempt.ResultKey, ResultJSON: attempt.ResultJSON, FinishedAt: now},
 			Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventValidationFinished, Detail: eventDetail{Code: "validation_failed", Message: detail}.marshal()}},
 		}
-		plan, exhausted := s.planRepair(pauseCtx, run, snap, attempt, domain.PipelineRepairValidationFailed, validationFeedback(attempt, attempt.OutputCommit, results), attempt.OutputCommit)
-		s.applyRepairOrPause(&t, run, plan, exhausted, PauseValidationFailed, detail)
+		fb := validationFeedback(attempt, attempt.OutputCommit, results)
+		plan, exhausted := s.planRepair(pauseCtx, run, snap, attempt, domain.PipelineRepairValidationFailed, fb, attempt.OutputCommit)
+		s.applyRepairOrPause(&t, run, plan, exhausted, PauseValidationFailed, detail, fb)
 		_, err := s.store.CommitPipelineTransition(pauseCtx, t)
 		if errors.Is(err, domain.ErrPipelineConflict) {
 			return nil

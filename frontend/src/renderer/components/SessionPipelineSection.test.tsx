@@ -27,7 +27,8 @@ const multi = { id: "build-test", file: "f", valid: true, executable: false, una
 
 const run = (overrides: Record<string, unknown> = {}) => ({
 	id: "prun_1", sessionId: "w-1", projectId: "proj", workflowId: "build-only", state: "running", currentStageId: "build", requestedBy: "user",
-	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], repairs: [], reviews: [], revision: 1,
+	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], repairs: [], reviews: [], repairGrants: [], revision: 1,
+	control: { canPause: true, canResume: false, canCancel: true, resumeNeedsUser: false, needsRepairAuthorization: false },
 	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 	stages: [{ id: "build", kind: "build", state: "active", model: "opus", settingsSource: "worker" }],
 	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] }],
@@ -288,5 +289,73 @@ describe("SessionPipelineSection", () => {
 		expect(gate).toHaveTextContent("The review requested changes");
 		expect(gate).toHaveTextContent("AO review: complete, changes requested");
 		expect(screen.getByText(/Review of bbbbbbb: changes requested \(a newer revision exists/)).toBeInTheDocument();
+	});
+	it("pauses a running pipeline as the user and shows an unconfirmed stop honestly", async () => {
+		mockGets(run());
+		postMock.mockResolvedValue({
+			data: {
+				changed: true,
+				stop: { requested: true, confirmed: false, detail: "waiting on a permission request" },
+				run: run({
+					state: "paused", pauseReason: "paused_by_user", pauseDetail: "Paused by the user", revision: 2,
+					control: { canPause: false, canResume: true, canCancel: true, resumeNeedsUser: false, needsRepairAuthorization: false, lastStop: { requested: true, confirmed: false, detail: "waiting on a permission request" } },
+				}),
+			},
+		});
+		renderSection();
+		await userEvent.click(await screen.findByRole("button", { name: "Pause" }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/pipeline/control", {
+				params: { path: { sessionId: "w-1" } },
+				body: { runId: "prun_1", requestedBy: "user", expectedRevision: 1, action: "pause" },
+			}),
+		);
+		expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+		expect(screen.getByText("Stop requested but not confirmed: waiting on a permission request")).toBeInTheDocument();
+	});
+
+	it("asks before cancelling and explains that nothing is deleted", async () => {
+		mockGets(run());
+		postMock.mockResolvedValue({ data: { changed: true, run: run({ state: "cancelled", control: { canPause: false, canResume: false, canCancel: false, resumeNeedsUser: false, needsRepairAuthorization: false } }) } });
+		renderSection();
+		await userEvent.click(await screen.findByRole("button", { name: "Cancel pipeline" }));
+		expect(await screen.findByText(/Nothing is reset or deleted/)).toBeInTheDocument();
+		expect(postMock).not.toHaveBeenCalled();
+		await userEvent.click(screen.getAllByRole("button", { name: "Cancel pipeline" }).at(-1) as HTMLElement);
+		await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/pipeline/control", expect.objectContaining({ body: expect.objectContaining({ action: "cancel", requestedBy: "user" }) })));
+	});
+
+	it("offers an explicit repair authorization instead of resume once the budget is spent", async () => {
+		mockGets(
+			run({
+				state: "paused", pauseReason: "repair_budget_exhausted", pauseDetail: "All 3 repairs used", repairsUsed: 3, repairsRemaining: 0,
+				control: { canPause: false, canResume: false, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: true },
+			}),
+		);
+		postMock.mockResolvedValue({
+			data: {
+				changed: true,
+				run: run({
+					state: "paused", pauseReason: "repair_budget_exhausted", repairBudget: 4, repairsUsed: 3, repairsRemaining: 1, revision: 2,
+					repairGrants: [{ amount: 1, authorizedBy: "user", createdAt: "2026-01-01T00:00:00Z" }],
+					control: { canPause: false, canResume: true, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: false },
+				}),
+			},
+		});
+		renderSection();
+		expect(await screen.findByRole("button", { name: "Authorize repair" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Authorize repair" }));
+		expect(await screen.findByText(/resuming never adds attempts/)).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Authorize one repair" }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/pipeline/control",
+				expect.objectContaining({ body: expect.objectContaining({ action: "authorize_repairs", additionalRepairs: 1, requestedBy: "user" }) }),
+			),
+		);
+		expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
+		expect(screen.getByText("Extra repairs authorized by you: 1")).toBeInTheDocument();
 	});
 });

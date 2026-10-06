@@ -184,7 +184,7 @@ func (s *Service) routeReviewFeedback(ctx context.Context, run domain.PipelineRu
 		fb = reviewFeedback(attempt, attempt.InputCommit, *dec.Run)
 	}
 	plan, exhausted := s.planRepair(ctx, run, snap, attempt, domain.PipelineRepairReviewFeedback, fb, attempt.InputCommit)
-	s.applyRepairOrPause(&t, run, plan, exhausted, dec.Pause, dec.Detail)
+	s.applyRepairOrPause(&t, run, plan, exhausted, dec.Pause, dec.Detail, fb)
 	_, err := s.store.CommitPipelineTransition(ctx, t)
 	if errors.Is(err, domain.ErrPipelineConflict) {
 		return nil // another writer decided first; the next pass sees the result

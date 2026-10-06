@@ -2238,6 +2238,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/pipeline/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause, resume, or cancel the task's pipeline run, or authorize additional repairs (human only) */
+        post: operations["controlSessionPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/pipeline/results": {
         parameters: {
             query?: never;
@@ -4631,6 +4648,31 @@ export interface components {
         PipelineCommandTrust: {
             trusted: boolean;
         };
+        PipelineControlRequest: {
+            /** @enum {string} */
+            action: "pause" | "resume" | "cancel" | "authorize_repairs";
+            additionalRepairs?: number;
+            /** Format: int64 */
+            expectedRevision?: number;
+            reason?: string;
+            requestKey?: string;
+            /** @enum {string} */
+            requestedBy: "user" | "orchestrator";
+            runId: string;
+        };
+        PipelineControlResponse: {
+            changed: boolean;
+            run: components["schemas"]["PipelineRunView"];
+            stop?: components["schemas"]["PipelineStopView"];
+        };
+        PipelineControlView: {
+            canCancel: boolean;
+            canPause: boolean;
+            canResume: boolean;
+            lastStop?: components["schemas"]["PipelineStopView"];
+            needsRepairAuthorization: boolean;
+            resumeNeedsUser: boolean;
+        };
         PipelineDiagnostic: {
             field?: string;
             file?: string;
@@ -4701,6 +4743,13 @@ export interface components {
             message: string;
             paths?: string[];
         };
+        PipelineRepairGrantView: {
+            amount: number;
+            authorizedBy: string;
+            /** Format: date-time */
+            createdAt: string;
+            note?: string;
+        };
         PipelineRepairView: {
             /** Format: date-time */
             createdAt: string;
@@ -4764,6 +4813,7 @@ export interface components {
             checkpoint?: components["schemas"]["PipelineCheckpointView"];
             /** Format: date-time */
             completedAt?: null | string;
+            control: components["schemas"]["PipelineControlView"];
             /** Format: date-time */
             createdAt: string;
             currentStageId?: string;
@@ -4776,6 +4826,7 @@ export interface components {
             pauseReason?: string;
             projectId: string;
             repairBudget: number;
+            repairGrants: components["schemas"]["PipelineRepairGrantView"][];
             repairs: components["schemas"]["PipelineRepairView"][];
             repairsRemaining: number;
             repairsUsed: number;
@@ -4828,6 +4879,11 @@ export interface components {
             settingsSource: string;
             /** @enum {string} */
             state: "pending" | "handoff" | "active" | "validating" | "accepted" | "failed" | "interrupted" | "paused";
+        };
+        PipelineStopView: {
+            confirmed: boolean;
+            detail?: string;
+            requested: boolean;
         };
         PipelineValidationCommand: {
             command: string;
@@ -14291,6 +14347,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineRunEnvelope"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    controlSessionPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineControlRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineControlResponse"];
                 };
             };
             /** @description Bad Request */

@@ -58,12 +58,16 @@ type RunView struct {
 	ReviewGate *ReviewGateView `json:"reviewGate,omitempty"`
 	// Reviews records, per Review attempt, the pull request head and AO review
 	// run it was bound to and how it ended.
-	Reviews     []ReviewEvidenceView `json:"reviews"`
-	Events      []EventView          `json:"events"`
-	Revision    int64                `json:"revision"`
-	CreatedAt   time.Time            `json:"createdAt"`
-	UpdatedAt   time.Time            `json:"updatedAt"`
-	CompletedAt *time.Time           `json:"completedAt,omitempty"`
+	Reviews []ReviewEvidenceView `json:"reviews"`
+	// Control says which run controls apply now and why; RepairGrants lists the
+	// human authorizations of extra repairs (resume never creates one).
+	Control      ControlView       `json:"control"`
+	RepairGrants []RepairGrantView `json:"repairGrants"`
+	Events       []EventView       `json:"events"`
+	Revision     int64             `json:"revision"`
+	CreatedAt    time.Time         `json:"createdAt"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
+	CompletedAt  *time.Time        `json:"completedAt,omitempty"`
 }
 
 // StageView is one workflow stage with its derived state and resolved settings.
@@ -206,6 +210,29 @@ type ReviewEvidenceView struct {
 	Current bool `json:"current"`
 }
 
+// ControlView reports which controls make sense right now.
+type ControlView struct {
+	CanPause  bool `json:"canPause"`
+	CanResume bool `json:"canResume"`
+	CanCancel bool `json:"canCancel"`
+	// ResumeNeedsUser is true when the current pause is a decision only a
+	// person may make; an orchestrator's resume is refused.
+	ResumeNeedsUser bool `json:"resumeNeedsUser"`
+	// NeedsRepairAuthorization is true when the repair budget is spent: resume
+	// will not grant attempts, and a person must authorize more first.
+	NeedsRepairAuthorization bool `json:"needsRepairAuthorization"`
+	// LastStop is what AO knows about the last executor it asked to stop.
+	LastStop *StopView `json:"lastStop,omitempty"`
+}
+
+// RepairGrantView is one persisted human authorization of extra repairs.
+type RepairGrantView struct {
+	Amount       int       `json:"amount"`
+	AuthorizedBy string    `json:"authorizedBy"`
+	Note         string    `json:"note,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 // RepairView is one counted return to Build.
 type RepairView struct {
 	Ordinal         int       `json:"ordinal"`
@@ -259,7 +286,7 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 		CurrentStageID: run.CurrentStageID, RequestedBy: string(run.RequestedBy), ExpectedBranch: run.ExpectedBranch,
 		RepairBudget: run.RepairBudget, RepairsUsed: run.RepairsUsed, RepairsRemaining: max(run.RepairBudget-run.RepairsUsed, 0),
 		SnapshotSHA256: run.SnapshotSHA256, SnapshotCaptured: snap.CapturedAt.Format(time.RFC3339),
-		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Repairs: []RepairView{}, Reviews: []ReviewEvidenceView{}, Events: []EventView{},
+		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Repairs: []RepairView{}, Reviews: []ReviewEvidenceView{}, RepairGrants: []RepairGrantView{}, Events: []EventView{},
 		Revision: run.Revision, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, CompletedAt: run.CompletedAt,
 	}
 	latestByStage := map[string]domain.PipelineStageAttempt{}
@@ -358,4 +385,26 @@ func commandViews(results []domain.PipelineCommandResult) []CommandResultView {
 		out = append(out, v)
 	}
 	return out
+}
+
+// buildControlView derives which controls apply from the run and its events.
+func buildControlView(run domain.PipelineRun, events []domain.PipelineEvent) ControlView {
+	c := ControlView{
+		CanPause:  run.State == domain.PipelineRunRunning,
+		CanCancel: run.State.Unfinished(),
+	}
+	if run.State == domain.PipelineRunPaused {
+		exhausted := run.PauseReason == PauseRepairBudgetExhausted && run.RepairsUsed >= run.RepairBudget
+		c.NeedsRepairAuthorization = exhausted
+		c.CanResume = !exhausted && run.PauseReason != domain.PipelinePauseSessionTerminated
+		c.ResumeNeedsUser = humanOnlyPause(run.PauseReason)
+	}
+	for _, e := range events { // newest first
+		if e.Kind == eventExecutionStop {
+			d := parseEventDetail(e.Detail)
+			c.LastStop = &StopView{Requested: true, Confirmed: d.Code == "confirmed", Detail: d.Message}
+			break
+		}
+	}
+	return c
 }

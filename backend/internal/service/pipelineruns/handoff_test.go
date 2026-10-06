@@ -47,8 +47,11 @@ type fakeExecutor struct {
 	onRelinquish  func()
 	onStart       func()
 
-	resumeErr error
-	resumed   []resumeCall
+	resumeErr    error
+	resumed      []resumeCall
+	interruptErr error
+	interrupted  []domain.SessionID
+	released     []domain.SessionID
 
 	events      []string
 	relinquish  []domain.SessionID
@@ -76,6 +79,22 @@ func (e *fakeExecutor) RelinquishExecutor(_ context.Context, id domain.SessionID
 	e.events = append(e.events, "relinquish:"+string(id))
 	e.relinquish = append(e.relinquish, id)
 	return e.relinquishErr
+}
+
+func (e *fakeExecutor) InterruptExecutor(_ context.Context, id domain.SessionID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, "interrupt:"+string(id))
+	e.interrupted = append(e.interrupted, id)
+	return e.interruptErr
+}
+
+func (e *fakeExecutor) ReleaseExecutor(_ context.Context, id domain.SessionID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, "release:"+string(id))
+	e.released = append(e.released, id)
+	return nil
 }
 
 func (e *fakeExecutor) StartStage(ctx context.Context, start ports.PipelineStageStart) (ports.PipelineStageStarted, error) {

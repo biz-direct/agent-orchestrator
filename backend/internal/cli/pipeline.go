@@ -106,6 +106,10 @@ func newPipelineCommand(ctx *commandContext) *cobra.Command {
 		newPipelineStartCommand(ctx),
 		newPipelineStatusCommand(ctx),
 		newPipelineSubmitCommand(ctx),
+		newPipelineControlCommand(ctx, "pause", "Pause the task's pipeline run and stop its active stage"),
+		newPipelineControlCommand(ctx, "resume", "Resume a paused pipeline run after revalidating the workspace"),
+		newPipelineControlCommand(ctx, "cancel", "Cancel the task's pipeline run without resetting or deleting anything"),
+		newPipelineAuthorizeRepairsCommand(ctx),
 	)
 	return cmd
 }

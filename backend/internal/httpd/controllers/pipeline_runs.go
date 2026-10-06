@@ -22,6 +22,7 @@ func (c *PipelineRunsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/pipeline", c.get)
 	r.Post("/sessions/{sessionId}/pipeline", c.start)
 	r.Post("/sessions/{sessionId}/pipeline/results", c.submit)
+	r.Post("/sessions/{sessionId}/pipeline/control", c.control)
 }
 
 func (c *PipelineRunsController) get(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +69,25 @@ func (c *PipelineRunsController) submit(w http.ResponseWriter, r *http.Request) 
 	}
 	in.SessionID = sessionID(r)
 	out, err := c.Mgr.Submit(r.Context(), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *PipelineRunsController) control(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/pipeline/control")
+		return
+	}
+	var in runssvc.ControlInput
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	in.SessionID = sessionID(r)
+	out, err := c.Mgr.Control(r.Context(), in)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

@@ -2549,5 +2549,21 @@
 	"inspector.pipeline.reviewGate.code.review_unverifiable": "AO could not inspect what it needs",
 	"inspector.pipeline.reviewGate.code.unexpected_changes": "The workspace changed while it was being reviewed",
 	"inspector.pipeline.reviewEvidence": "Review of {{revision}}: {{outcome}}",
-	"inspector.pipeline.reviewEvidenceSuperseded": "Review of {{revision}}: {{outcome}} (a newer revision exists; this no longer applies)"
+	"inspector.pipeline.reviewEvidenceSuperseded": "Review of {{revision}}: {{outcome}} (a newer revision exists; this no longer applies)",
+	"inspector.pipeline.control.pause": "Pause",
+	"inspector.pipeline.control.resume": "Resume",
+	"inspector.pipeline.control.cancel": "Cancel pipeline",
+	"inspector.pipeline.control.authorize": "Authorize repair",
+	"inspector.pipeline.control.cancelTitle": "Cancel this pipeline?",
+	"inspector.pipeline.control.cancelDescription": "The run stops. Nothing is reset or deleted: your worktree, branch, pull request, conversations, and evidence stay, and this worker keeps the task.",
+	"inspector.pipeline.control.cancelConfirm": "Cancel pipeline",
+	"inspector.pipeline.control.cancelKeep": "Keep running",
+	"inspector.pipeline.control.authorizeTitle": "Authorize one more repair?",
+	"inspector.pipeline.control.authorizeDescription": "The repair budget is spent, and resuming never adds attempts. This is your decision to let the pipeline send the failing stage back to Build one more time.",
+	"inspector.pipeline.control.authorizeConfirm": "Authorize one repair",
+	"inspector.pipeline.control.stopUnconfirmed": "Stop requested but not confirmed: {{detail}}",
+	"inspector.pipeline.control.stopConfirmed": "The active stage was stopped.",
+	"inspector.pipeline.control.failed": "The pipeline could not be updated.",
+	"inspector.pipeline.control.humanOnly": "This pause needs your decision; only you can resume it.",
+	"inspector.pipeline.control.grants": "Extra repairs authorized by you: {{count}}"
 }

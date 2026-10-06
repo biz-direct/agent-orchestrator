@@ -6549,6 +6549,64 @@ paths:
       summary: Start a snapshotted pipeline run on an existing worker task
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/pipeline/control:
+    post:
+      operationId: controlSessionPipeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineControlRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineControlResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Pause, resume, or cancel the task's pipeline run, or authorize additional
+        repairs (human only)
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/pipeline/results:
     post:
       operationId: submitSessionPipelineResult
@@ -13564,6 +13622,69 @@ components:
       required:
       - trusted
       type: object
+    PipelineControlRequest:
+      properties:
+        action:
+          enum:
+          - pause
+          - resume
+          - cancel
+          - authorize_repairs
+          type: string
+        additionalRepairs:
+          type: integer
+        expectedRevision:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        requestKey:
+          type: string
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        runId:
+          type: string
+      required:
+      - runId
+      - action
+      - requestedBy
+      type: object
+    PipelineControlResponse:
+      properties:
+        changed:
+          type: boolean
+        run:
+          $ref: '#/components/schemas/PipelineRunView'
+        stop:
+          $ref: '#/components/schemas/PipelineStopView'
+      required:
+      - run
+      - changed
+      type: object
+    PipelineControlView:
+      properties:
+        canCancel:
+          type: boolean
+        canPause:
+          type: boolean
+        canResume:
+          type: boolean
+        lastStop:
+          $ref: '#/components/schemas/PipelineStopView'
+        needsRepairAuthorization:
+          type: boolean
+        resumeNeedsUser:
+          type: boolean
+      required:
+      - canPause
+      - canResume
+      - canCancel
+      - resumeNeedsUser
+      - needsRepairAuthorization
+      type: object
     PipelineDiagnostic:
       properties:
         field:
@@ -13756,6 +13877,22 @@ components:
       - message
       - at
       type: object
+    PipelineRepairGrantView:
+      properties:
+        amount:
+          type: integer
+        authorizedBy:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        note:
+          type: string
+      required:
+      - amount
+      - authorizedBy
+      - createdAt
+      type: object
     PipelineRepairView:
       properties:
         createdAt:
@@ -13924,6 +14061,8 @@ components:
           type:
           - "null"
           - string
+        control:
+          $ref: '#/components/schemas/PipelineControlView'
         createdAt:
           format: date-time
           type: string
@@ -13951,6 +14090,10 @@ components:
           type: string
         repairBudget:
           type: integer
+        repairGrants:
+          items:
+            $ref: '#/components/schemas/PipelineRepairGrantView'
+          type: array
         repairs:
           items:
             $ref: '#/components/schemas/PipelineRepairView'
@@ -14012,6 +14155,8 @@ components:
       - evidence
       - repairs
       - reviews
+      - control
+      - repairGrants
       - events
       - revision
       - createdAt
@@ -14112,6 +14257,18 @@ components:
       - kind
       - settingsSource
       - state
+      type: object
+    PipelineStopView:
+      properties:
+        confirmed:
+          type: boolean
+        detail:
+          type: string
+        requested:
+          type: boolean
+      required:
+      - requested
+      - confirmed
       type: object
     PipelineValidationCommand:
       properties:

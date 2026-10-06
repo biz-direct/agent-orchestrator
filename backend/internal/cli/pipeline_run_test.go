@@ -210,3 +210,66 @@ func TestPipelineStatusShowsCurrentHeadReviewReadiness(t *testing.T) {
 		}
 	}
 }
+
+func TestPipelineControlCommandsSendConditionalIdempotentRequests(t *testing.T) {
+	var bodies []pipelineControlRequestDTO
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{"run":{"id":"prun_1","workflowId":"wf","state":"paused","pauseReason":"repair_budget_exhausted","revision":7,"repairBudget":3,"repairsUsed":3,"repairsRemaining":0,"stages":[],"attempts":[],"repairs":[],"reviews":[],"repairGrants":[],"control":{"canPause":false,"canResume":false,"canCancel":true,"resumeNeedsUser":true,"needsRepairAuthorization":true}}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/w-1/pipeline/control":
+			var b pipelineControlRequestDTO
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			bodies = append(bodies, b)
+			_, _ = io.WriteString(w, `{"changed":false,"stop":{"requested":true,"confirmed":false,"detail":"waiting on a permission request"},"run":{"id":"prun_1","workflowId":"wf","state":"paused","revision":8,"stages":[],"attempts":[],"repairs":[],"reviews":[],"repairGrants":[],"control":{}}}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+
+	t.Setenv("AO_SESSION_ID", "")
+	out, _, err := executeCLI(t, deps, "pipeline", "pause", "--session", "w-1", "--reason", "lunch")
+	if err != nil || len(bodies) != 1 {
+		t.Fatalf("pause: err=%v bodies=%d", err, len(bodies))
+	}
+	if b := bodies[0]; b.Action != "pause" || b.RunID != "prun_1" || b.RequestedBy != "user" || b.ExpectedRevision != 7 || b.Reason != "lunch" {
+		t.Fatalf("request: %+v", b)
+	}
+	for _, want := range []string{"already paused (no change)", "not confirmed stopped", "waiting on a permission request"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	if _, _, err := executeCLI(t, deps, "pipeline", "authorize-repairs", "--session", "w-1", "--count", "2", "--request-key", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies[1]; b.Action != "authorize_repairs" || b.AdditionalRepairs != 2 || b.RequestKey != "k1" || b.RequestedBy != "user" {
+		t.Fatalf("authorize request: %+v", b)
+	}
+	// The default request key is stable, so an accidental repeat is not a second grant.
+	for i := 0; i < 2; i++ {
+		if _, _, err := executeCLI(t, deps, "pipeline", "authorize-repairs", "--session", "w-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if bodies[2].RequestKey == "" || bodies[2].RequestKey != bodies[3].RequestKey {
+		t.Fatalf("default keys: %q %q", bodies[2].RequestKey, bodies[3].RequestKey)
+	}
+
+	// Inside an AO session the caller is an orchestrator: it can pause, but it
+	// cannot authorize repairs.
+	t.Setenv("AO_SESSION_ID", "orchestrator-1")
+	if _, _, err := executeCLI(t, deps, "pipeline", "resume", "--session", "w-1"); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies[len(bodies)-1]; b.Action != "resume" || b.RequestedBy != "orchestrator" {
+		t.Fatalf("an agent identifies itself as an orchestrator: %+v", b)
+	}
+	n := len(bodies)
+	if _, _, err := executeCLI(t, deps, "pipeline", "authorize-repairs", "--session", "w-1"); err == nil || ExitCode(err) != 2 || len(bodies) != n {
+		t.Fatalf("authorizing repairs is user-only and must not reach the daemon: %v", err)
+	}
+}

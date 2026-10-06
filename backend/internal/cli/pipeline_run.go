@@ -40,6 +40,46 @@ type pipelineRunDTO struct {
 	Repairs          []pipelineRepairDTO      `json:"repairs"`
 	ReviewGate       *pipelineReviewGateDTO   `json:"reviewGate,omitempty"`
 	Reviews          []pipelineReviewEvidence `json:"reviews"`
+	Control          pipelineControlDTO       `json:"control"`
+	RepairGrants     []pipelineGrantDTO       `json:"repairGrants"`
+	Revision         int64                    `json:"revision"`
+}
+
+type pipelineControlDTO struct {
+	CanPause                 bool             `json:"canPause"`
+	CanResume                bool             `json:"canResume"`
+	CanCancel                bool             `json:"canCancel"`
+	ResumeNeedsUser          bool             `json:"resumeNeedsUser"`
+	NeedsRepairAuthorization bool             `json:"needsRepairAuthorization"`
+	LastStop                 *pipelineStopDTO `json:"lastStop,omitempty"`
+}
+
+type pipelineStopDTO struct {
+	Requested bool   `json:"requested"`
+	Confirmed bool   `json:"confirmed"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+type pipelineGrantDTO struct {
+	Amount       int    `json:"amount"`
+	AuthorizedBy string `json:"authorizedBy"`
+	Note         string `json:"note,omitempty"`
+}
+
+type pipelineControlRequestDTO struct {
+	RunID             string `json:"runId"`
+	Action            string `json:"action"`
+	RequestedBy       string `json:"requestedBy"`
+	ExpectedRevision  int64  `json:"expectedRevision,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	AdditionalRepairs int    `json:"additionalRepairs,omitempty"`
+	RequestKey        string `json:"requestKey,omitempty"`
+}
+
+type pipelineControlResultDTO struct {
+	Run     pipelineRunDTO   `json:"run"`
+	Changed bool             `json:"changed"`
+	Stop    *pipelineStopDTO `json:"stop,omitempty"`
 }
 
 type pipelineReviewGateDTO struct {
@@ -251,6 +291,127 @@ func newPipelineStatusCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
+// runControl reads the task's current run and sends one control request for it.
+func runControl(cmd *cobra.Command, ctx *commandContext, session string, build func(run *pipelineRunDTO) pipelineControlRequestDTO) (pipelineControlResultDTO, error) {
+	id, err := pipelineSessionID(session)
+	if err != nil {
+		return pipelineControlResultDTO{}, err
+	}
+	var current pipelineRunEnvelopeDTO
+	if err := ctx.getJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/pipeline", &current); err != nil {
+		return pipelineControlResultDTO{}, err
+	}
+	if current.Run == nil {
+		return pipelineControlResultDTO{}, errors.New("this task has no pipeline run to control")
+	}
+	req := build(current.Run)
+	req.RunID, req.RequestedBy = current.Run.ID, pipelineRequester()
+	var res pipelineControlResultDTO
+	if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/pipeline/control", req, &res); err != nil {
+		return pipelineControlResultDTO{}, err
+	}
+	return res, nil
+}
+
+func writeControlResult(cmd *cobra.Command, res pipelineControlResultDTO, verb string, jsonOutput bool) error {
+	if jsonOutput {
+		return writeJSON(cmd.OutOrStdout(), res)
+	}
+	note := verb
+	if !res.Changed {
+		note = "already " + verb + " (no change)"
+	}
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "run %s: %s\n", res.Run.ID, note); err != nil {
+		return err
+	}
+	if s := res.Stop; s != nil {
+		state := "not confirmed stopped"
+		if s.Confirmed {
+			state = "confirmed stopped"
+		}
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "executor: %s - %s\n", state, s.Detail); err != nil {
+			return err
+		}
+	}
+	return writePipelineRun(cmd.OutOrStdout(), &res.Run)
+}
+
+func newPipelineControlCommand(ctx *commandContext, action, short string) *cobra.Command {
+	var session, reason string
+	var jsonOutput bool
+	verbs := map[string]string{"pause": "paused", "resume": "resumed", "cancel": "cancelled"}
+	long := short + ". Requests are idempotent and refused when stale. "
+	switch action {
+	case "resume":
+		long += "Resume revalidates the branch, history, and ownership first; it never replays a turn, never starts a fresh conversation in place of a lost one, and never grants additional repair attempts. Pauses that are recovery decisions can only be resumed by a person at a shell."
+	case "cancel":
+		long += "Cancel never resets the worktree, deletes files, closes the pull request, or removes conversations; the original worker keeps the task."
+	default:
+		long += "Pausing interrupts the active stage's executor and reports honestly whether it was confirmed stopped; a pending permission prompt is left for you to answer."
+	}
+	cmd := &cobra.Command{
+		Use:   action,
+		Short: short,
+		Long:  long,
+		Args:  usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			res, err := runControl(cmd, ctx, session, func(run *pipelineRunDTO) pipelineControlRequestDTO {
+				return pipelineControlRequestDTO{Action: action, Reason: reason, ExpectedRevision: run.Revision}
+			})
+			if err != nil {
+				return err
+			}
+			return writeControlResult(cmd, res, verbs[action], jsonOutput)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&session, "session", "", "Worker session id (default: AO_SESSION_ID)")
+	f.StringVar(&reason, "reason", "", "Why (recorded with the run)")
+	f.BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
+}
+
+func newPipelineAuthorizeRepairsCommand(ctx *commandContext) *cobra.Command {
+	var session, reason, key string
+	var count int
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "authorize-repairs",
+		Short: "Authorize additional automatic repairs after the repair budget is spent (user only)",
+		Long: "Record your authorization of additional automatic returns to Build for a run paused with an exhausted repair budget. " +
+			"Only a person at a shell can do this; resume never extends the budget. Run `ao pipeline resume` afterwards to apply it.",
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if pipelineRequester() != "user" {
+				return usageError{errors.New("authorizing additional repairs is user-only and cannot be done from inside an AO session")}
+			}
+			if count < 1 {
+				return usageError{errors.New("--count must be at least 1")}
+			}
+			requestKey := strings.TrimSpace(key)
+			res, err := runControl(cmd, ctx, session, func(run *pipelineRunDTO) pipelineControlRequestDTO {
+				if requestKey == "" {
+					// Stable per run state so an accidental repeat is not granted twice.
+					sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%d", run.ID, run.Revision, count, len(run.RepairGrants))))
+					requestKey = hex.EncodeToString(sum[:12])
+				}
+				return pipelineControlRequestDTO{Action: "authorize_repairs", Reason: reason, AdditionalRepairs: count, RequestKey: requestKey, ExpectedRevision: run.Revision}
+			})
+			if err != nil {
+				return err
+			}
+			return writeControlResult(cmd, res, "authorized", jsonOutput)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&session, "session", "", "Worker session id (default: AO_SESSION_ID)")
+	f.IntVar(&count, "count", 1, "Number of additional repairs to authorize")
+	f.StringVar(&reason, "reason", "", "Why (recorded with the authorization)")
+	f.StringVar(&key, "request-key", "", "Idempotency key; repeating the same key never grants twice")
+	f.BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
+}
+
 func newPipelineSubmitCommand(ctx *commandContext) *cobra.Command {
 	var session, outcome, summary, reportFile string
 	var jsonOutput bool
@@ -348,7 +509,7 @@ func writePipelineRun(w io.Writer, run *pipelineRunDTO) error {
 	if _, err := fmt.Fprintf(w, "run %s  workflow %s  %s  branch %s\n", run.ID, run.WorkflowID, status, run.ExpectedBranch); err != nil {
 		return err
 	}
-	if run.PauseDetail != "" {
+	if run.PauseDetail != "" && run.State == "paused" {
 		if _, err := fmt.Fprintf(w, "paused: %s\n", run.PauseDetail); err != nil {
 			return err
 		}

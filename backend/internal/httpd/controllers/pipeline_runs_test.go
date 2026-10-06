@@ -139,6 +139,83 @@ func TestPipelineRunsAPI_StartInspectSubmit(t *testing.T) {
 	}
 }
 
+func TestPipelineRunsAPI_Control(t *testing.T) {
+	repo := t.TempDir()
+	gitCmd(t, repo, "init", "-q", "-b", "task")
+	writeRepoFile(t, repo, "README.md", "x\n")
+	writeRepoFile(t, repo, ".ao/pipelines/workflows/build-only.yaml", "version: 1\nid: build-only\ndescription: d\nstages:\n  - {id: build, kind: build}\n")
+	gitCmd(t, repo, "add", "-A")
+	gitCmd(t, repo, "commit", "-q", "-m", "init")
+	store := sqlitetest.MustOpen(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "proj", Path: repo, RegisteredAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "proj", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode, Mode: domain.SessionModeChat,
+		Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: now},
+		Metadata: domain.SessionMetadata{WorkspacePath: repo, ControllerGeneration: "gen-1"}, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{
+		PipelineRuns: pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: &captureMessenger{}}),
+	}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	base := "/api/v1/sessions/" + string(sess.ID) + "/pipeline"
+
+	body, status, _ := doRequest(t, srv, "POST", base+"/control", `{"runId":"prun_x","action":"pause","requestedBy":"user"}`)
+	assertErrorCode(t, body, status, http.StatusNotFound, "PIPELINE_RUN_NOT_FOUND")
+
+	body, status, _ = doRequest(t, srv, "POST", base, `{"workflowId":"build-only","requestedBy":"user"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("start = %d %s", status, body)
+	}
+	var started struct {
+		Run struct {
+			ID       string `json:"id"`
+			Revision int64  `json:"revision"`
+		} `json:"run"`
+	}
+	mustJSON(t, body, &started)
+	control := func(action, by string, extra string) ([]byte, int) {
+		b, st, _ := doRequest(t, srv, "POST", base+"/control", `{"runId":"`+started.Run.ID+`","action":"`+action+`","requestedBy":"`+by+`"`+extra+`}`)
+		return b, st
+	}
+
+	body, status = control("pause", "user", `,"reason":"lunch"`)
+	if status != http.StatusOK || !strings.Contains(string(body), `"changed":true`) || !strings.Contains(string(body), `"pauseReason":"paused_by_user"`) || !strings.Contains(string(body), `"canResume":true`) {
+		t.Fatalf("pause = %d %s", status, body)
+	}
+	body, status = control("pause", "user", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"changed":false`) {
+		t.Fatalf("a repeated pause is idempotent: %d %s", status, body)
+	}
+	body, status = control("resume", "user", `,"expectedRevision":1`)
+	assertErrorCode(t, body, status, http.StatusConflict, "PIPELINE_STALE_CONTROL")
+	body, status = control("authorize_repairs", "orchestrator", `,"additionalRepairs":1,"requestKey":"k"`)
+	assertErrorCode(t, body, status, http.StatusForbidden, "PIPELINE_HUMAN_AUTHORIZATION_REQUIRED")
+	body, status = control("resume", "orchestrator", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"state":"running"`) {
+		t.Fatalf("resume = %d %s", status, body)
+	}
+	body, status = control("cancel", "user", `,"reason":"changed my mind"`)
+	if status != http.StatusOK || !strings.Contains(string(body), `"state":"cancelled"`) {
+		t.Fatalf("cancel = %d %s", status, body)
+	}
+	body, status = control("cancel", "user", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"changed":false`) {
+		t.Fatalf("a repeated cancel is idempotent: %d %s", status, body)
+	}
+	body, status = control("resume", "user", "")
+	assertErrorCode(t, body, status, http.StatusConflict, "PIPELINE_RUN_FINISHED")
+	body, status, _ = doRequest(t, srv, "POST", base+"/control", `{"runId":"`+started.Run.ID+`","action":"nope","requestedBy":"user"}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "INVALID_PIPELINE_CONTROL")
+}
+
 func TestPipelineRunsRoutes_DefaultToStubsWithoutManager(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{}, httpd.ControlDeps{}))

@@ -80,6 +80,29 @@ func (m *Manager) PreflightStage(ctx context.Context, harness domain.AgentHarnes
 // fenced; anything unprovable is returned as an uncertainty and the handoff
 // pauses instead of risking two writers.
 func (m *Manager) RelinquishExecutor(ctx context.Context, id domain.SessionID) error {
+	return m.quiesceExecutor(ctx, id, domain.SessionInterfaceTransitionDrain)
+}
+
+// InterruptExecutor implements ports.PipelineExecutor. It interrupts the
+// running turn (and settles queued turns, which are recorded as cancelled)
+// before applying the same proof as RelinquishExecutor. The controller stays
+// fenced; the caller decides whether to ReleaseExecutor.
+func (m *Manager) InterruptExecutor(ctx context.Context, id domain.SessionID) error {
+	return m.quiesceExecutor(ctx, id, domain.SessionInterfaceTransitionInterrupt)
+}
+
+// ReleaseExecutor implements ports.PipelineExecutor.
+func (m *Manager) ReleaseExecutor(ctx context.Context, id domain.SessionID) error {
+	if m.chat == nil {
+		return nil
+	}
+	if handoff, supported := m.chat.(chatHandoffLauncher); supported {
+		handoff.AbortChatHandoff(id)
+	}
+	return nil
+}
+
+func (m *Manager) quiesceExecutor(ctx context.Context, id domain.SessionID, policy domain.SessionInterfaceTransitionPolicy) error {
 	uncertain := func(format string, args ...any) error {
 		return fmt.Errorf("%w: %s", ports.ErrPipelineExecutionUncertain, fmt.Sprintf(format, args...))
 	}
@@ -102,12 +125,12 @@ func (m *Manager) RelinquishExecutor(ctx context.Context, id domain.SessionID) e
 		case !supported:
 			return uncertain("the Chat controller cannot be fenced in this build")
 		default:
-			if err := handoff.ArmChatHandoff(ctx, id, domain.SessionInterfaceTransitionDrain); err != nil {
+			if err := handoff.ArmChatHandoff(ctx, id, policy); err != nil {
 				return uncertain("could not close the controller's intake: %v", err)
 			}
 			drainCtx, cancel := context.WithTimeout(ctx, pipelineRelinquishTimeout)
 			defer cancel()
-			if err := handoff.PrepareChatHandoff(drainCtx, id, domain.SessionInterfaceTransitionDrain); err != nil {
+			if err := handoff.PrepareChatHandoff(drainCtx, id, policy); err != nil {
 				// The fence stays closed: the executor must not resume on its own.
 				return uncertain("the controller did not drain: %v", err)
 			}

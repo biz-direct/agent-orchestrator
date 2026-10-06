@@ -18,7 +18,7 @@ SET state = 'active',
     controller_generation = ?2,
     started_at = ?3
 WHERE id = ?4 AND state = 'handoff'
-RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id
 `
 
 type ActivatePipelineStageAttemptParams struct {
@@ -59,6 +59,7 @@ func (q *Queries) ActivatePipelineStageAttempt(ctx context.Context, arg Activate
 		&i.RepairSourceAttemptID,
 		&i.ReturnStageID,
 		&i.FeedbackJson,
+		&i.RetryOfAttemptID,
 	)
 	return i, err
 }
@@ -174,6 +175,34 @@ func (q *Queries) CreatePipelineRepair(ctx context.Context, arg CreatePipelineRe
 	return err
 }
 
+const createPipelineRepairGrant = `-- name: CreatePipelineRepairGrant :exec
+INSERT INTO pipeline_repair_grants (id, run_id, amount, authorized_by, request_key, note, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreatePipelineRepairGrantParams struct {
+	ID           string
+	RunID        string
+	Amount       int64
+	AuthorizedBy string
+	RequestKey   string
+	Note         string
+	CreatedAt    time.Time
+}
+
+func (q *Queries) CreatePipelineRepairGrant(ctx context.Context, arg CreatePipelineRepairGrantParams) error {
+	_, err := q.db.ExecContext(ctx, createPipelineRepairGrant,
+		arg.ID,
+		arg.RunID,
+		arg.Amount,
+		arg.AuthorizedBy,
+		arg.RequestKey,
+		arg.Note,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const createPipelineRun = `-- name: CreatePipelineRun :one
 INSERT INTO pipeline_runs (
     id, session_id, project_id, workflow_id, state, pause_reason, pause_detail,
@@ -244,10 +273,10 @@ const createPipelineStageAttempt = `-- name: CreatePipelineStageAttempt :one
 INSERT INTO pipeline_stage_attempts (
     id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id,
     controller_generation, input_commit, instruction_delivery, started_at, predecessor_attempt_id,
-    repair_source_attempt_id, return_stage_id, feedback_json
+    repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
-RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id
 `
 
 type CreatePipelineStageAttemptParams struct {
@@ -265,6 +294,7 @@ type CreatePipelineStageAttemptParams struct {
 	RepairSourceAttemptID string
 	ReturnStageID         string
 	FeedbackJson          string
+	RetryOfAttemptID      string
 }
 
 func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipelineStageAttemptParams) (PipelineStageAttempt, error) {
@@ -283,6 +313,7 @@ func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipe
 		arg.RepairSourceAttemptID,
 		arg.ReturnStageID,
 		arg.FeedbackJson,
+		arg.RetryOfAttemptID,
 	)
 	var i PipelineStageAttempt
 	err := row.Scan(
@@ -308,6 +339,7 @@ func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipe
 		&i.RepairSourceAttemptID,
 		&i.ReturnStageID,
 		&i.FeedbackJson,
+		&i.RetryOfAttemptID,
 	)
 	return i, err
 }
@@ -355,9 +387,10 @@ SET state = ?1,
     summary = ?5,
     result_key = ?6,
     result_json = ?7,
-    finished_at = ?8
-WHERE id = ?9 AND state IN ('active', 'handoff', 'validating')
-RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json
+    feedback_json = CASE WHEN ?8 <> '' THEN ?8 ELSE feedback_json END,
+    finished_at = ?9
+WHERE id = ?10 AND state IN ('active', 'handoff', 'validating')
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id
 `
 
 type FinishPipelineStageAttemptParams struct {
@@ -368,6 +401,7 @@ type FinishPipelineStageAttemptParams struct {
 	Summary      string
 	ResultKey    string
 	ResultJson   string
+	FeedbackJson interface{}
 	FinishedAt   sql.NullTime
 	ID           string
 }
@@ -381,6 +415,7 @@ func (q *Queries) FinishPipelineStageAttempt(ctx context.Context, arg FinishPipe
 		arg.Summary,
 		arg.ResultKey,
 		arg.ResultJson,
+		arg.FeedbackJson,
 		arg.FinishedAt,
 		arg.ID,
 	)
@@ -408,6 +443,7 @@ func (q *Queries) FinishPipelineStageAttempt(ctx context.Context, arg FinishPipe
 		&i.RepairSourceAttemptID,
 		&i.ReturnStageID,
 		&i.FeedbackJson,
+		&i.RetryOfAttemptID,
 	)
 	return i, err
 }
@@ -526,7 +562,7 @@ func (q *Queries) GetPipelineRun(ctx context.Context, id string) (PipelineRun, e
 }
 
 const getPipelineStageAttempt = `-- name: GetPipelineStageAttempt :one
-SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json FROM pipeline_stage_attempts WHERE id = ?
+SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id FROM pipeline_stage_attempts WHERE id = ?
 `
 
 func (q *Queries) GetPipelineStageAttempt(ctx context.Context, id string) (PipelineStageAttempt, error) {
@@ -555,6 +591,7 @@ func (q *Queries) GetPipelineStageAttempt(ctx context.Context, id string) (Pipel
 		&i.RepairSourceAttemptID,
 		&i.ReturnStageID,
 		&i.FeedbackJson,
+		&i.RetryOfAttemptID,
 	)
 	return i, err
 }
@@ -654,6 +691,41 @@ func (q *Queries) ListPipelineEvents(ctx context.Context, arg ListPipelineEvents
 	return items, nil
 }
 
+const listPipelineRepairGrants = `-- name: ListPipelineRepairGrants :many
+SELECT id, run_id, amount, authorized_by, request_key, note, created_at FROM pipeline_repair_grants WHERE run_id = ? ORDER BY created_at, id
+`
+
+func (q *Queries) ListPipelineRepairGrants(ctx context.Context, runID string) ([]PipelineRepairGrant, error) {
+	rows, err := q.db.QueryContext(ctx, listPipelineRepairGrants, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PipelineRepairGrant{}
+	for rows.Next() {
+		var i PipelineRepairGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.Amount,
+			&i.AuthorizedBy,
+			&i.RequestKey,
+			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPipelineRepairs = `-- name: ListPipelineRepairs :many
 SELECT id, run_id, ordinal, source_attempt_id, source_stage_id, kind, target_stage_id, return_stage_id, created_at FROM pipeline_repairs WHERE run_id = ? ORDER BY ordinal
 `
@@ -727,7 +799,7 @@ func (q *Queries) ListPipelineReviewLinks(ctx context.Context, runID string) ([]
 }
 
 const listPipelineStageAttempts = `-- name: ListPipelineStageAttempts :many
-SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json FROM pipeline_stage_attempts WHERE run_id = ? ORDER BY started_at, attempt_no, id
+SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id FROM pipeline_stage_attempts WHERE run_id = ? ORDER BY started_at, attempt_no, id
 `
 
 func (q *Queries) ListPipelineStageAttempts(ctx context.Context, runID string) ([]PipelineStageAttempt, error) {
@@ -762,6 +834,7 @@ func (q *Queries) ListPipelineStageAttempts(ctx context.Context, runID string) (
 			&i.RepairSourceAttemptID,
 			&i.ReturnStageID,
 			&i.FeedbackJson,
+			&i.RetryOfAttemptID,
 		); err != nil {
 			return nil, err
 		}
@@ -907,8 +980,9 @@ SET state = ?1,
     updated_at = ?5,
     completed_at = ?6,
     repairs_used = repairs_used + ?7,
+    repair_budget = repair_budget + ?8,
     revision = revision + 1
-WHERE id = ?8 AND revision = ?9
+WHERE id = ?9 AND revision = ?10
 RETURNING id, session_id, project_id, workflow_id, state, pause_reason, pause_detail, current_stage_id, requested_by, expected_branch, repair_budget, repairs_used, snapshot, snapshot_sha256, revision, created_at, updated_at, completed_at
 `
 
@@ -920,6 +994,7 @@ type SetPipelineRunStateParams struct {
 	UpdatedAt        time.Time
 	CompletedAt      sql.NullTime
 	RepairsDelta     int64
+	BudgetDelta      int64
 	ID               string
 	ExpectedRevision int64
 }
@@ -933,6 +1008,7 @@ func (q *Queries) SetPipelineRunState(ctx context.Context, arg SetPipelineRunSta
 		arg.UpdatedAt,
 		arg.CompletedAt,
 		arg.RepairsDelta,
+		arg.BudgetDelta,
 		arg.ID,
 		arg.ExpectedRevision,
 	)
@@ -970,7 +1046,7 @@ SET state = 'validating',
     result_key = ?5,
     result_json = ?6
 WHERE id = ?7 AND state = 'active'
-RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json, repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id
 `
 
 type StartPipelineAttemptValidationParams struct {
@@ -1017,6 +1093,7 @@ func (q *Queries) StartPipelineAttemptValidation(ctx context.Context, arg StartP
 		&i.RepairSourceAttemptID,
 		&i.ReturnStageID,
 		&i.FeedbackJson,
+		&i.RetryOfAttemptID,
 	)
 	return i, err
 }

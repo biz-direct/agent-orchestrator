@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -134,21 +135,41 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 		if err != nil {
 			return err
 		}
-		return s.driveValidation(ctx, run, *validating, snap)
+		vctx, cancel := context.WithCancel(ctx)
+		s.validations.Store(run.ID, cancel)
+		defer func() {
+			s.validations.Delete(run.ID)
+			cancel()
+		}()
+		return s.driveValidation(vctx, run, *validating, snap)
 	}
 	if pending == nil || pending.StageID != run.CurrentStageID {
 		return nil
 	}
 	// A repair hands off from the failed attempt that sent the task back; every
 	// other handoff is from an accepted predecessor.
-	isRepair := pending.RepairSourceAttemptID != ""
-	predID, wantState := pending.PredecessorAttemptID, domain.PipelineAttemptAccepted
-	if isRepair {
-		predID, wantState = pending.RepairSourceAttemptID, domain.PipelineAttemptFailed
+	// A resumed attempt continues the interrupted one it names: the same
+	// executor, the same conversation, no replay.
+	isRetry := pending.RetryOfAttemptID != ""
+	isRepair := pending.RepairSourceAttemptID != "" && !isRetry
+	predID, wantStates := pending.PredecessorAttemptID, []domain.PipelineAttemptState{domain.PipelineAttemptAccepted}
+	switch {
+	case isRetry:
+		predID, wantStates = pending.RetryOfAttemptID, []domain.PipelineAttemptState{domain.PipelineAttemptInterrupted, domain.PipelineAttemptFailed, domain.PipelineAttemptCancelled}
+	case isRepair:
+		predID, wantStates = pending.RepairSourceAttemptID, []domain.PipelineAttemptState{domain.PipelineAttemptFailed}
 	}
 	pred, ok := byID[predID]
-	if !ok || pred.State != wantState {
+	if !ok || !slices.Contains(wantStates, pred.State) {
 		return s.pauseHandoff(ctx, run, pending, PauseHandoffUncertain, "The handoff has no settled predecessor to hand off from")
+	}
+	// The brief a successor reads names the accepted work it builds on, which
+	// for a retry is the original predecessor, not the interrupted attempt.
+	promptPred := pred
+	if isRetry {
+		if orig, found := byID[pending.PredecessorAttemptID]; found {
+			promptPred = orig
+		}
 	}
 	snap, err := parseSnapshot(run.Snapshot)
 	if err != nil {
@@ -183,7 +204,7 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	// turn, queue, approval, or background work remains.
 	// A Review predecessor has no executor to fence: the writer was stopped when
 	// Review began and stays stopped until the repair resumes it below.
-	if pred.StageKind != string(pipeline.StageReview) {
+	if pred.StageKind != string(pipeline.StageReview) && pred.ExecutorSessionID != "" {
 		if err := s.executor.RelinquishExecutor(ctx, pred.ExecutorSessionID); err != nil {
 			reason, detail := PauseHandoffUncertain, fmt.Sprintf("Could not prove stage %q stopped executing: %v", pred.StageID, err)
 			if errors.Is(err, ports.ErrPipelineExecutionUncertain) {
@@ -202,6 +223,20 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	switch {
 	case state.Branch != run.ExpectedBranch:
 		return s.pauseHandoff(ctx, run, pending, PauseUnexpectedChanges, fmt.Sprintf("The workspace is on %q, expected %q", branchLabel(state.Branch), run.ExpectedBranch))
+	case isRetry && stage.Kind != pipeline.StageReview:
+		// The same executor continues its own work: uncommitted edits are its own
+		// and the head may have moved on, but history must still descend from the
+		// stage's input revision.
+		if state.Head != pending.InputCommit {
+			descends, derr := s.git.IsAncestor(ctx, owner.Metadata.WorkspacePath, pending.InputCommit, state.Head)
+			if derr != nil || !descends {
+				return s.pauseHandoff(ctx, run, pending, PauseUnexpectedChanges, fmt.Sprintf("HEAD %s does not descend from stage %q's input revision %s; the stage cannot continue safely", shortCommit(state.Head), stage.ID, shortCommit(pending.InputCommit)))
+			}
+		}
+	case isRetry:
+		if state.TrackedTotal > 0 || state.Head != pending.InputCommit {
+			return s.pauseHandoff(ctx, run, pending, PauseUnexpectedChanges, fmt.Sprintf("The workspace no longer matches the checkpoint %s the review resumes at", shortCommit(pending.InputCommit)))
+		}
 	case state.DirtyTotal > 0:
 		return s.pauseHandoff(ctx, run, pending, PauseUnexpectedChanges, fmt.Sprintf("The workspace has %d uncommitted path(s) after stage %q was accepted; they are preserved, not reset", state.DirtyTotal, pred.StageID))
 	case state.Head != pred.OutputCommit:
@@ -222,16 +257,24 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 		// the worktree is the checkpoint, and AO's reviewer takes it from there.
 	case stage.Kind == pipeline.StageBuild:
 		resumed = true
-		started, err = s.executor.ResumeExecutor(ctx, run.SessionID, s.repairPromptFor(ctx, run, *pending))
+		prompt := s.repairPromptFor(ctx, run, *pending)
+		if isRetry {
+			prompt = resumeNote(run, *pending) + s.buildResumePrompt(ctx, run, *pending, snap, stage)
+		}
+		started, err = s.executor.ResumeExecutor(ctx, run.SessionID, prompt)
 	case existing != "":
 		resumed = true
-		started, err = s.executor.ResumeExecutor(ctx, existing, specialistPrompt(owner, run, pred, *pending, stage))
+		prompt := specialistPrompt(owner, run, promptPred, *pending, stage)
+		if isRetry {
+			prompt = resumeNote(run, *pending) + prompt
+		}
+		started, err = s.executor.ResumeExecutor(ctx, existing, prompt)
 	default:
 		started, err = s.executor.StartStage(ctx, ports.PipelineStageStart{
 			RunID: run.ID, StageID: stage.ID, AttemptID: pending.ID, Owner: run.SessionID,
 			Harness: domain.AgentHarness(stage.Harness), Model: stage.Model,
 			SystemPrompt: specialistSystemPrompt(snap, stage, run),
-			Prompt:       specialistPrompt(owner, run, pred, *pending, stage),
+			Prompt:       specialistPrompt(owner, run, promptPred, *pending, stage),
 		})
 	}
 	if err != nil {
@@ -371,4 +414,19 @@ func (s *Service) repairPromptFor(ctx context.Context, run domain.PipelineRun, a
 		}
 	}
 	return repairPrompt(run, repair, *fb)
+}
+
+// resumeNote opens the prompt of a resumed stage: it says what happened, that
+// the earlier turn is not repeated, and that the repository is the source of truth.
+func resumeNote(run domain.PipelineRun, attempt domain.PipelineStageAttempt) string {
+	return fmt.Sprintf("AO paused this pipeline run (%s) and has now resumed stage %q as attempt %d (id %s). Your earlier turn is not replayed. Look at the repository (git status and git log) to see what you already did, continue from there, and submit your result when the stage is complete.\n\n", run.ID, attempt.StageID, attempt.AttemptNo, attempt.ID)
+}
+
+// buildResumePrompt is the Build stage's own instruction for a resumed attempt:
+// the repair feedback when it is a repair, otherwise the stage instruction.
+func (s *Service) buildResumePrompt(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, snap Snapshot, stage SnapshotStage) string {
+	if attempt.FeedbackJSON != "" {
+		return s.repairPromptFor(ctx, run, attempt)
+	}
+	return stageInstruction(run, attempt, snap, stage)
 }

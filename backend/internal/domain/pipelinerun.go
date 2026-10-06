@@ -118,6 +118,9 @@ type PipelineStageAttempt struct {
 	ReturnStageID string
 	// FeedbackJSON is the revision-bound feedback delivered to the repairer.
 	FeedbackJSON string
+	// RetryOfAttemptID names the interrupted attempt this attempt continues
+	// after a resume; empty for ordinary attempts.
+	RetryOfAttemptID string
 }
 
 // PipelineRepairKind says why a stage was sent back to Build.
@@ -171,6 +174,9 @@ type PipelineRunUpdate struct {
 	// RepairsDelta is added to the run's used repair budget in the same atomic
 	// change as the repair record, so it can never be spent twice.
 	RepairsDelta int
+	// BudgetDelta grows the run's repair budget in the same atomic change as the
+	// human authorization (PipelineRepairGrant) that justifies it.
+	BudgetDelta int
 }
 
 // PipelineAttemptFinish closes an active attempt.
@@ -183,6 +189,10 @@ type PipelineAttemptFinish struct {
 	Summary      string
 	ResultKey    string
 	ResultJSON   string
+	// FeedbackJSON, when set, keeps the revision-bound feedback on an attempt
+	// that could not be repaired automatically so a later authorized repair
+	// can still carry it.
+	FeedbackJSON string
 	FinishedAt   time.Time
 }
 
@@ -257,6 +267,9 @@ type PipelineTransition struct {
 	Validate *PipelineAttemptValidation
 	// Repair records one counted return to Build alongside NewAttempt.
 	Repair *PipelineRepair
+	// Grant records a human authorization of additional repairs; it travels
+	// with Run.BudgetDelta.
+	Grant  *PipelineRepairGrant
 	Events []PipelineEvent
 	At     time.Time
 }
@@ -273,3 +286,18 @@ type PipelineReviewLink struct {
 	LinkedAt    time.Time
 	UpdatedAt   time.Time
 }
+
+// PipelineRepairGrant is one persisted human authorization of additional
+// automatic repairs. Only a user can create one; resume never does.
+type PipelineRepairGrant struct {
+	ID           string
+	RunID        string
+	Amount       int
+	AuthorizedBy PipelineRequester
+	RequestKey   string
+	Note         string
+	CreatedAt    time.Time
+}
+
+// ErrPipelineGrantDuplicate means a grant with this request key already exists.
+var ErrPipelineGrantDuplicate = errors.New("pipeline repair authorization already recorded")

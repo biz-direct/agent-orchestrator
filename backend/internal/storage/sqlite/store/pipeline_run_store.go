@@ -159,7 +159,7 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 		if t.Attempt != nil {
 			_, err := q.FinishPipelineStageAttempt(ctx, gen.FinishPipelineStageAttemptParams{
 				State: string(t.Attempt.State), OutputCommit: t.Attempt.OutputCommit, NoChange: boolInt(t.Attempt.NoChange),
-				Outcome: t.Attempt.Outcome, Summary: t.Attempt.Summary, ResultKey: t.Attempt.ResultKey, ResultJson: t.Attempt.ResultJSON,
+				Outcome: t.Attempt.Outcome, Summary: t.Attempt.Summary, ResultKey: t.Attempt.ResultKey, ResultJson: t.Attempt.ResultJSON, FeedbackJson: t.Attempt.FeedbackJSON,
 				FinishedAt: nullTime(t.Attempt.FinishedAt), ID: t.Attempt.ID,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
@@ -177,7 +177,7 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 			row, err := q.SetPipelineRunState(ctx, gen.SetPipelineRunStateParams{
 				State: string(t.Run.State), PauseReason: string(t.Run.PauseReason), PauseDetail: t.Run.PauseDetail,
 				CurrentStageID: t.Run.CurrentStageID, UpdatedAt: t.At, CompletedAt: completed,
-				RepairsDelta: int64(t.Run.RepairsDelta), ID: t.RunID, ExpectedRevision: t.ExpectedRevision,
+				RepairsDelta: int64(t.Run.RepairsDelta), BudgetDelta: int64(t.Run.BudgetDelta), ID: t.RunID, ExpectedRevision: t.ExpectedRevision,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
 				return domain.ErrPipelineConflict
@@ -207,7 +207,7 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 				State: attemptStateOrActive(na.State), ExecutorSessionID: string(na.ExecutorSessionID),
 				ControllerGeneration: na.ControllerGeneration, InputCommit: na.InputCommit, StartedAt: na.StartedAt,
 				PredecessorAttemptID: na.PredecessorAttemptID, RepairSourceAttemptID: na.RepairSourceAttemptID,
-				ReturnStageID: na.ReturnStageID, FeedbackJson: na.FeedbackJSON,
+				ReturnStageID: na.ReturnStageID, FeedbackJson: na.FeedbackJSON, RetryOfAttemptID: na.RetryOfAttemptID,
 			}); err != nil {
 				return err
 			}
@@ -239,6 +239,18 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 				return err
 			}
 		}
+		if t.Grant != nil {
+			g := t.Grant
+			if err := q.CreatePipelineRepairGrant(ctx, gen.CreatePipelineRepairGrantParams{
+				ID: g.ID, RunID: t.RunID, Amount: int64(g.Amount), AuthorizedBy: string(g.AuthorizedBy),
+				RequestKey: g.RequestKey, Note: g.Note, CreatedAt: t.At,
+			}); err != nil {
+				if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+					return domain.ErrPipelineGrantDuplicate
+				}
+				return err
+			}
+		}
 		for _, ev := range t.Events {
 			if err := q.CreatePipelineEvent(ctx, gen.CreatePipelineEventParams{
 				RunID: t.RunID, AttemptID: ev.AttemptID, Kind: ev.Kind, Detail: detailOrEmpty(ev.Detail), CreatedAt: t.At,
@@ -249,7 +261,7 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, domain.ErrPipelineConflict) {
+		if errors.Is(err, domain.ErrPipelineConflict) || errors.Is(err, domain.ErrPipelineGrantDuplicate) {
 			return domain.PipelineRun{}, err
 		}
 		return domain.PipelineRun{}, fmt.Errorf("commit pipeline transition: %w", err)
@@ -306,7 +318,7 @@ func pipelineAttemptFromGen(a gen.PipelineStageAttempt) domain.PipelineStageAtte
 		NoChange: a.NoChange != 0, Outcome: a.Outcome, Summary: a.Summary, ResultKey: a.ResultKey,
 		InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt,
 		PredecessorAttemptID: a.PredecessorAttemptID, ResultJSON: a.ResultJson,
-		RepairSourceAttemptID: a.RepairSourceAttemptID, ReturnStageID: a.ReturnStageID, FeedbackJSON: a.FeedbackJson,
+		RepairSourceAttemptID: a.RepairSourceAttemptID, ReturnStageID: a.ReturnStageID, FeedbackJSON: a.FeedbackJson, RetryOfAttemptID: a.RetryOfAttemptID,
 	}
 	if a.FinishedAt.Valid {
 		t := a.FinishedAt.Time
@@ -524,4 +536,20 @@ func reviewLinkFromRow(r gen.PipelineReviewLink) domain.PipelineReviewLink {
 		AttemptID: r.AttemptID, RunID: r.RunID, PRURL: r.PRURL, HeadSHA: r.HeadSha,
 		ReviewRunID: r.ReviewRunID, LinkedAt: r.LinkedAt, UpdatedAt: r.UpdatedAt,
 	}
+}
+
+// ListPipelineRepairGrants returns a run's human authorizations of extra repairs.
+func (s *Store) ListPipelineRepairGrants(ctx context.Context, runID string) ([]domain.PipelineRepairGrant, error) {
+	rows, err := s.qr.ListPipelineRepairGrants(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list pipeline repair grants: %w", err)
+	}
+	out := make([]domain.PipelineRepairGrant, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, domain.PipelineRepairGrant{
+			ID: r.ID, RunID: r.RunID, Amount: int(r.Amount), AuthorizedBy: domain.PipelineRequester(r.AuthorizedBy),
+			RequestKey: r.RequestKey, Note: r.Note, CreatedAt: r.CreatedAt,
+		})
+	}
+	return out, nil
 }

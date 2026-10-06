@@ -314,3 +314,37 @@ func TestPipelineReviewLinkIsBoundToOneHead(t *testing.T) {
 		t.Fatalf("missing link ok=%v err=%v", ok, err)
 	}
 }
+
+func TestPipelineRepairGrantsAreIdempotentAndGrowTheBudgetAtomically(t *testing.T) {
+	ctx := context.Background()
+	s, sid := seedPipelineSession(t, "prg")
+	at := time.Now().UTC().Truncate(time.Second)
+	run, attempt := newRun("run-g", sid, "prg", at)
+	created, _, err := s.CreatePipelineRun(ctx, run, attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := domain.PipelineRepairGrant{ID: "g1", RunID: run.ID, Amount: 2, AuthorizedBy: domain.PipelineRequestedByUser, RequestKey: "k1", Note: "more", CreatedAt: at}
+	updated, err := s.CommitPipelineTransition(ctx, domain.PipelineTransition{
+		RunID: run.ID, ExpectedRevision: created.Revision, At: at, Grant: &grant,
+		Run: &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: "repair_budget_exhausted", CurrentStageID: "build", BudgetDelta: 2},
+	})
+	if err != nil || updated.RepairBudget != 5 {
+		t.Fatalf("budget = %d err=%v", updated.RepairBudget, err)
+	}
+	// The same request key cannot grant again, and the budget must not move.
+	dup := grant
+	dup.ID = "g2"
+	_, err = s.CommitPipelineTransition(ctx, domain.PipelineTransition{
+		RunID: run.ID, ExpectedRevision: updated.Revision, At: at, Grant: &dup,
+		Run: &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: "repair_budget_exhausted", CurrentStageID: "build", BudgetDelta: 2},
+	})
+	if !errors.Is(err, domain.ErrPipelineGrantDuplicate) {
+		t.Fatalf("duplicate grant: %v", err)
+	}
+	got, _, _ := s.GetPipelineRun(ctx, run.ID)
+	grants, lerr := s.ListPipelineRepairGrants(ctx, run.ID)
+	if lerr != nil || got.RepairBudget != 5 || len(grants) != 1 || grants[0].Amount != 2 || grants[0].AuthorizedBy != domain.PipelineRequestedByUser {
+		t.Fatalf("budget=%d grants=%+v err=%v", got.RepairBudget, grants, lerr)
+	}
+}

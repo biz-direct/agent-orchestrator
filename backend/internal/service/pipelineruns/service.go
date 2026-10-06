@@ -76,6 +76,7 @@ type Store interface {
 	FinishPipelineCommandResult(ctx context.Context, id int64, r domain.PipelineCommandResult) error
 	ListPipelineCommandResults(ctx context.Context, attemptID string) ([]domain.PipelineCommandResult, error)
 	ListPipelineRepairs(ctx context.Context, runID string) ([]domain.PipelineRepair, error)
+	ListPipelineRepairGrants(ctx context.Context, runID string) ([]domain.PipelineRepairGrant, error)
 	LinkPipelineReview(ctx context.Context, l domain.PipelineReviewLink) (domain.PipelineReviewLink, error)
 	GetPipelineReviewLink(ctx context.Context, attemptID string) (domain.PipelineReviewLink, bool, error)
 	ListPipelineReviewLinks(ctx context.Context, runID string) ([]domain.PipelineReviewLink, error)
@@ -92,6 +93,7 @@ type Manager interface {
 	Start(ctx context.Context, in StartInput) (RunView, error)
 	Get(ctx context.Context, id domain.SessionID) (RunEnvelope, error)
 	Submit(ctx context.Context, in SubmitInput) (SubmitResult, error)
+	Control(ctx context.Context, in ControlInput) (ControlResult, error)
 }
 
 // StartInput starts a run on an existing worker.
@@ -156,12 +158,15 @@ type Service struct {
 	runner    CommandRunner
 	reviews   ReviewGateway
 	waits     sync.Map // review attempt id -> last recorded waiting code
-	wakeCh    chan struct{}
-	driving   sync.Map // run id -> struct{}: at most one handoff driver per run
-	clock     func() time.Time
-	newID     func(prefix string) string
-	logger    *slog.Logger
-	locks     sync.Map // session id -> *sync.Mutex
+	// validations holds the cancel function of each run's in-flight validation
+	// round so a pause or cancel can kill its commands.
+	validations sync.Map
+	wakeCh      chan struct{}
+	driving     sync.Map // run id -> struct{}: at most one handoff driver per run
+	clock       func() time.Time
+	newID       func(prefix string) string
+	logger      *slog.Logger
+	locks       sync.Map // session id -> *sync.Mutex
 }
 
 var _ Manager = (*Service)(nil)
@@ -462,7 +467,15 @@ func (s *Service) view(ctx context.Context, runID string) (RunView, error) {
 	if err != nil {
 		return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load review evidence")
 	}
+	grants, err := s.store.ListPipelineRepairGrants(ctx, runID)
+	if err != nil {
+		return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load repair authorizations")
+	}
 	v := buildRunView(run, snap, attempts, events, commands, repairs, links)
+	v.Control = buildControlView(run, events)
+	for _, g := range grants {
+		v.RepairGrants = append(v.RepairGrants, RepairGrantView{Amount: g.Amount, AuthorizedBy: string(g.AuthorizedBy), Note: g.Note, CreatedAt: g.CreatedAt})
+	}
 	v.ReviewGate = s.reviewGateFor(ctx, run, attempts)
 	return v, nil
 }
@@ -730,6 +743,11 @@ func (s *Service) commitAcceptance(ctx context.Context, run domain.PipelineRun, 
 		// request), so the handoff must run after we answer, never inside it.
 		s.wake()
 	}
+	if err == nil && successor == nil {
+		// The run is complete: hand the worker's conversation back. Its intake
+		// was closed at the first handoff and stays closed until someone reopens it.
+		s.releaseOwner(ctx, run.SessionID)
+	}
 	return err
 }
 
@@ -992,8 +1010,9 @@ func (s *Service) recordProductionDefect(ctx context.Context, run domain.Pipelin
 		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, OutputCommit: head, NoChange: noChange, Outcome: OutcomeProductionDefect, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now},
 		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventProductionDefect, Detail: eventDetail{Code: OutcomeProductionDefect, Message: detail}.marshal()}},
 	}
-	plan, exhausted := s.planRepair(ctx, run, snap, attempt, domain.PipelineRepairProductionDefect, defectFeedback(attempt, head, in.Report), head)
-	s.applyRepairOrPause(&t, run, plan, exhausted, PauseProductionDefect, detail)
+	fb := defectFeedback(attempt, head, in.Report)
+	plan, exhausted := s.planRepair(ctx, run, snap, attempt, domain.PipelineRepairProductionDefect, fb, head)
+	s.applyRepairOrPause(&t, run, plan, exhausted, PauseProductionDefect, detail, fb)
 	_, err := s.store.CommitPipelineTransition(ctx, t)
 	if err == nil && plan != nil {
 		s.wake()
@@ -1004,12 +1023,17 @@ func (s *Service) recordProductionDefect(ctx context.Context, run domain.Pipelin
 // applyRepairOrPause finishes a failing-stage transition one of three ways: a
 // counted return to Build, a pause because the shared budget is spent, or the
 // stage's ordinary pause when it declares no repair route.
-func (s *Service) applyRepairOrPause(t *domain.PipelineTransition, run domain.PipelineRun, plan *repairPlan, exhausted string, defaultReason domain.PipelinePauseReason, defaultDetail string) {
+func (s *Service) applyRepairOrPause(t *domain.PipelineTransition, run domain.PipelineRun, plan *repairPlan, exhausted string, defaultReason domain.PipelinePauseReason, defaultDetail string, fb Feedback) {
 	switch {
 	case plan != nil:
 		t.Run, t.NewAttempt, t.Repair = &plan.update, &plan.build, &plan.repair
 		t.Events = append(t.Events, plan.event)
 	case exhausted != "":
+		// Keep the revision-bound feedback on the failing attempt so a repair a
+		// person later authorizes still carries it.
+		if t.Attempt != nil {
+			t.Attempt.FeedbackJSON = fb.marshal()
+		}
 		t.Run = &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: PauseRepairBudgetExhausted, PauseDetail: exhausted + ". " + defaultDetail, CurrentStageID: run.CurrentStageID}
 		t.Events = append(t.Events, domain.PipelineEvent{Kind: eventRunPaused, Detail: eventDetail{Code: string(PauseRepairBudgetExhausted), Message: exhausted}.marshal()})
 	default:

@@ -574,6 +574,16 @@ type PipelineRepair struct {
 	CreatedAt       time.Time
 }
 
+type PipelineRepairGrant struct {
+	ID           string
+	RunID        string
+	Amount       int64
+	AuthorizedBy string
+	RequestKey   string
+	Note         string
+	CreatedAt    time.Time
+}
+
 type PipelineReviewLink struct {
 	AttemptID   string
 	RunID       string
@@ -628,6 +638,7 @@ type PipelineStageAttempt struct {
 	RepairSourceAttemptID string
 	ReturnStageID         string
 	FeedbackJson          string
+	RetryOfAttemptID      string
 }
 
 type Project struct {

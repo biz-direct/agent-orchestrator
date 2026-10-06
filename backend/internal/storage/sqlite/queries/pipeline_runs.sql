@@ -32,6 +32,7 @@ SET state = sqlc.arg(state),
     updated_at = sqlc.arg(updated_at),
     completed_at = sqlc.arg(completed_at),
     repairs_used = repairs_used + sqlc.arg(repairs_delta),
+    repair_budget = repair_budget + sqlc.arg(budget_delta),
     revision = revision + 1
 WHERE id = sqlc.arg(id) AND revision = sqlc.arg(expected_revision)
 RETURNING *;
@@ -40,9 +41,9 @@ RETURNING *;
 INSERT INTO pipeline_stage_attempts (
     id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id,
     controller_generation, input_commit, instruction_delivery, started_at, predecessor_attempt_id,
-    repair_source_attempt_id, return_stage_id, feedback_json
+    repair_source_attempt_id, return_stage_id, feedback_json, retry_of_attempt_id
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: ActivatePipelineStageAttempt :one
@@ -69,6 +70,7 @@ SET state = sqlc.arg(state),
     summary = sqlc.arg(summary),
     result_key = sqlc.arg(result_key),
     result_json = sqlc.arg(result_json),
+    feedback_json = CASE WHEN sqlc.arg(feedback_json) <> '' THEN sqlc.arg(feedback_json) ELSE feedback_json END,
     finished_at = sqlc.arg(finished_at)
 WHERE id = sqlc.arg(id) AND state IN ('active', 'handoff', 'validating')
 RETURNING *;
@@ -155,3 +157,10 @@ SELECT * FROM pipeline_review_links WHERE attempt_id = ?;
 
 -- name: ListPipelineReviewLinks :many
 SELECT * FROM pipeline_review_links WHERE run_id = ? ORDER BY linked_at;
+
+-- name: CreatePipelineRepairGrant :exec
+INSERT INTO pipeline_repair_grants (id, run_id, amount, authorized_by, request_key, note, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListPipelineRepairGrants :many
+SELECT * FROM pipeline_repair_grants WHERE run_id = ? ORDER BY created_at, id;

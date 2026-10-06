@@ -65,6 +65,18 @@ type PipelineExecutor interface {
 	// background work. Anything it cannot prove is an error wrapping
 	// ErrPipelineExecutionUncertain.
 	RelinquishExecutor(ctx context.Context, id domain.SessionID) error
+	// InterruptExecutor asks the executor to stop its running turn now and then
+	// tries to prove it quiescent, exactly as RelinquishExecutor does. A
+	// requested interrupt is never proof: when the turn, a queued item, a
+	// background task, or a pending permission or input request cannot be shown
+	// to be gone it returns an error wrapping ErrPipelineExecutionUncertain. It
+	// never answers a permission or input request on the user's behalf and
+	// never touches the workspace.
+	InterruptExecutor(ctx context.Context, id domain.SessionID) error
+	// ReleaseExecutor lifts a handoff fence so a person can talk to the
+	// executor again. It delivers no turn and starts nothing; for an executor
+	// that is not fenced it does nothing.
+	ReleaseExecutor(ctx context.Context, id domain.SessionID) error
 	// StartStage starts (or, for a retried stage, resumes) the stage's
 	// attached conversation and delivers the stage prompt.
 	StartStage(ctx context.Context, start PipelineStageStart) (PipelineStageStarted, error)
