@@ -316,10 +316,11 @@ func (d *discoverer) loadProfile(file string) ProfileEntry {
 	checkID(raw.ID, "profile", add)
 
 	p := Profile{
-		ID:          raw.ID,
-		Description: strings.TrimSpace(raw.Description),
-		Harness:     strings.TrimSpace(raw.Harness),
-		Model:       strings.TrimSpace(raw.Model),
+		ID:               raw.ID,
+		DefinitionSHA256: sha256Hex(data),
+		Description:      strings.TrimSpace(raw.Description),
+		Harness:          strings.TrimSpace(raw.Harness),
+		Model:            strings.TrimSpace(raw.Model),
 	}
 	if p.Description == "" {
 		add("description", "description is required so users can tell profiles apart")
@@ -412,7 +413,7 @@ func (d *discoverer) loadWorkflow(file string) WorkflowEntry {
 	checkVersion(raw.Version, add)
 	checkID(raw.ID, "workflow", add)
 
-	w := Workflow{ID: raw.ID, Description: strings.TrimSpace(raw.Description), RepairBudget: DefaultRepairBudget}
+	w := Workflow{ID: raw.ID, DefinitionSHA256: sha256Hex(data), Description: strings.TrimSpace(raw.Description), RepairBudget: DefaultRepairBudget}
 	if w.Description == "" {
 		add("description", "description is required so users can tell workflows apart")
 	}
@@ -605,6 +606,11 @@ func checkID(id, what string, add func(field, format string, args ...any)) {
 	if !idPattern.MatchString(id) {
 		add("id", "%s id %q must be 1-64 lowercase letters, digits, and hyphens", what, id)
 	}
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func fileStem(file string) string {

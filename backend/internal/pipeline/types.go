@@ -84,6 +84,9 @@ type Profile struct {
 	InstructionsSource string `json:"instructionsSource"`
 	// InstructionsSHA256 is the content hash recorded as snapshot provenance.
 	InstructionsSHA256 string `json:"instructionsSha256"`
+	// DefinitionSHA256 is the hash of the definition file bytes, recorded as
+	// snapshot provenance so a later repository edit is detectable.
+	DefinitionSHA256 string `json:"definitionSha256"`
 	// InstructionsText is the resolved instruction content. It is never
 	// serialized in catalog responses; run snapshots copy it explicitly.
 	InstructionsText string `json:"-"`
@@ -112,6 +115,8 @@ type Stage struct {
 type Workflow struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
+	// DefinitionSHA256 is the hash of the definition file bytes.
+	DefinitionSHA256 string `json:"definitionSha256"`
 	// InstructionsSource, InstructionsSHA256, and InstructionsText mirror the
 	// Profile fields for optional workflow-wide instructions.
 	InstructionsSource string  `json:"instructionsSource,omitempty"`

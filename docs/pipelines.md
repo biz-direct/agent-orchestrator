@@ -9,12 +9,13 @@ Status by delivery slice (parent design: issue #1):
 | Capability | State |
 | --- | --- |
 | Discover/validate definitions, project-default selection | shipped |
-| Execution (Build, attached specialists, validation, Review, repair, recovery) | in flight, tracked by the subissues of #1 |
+| Single-stage Build run on an existing Chat worker, snapshots, verified results | shipped |
+| Attached specialists, validation, Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
 
-Until execution ships, a valid workflow can be selected but is shown as
-**unavailable**. Tasks still start as ordinary workers; AO never silently
-substitutes a normal worker for a selected workflow that cannot run, and the
-selection never changes what an ordinary spawn launches.
+A valid workflow that this build cannot execute (anything beyond a single Build
+stage today) can be selected but is shown as **unavailable**. AO never silently
+substitutes a normal worker for a selected workflow that cannot run, and a
+project default never changes what an ordinary spawn launches.
 
 ## Where definitions live
 
@@ -97,3 +98,43 @@ Daemon routes: `GET /api/v1/projects/{id}/pipelines`,
 reference in the project config (`defaultPipeline`) by a focused write that
 leaves every other project setting untouched. The desktop shows the same
 catalog under **Settings → Project → Pipeline**.
+
+## Running a single-stage Build workflow
+
+A workflow whose only stage is `build` runs on an **existing Chat worker task**.
+The worker stays the owner of the worktree, branch, and PR; the run only records
+progress and decides whether a result may advance it.
+
+```bash
+ao pipeline start <workflow-id> [--session <id>]   # snapshots the definition and messages the worker
+ao pipeline status                                  # stages, attempts, checkpoint, last rejection
+ao pipeline submit --outcome succeeded --summary "…"   # run by the worker when committed
+```
+
+- **Snapshot.** Starting a run freezes the workflow, every referenced profile, the
+  resolved instruction contents, validation configuration, and each stage's
+  harness/model (with the hash of every definition file). Later repository edits
+  affect future runs only.
+- **Overrides.** Only an explicit *user* may override a stage's harness/model
+  (`--override-stage`, `--harness`, `--model`). A command run inside an AO session
+  is treated as an orchestrator and cannot. Instructions, path constraints, and
+  gates apply either way.
+- **Verified results.** `ao pipeline submit` only *claims* a result. The daemon
+  accepts it for the active attempt, under the controller generation the attempt
+  started with, when the worktree is clean, on the expected branch, and `HEAD`
+  equals the reported commit and descends from the stage's input commit. A
+  no-change stage keeps its input commit. Dirty or stale submissions are rejected
+  with the offending paths; AO never resets, cleans, or amends the worktree.
+  Submissions are idempotent per `idempotencyKey`.
+- **`ao report` is informational.** A done report never completes a stage.
+- **While a run is unfinished** (`running` or `paused`), automatic review and
+  merge-driven completion/cleanup stay out of the way. Ordinary workers are
+  unaffected.
+- **Interruption.** If the worker's controller restarts or the task ends mid-stage,
+  the run pauses (it is never replayed) and does not consume the repair budget.
+  Resume/cancel controls arrive with the pause/resume slice.
+
+Daemon routes: `GET|POST /api/v1/sessions/{id}/pipeline`,
+`POST /api/v1/sessions/{id}/pipeline/results`. Progress surfaces through the
+existing session change stream; the desktop shows it in the task inspector
+(**Summary → Pipeline**).

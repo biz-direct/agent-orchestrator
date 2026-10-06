@@ -3527,6 +3527,44 @@ func TestPRObservation_MergedUsesConfiguredTerminator(t *testing.T) {
 	}
 }
 
+type fakePipelineGuard struct{ suppress bool }
+
+func (g fakePipelineGuard) SuppressesLifecycleShortcuts(context.Context, domain.SessionID) bool {
+	return g.suppress
+}
+
+// A merge must not tear down a worker whose pipeline run has not finished; the
+// reaction re-runs on the next observation once the run is done.
+func TestPRObservation_MergedDefersCompletionWhilePipelineUnfinished(t *testing.T) {
+	for name, tc := range map[string]struct {
+		guard ports.PipelineGuard
+		want  int
+	}{
+		"no guard terminates as before": {guard: nil, want: 1},
+		"finished pipeline releases":    {guard: fakePipelineGuard{suppress: false}, want: 1},
+		"unfinished pipeline defers":    {guard: fakePipelineGuard{suppress: true}, want: 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, st, _ := newManager()
+			if tc.guard != nil {
+				WithPipelineGuard(tc.guard)(m)
+			}
+			terminator := &fakeCompletionTerminator{}
+			m.SetCompletionTerminator(terminator)
+			rec := exited("mer-1")
+			rec.TerminateOnPRMerge = true
+			st.sessions["mer-1"] = rec
+			st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Merged: true}}
+			if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
+				t.Fatal(err)
+			}
+			if terminator.calls != tc.want {
+				t.Fatalf("terminator calls = %d, want %d", terminator.calls, tc.want)
+			}
+		})
+	}
+}
+
 // TestPRObservation_MergedOnStillWorkingAgentDoesNotTerminate is the RED test
 // for #2879: an agent STILL CLIMBING (ActivityActive / `working`) with one PR
 // merged must NOT be flag-terminated. The merge may be PR #1 of several and

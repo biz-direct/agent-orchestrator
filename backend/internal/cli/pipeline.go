@@ -97,6 +97,9 @@ func newPipelineCommand(ctx *commandContext) *cobra.Command {
 		newPipelineListCommand(ctx),
 		newPipelineValidateCommand(ctx),
 		newPipelineDefaultCommand(ctx),
+		newPipelineStartCommand(ctx),
+		newPipelineStatusCommand(ctx),
+		newPipelineSubmitCommand(ctx),
 	)
 	return cmd
 }

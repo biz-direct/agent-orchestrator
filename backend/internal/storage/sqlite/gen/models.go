@@ -535,6 +535,56 @@ type PRURLAlias struct {
 	CanonicalURL string
 }
 
+type PipelineEvent struct {
+	ID        int64
+	RunID     string
+	AttemptID string
+	Kind      string
+	Detail    string
+	CreatedAt time.Time
+}
+
+type PipelineRun struct {
+	ID             string
+	SessionID      string
+	ProjectID      string
+	WorkflowID     string
+	State          string
+	PauseReason    string
+	PauseDetail    string
+	CurrentStageID string
+	RequestedBy    string
+	ExpectedBranch string
+	RepairBudget   int64
+	RepairsUsed    int64
+	Snapshot       string
+	SnapshotSha256 string
+	Revision       int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	CompletedAt    sql.NullTime
+}
+
+type PipelineStageAttempt struct {
+	ID                   string
+	RunID                string
+	StageID              string
+	StageKind            string
+	AttemptNo            int64
+	State                string
+	ExecutorSessionID    string
+	ControllerGeneration string
+	InputCommit          string
+	OutputCommit         string
+	NoChange             int64
+	Outcome              string
+	Summary              string
+	ResultKey            string
+	InstructionDelivery  string
+	StartedAt            time.Time
+	FinishedAt           sql.NullTime
+}
+
 type Project struct {
 	ID            domain.ProjectID
 	Path          string

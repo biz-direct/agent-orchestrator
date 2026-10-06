@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/githubpat"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
+	pipelineruns "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
 	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 )
@@ -227,6 +228,17 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainSession":                   "Session",
 	"DomainProjectConfig":             "ProjectConfig",
 	"DomainPipelineSelection":         "PipelineSelection",
+	"PipelinerunsAttemptView":         "PipelineAttemptView",
+	"PipelinerunsCheckpointView":      "PipelineCheckpointView",
+	"PipelinerunsEventView":           "PipelineEventView",
+	"PipelinerunsRejectionView":       "PipelineRejectionView",
+	"PipelinerunsRunEnvelope":         "PipelineRunEnvelope",
+	"PipelinerunsRunView":             "PipelineRunView",
+	"PipelinerunsStageOverride":       "PipelineStageOverride",
+	"PipelinerunsStageView":           "PipelineStageView",
+	"PipelinerunsStartInput":          "StartPipelineRequest",
+	"PipelinerunsSubmitInput":         "SubmitPipelineResultRequest",
+	"PipelinerunsSubmitResult":        "SubmitPipelineResultResponse",
 	"DomainTrackerIntakeConfig":       "TrackerIntakeConfig",
 	"ControllersTriggerReviewRequest": "TriggerReviewRequest",
 	"DomainContainerReapConfig":       "ContainerReapConfig",
@@ -2168,6 +2180,43 @@ func projectOperations() []operation {
 				{http.StatusOK, controllers.ProjectResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/pipeline", id: "getSessionPipeline", tag: "sessions",
+			summary:    "Read the task's pipeline run (latest), with stages, attempts, checkpoint, and rejections",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, pipelineruns.RunEnvelope{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/pipeline", id: "startSessionPipeline", tag: "sessions",
+			summary:    "Start a snapshotted pipeline run on an existing worker task",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    pipelineruns.StartInput{},
+			resps: []respUnit{
+				{http.StatusCreated, pipelineruns.RunEnvelope{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/pipeline/results", id: "submitSessionPipelineResult", tag: "sessions",
+			summary:    "Submit an idempotent, revision-bound stage result for the active attempt",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    pipelineruns.SubmitInput{},
+			resps: []respUnit{
+				{http.StatusOK, pipelineruns.SubmitResult{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
 		},

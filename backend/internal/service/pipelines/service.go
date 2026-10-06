@@ -205,5 +205,5 @@ func resolveDefault(sel *domain.PipelineSelection, cat pipeline.Catalog) Default
 		return DefaultStatus{Selection: sel, State: StateWorkflowUnavailable, Message: reason}
 	}
 	return DefaultStatus{Selection: sel, State: StateWorkflowAvailable, Executable: true,
-		Message: fmt.Sprintf("Tasks start with workflow %q.", sel.WorkflowID)}
+		Message: fmt.Sprintf("Workflow %q can be started on a task. New tasks do not start it automatically yet.", sel.WorkflowID)}
 }

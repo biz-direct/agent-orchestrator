@@ -169,6 +169,13 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 		if rec.IsTerminated || !rec.TerminateOnPRMerge {
 			return nil
 		}
+		// An unfinished pipeline run still owns this worker's lifecycle: a merge
+		// must not tear it down before the pipeline reaches its completion gate.
+		// The observer keeps the terminal PR discoverable, so the next poll
+		// re-runs this reaction once the run has finished.
+		if m.pipelines != nil && m.pipelines.SuppressesLifecycleShortcuts(ctx, id) {
+			return nil
+		}
 		// A merge must not race the still-working agent (#2879). A session whose
 		// agent is still ActivityActive is genuinely mid-climb: with one PR merged
 		// it is very likely raising the next PR in the same session, and

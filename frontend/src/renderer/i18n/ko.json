@@ -2486,5 +2486,22 @@
 	"settings.project.pipeline.loadFailed": "Couldn't load pipelines",
 	"settings.project.pipeline.saveFailed": "Couldn't save the default pipeline",
 	"settings.project.pipeline.problems_one": "{{count}} definition problem",
-	"settings.project.pipeline.problems_other": "{{count}} definition problems"
+	"settings.project.pipeline.problems_other": "{{count}} definition problems",
+	"inspector.pipeline.title": "Pipeline",
+	"inspector.pipeline.workflow": "Workflow",
+	"inspector.pipeline.start": "Start pipeline",
+	"inspector.pipeline.startFailed": "Couldn't start the pipeline",
+	"inspector.pipeline.loadFailed": "Couldn't load the pipeline",
+	"inspector.pipeline.checkpoint": "Checkpoint {{from}} → {{to}}",
+	"inspector.pipeline.checkpointNoChange": "Checkpoint {{commit}} (no new commits)",
+	"inspector.pipeline.state.running": "Running",
+	"inspector.pipeline.state.paused": "Paused",
+	"inspector.pipeline.state.completed": "Complete",
+	"inspector.pipeline.state.cancelled": "Cancelled",
+	"inspector.pipeline.stageState.pending": "Pending",
+	"inspector.pipeline.stageState.active": "Active",
+	"inspector.pipeline.stageState.accepted": "Accepted",
+	"inspector.pipeline.stageState.failed": "Failed",
+	"inspector.pipeline.stageState.interrupted": "Interrupted",
+	"inspector.pipeline.stageState.paused": "Paused"
 }

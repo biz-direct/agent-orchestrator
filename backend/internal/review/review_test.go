@@ -781,6 +781,42 @@ func TestAutoTriggerHealsUnavailableChatWithoutRereviewingApprovedCommit(t *test
 	}
 }
 
+type suppressGuard bool
+
+func (g suppressGuard) SuppressesLifecycleShortcuts(context.Context, domain.SessionID) bool {
+	return bool(g)
+}
+
+// Automatic review must not start while a pipeline run owns the worker; a
+// manual trigger and an ordinary worker are unaffected.
+func TestAutoTriggerRespectsPipelineGuard(t *testing.T) {
+	worker := liveWorker()
+	worker.AutoReviewEnabled = true
+	worker.Activity = domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Unix(0, 0).UTC().Add(-2 * time.Minute)}
+	build := func(g ports.PipelineGuard) (*Engine, *fakeLauncher) {
+		launcher := &fakeLauncher{handle: "review-mer-1"}
+		eng := newEngineForTest(&fakeStore{}, fakeSessions{rec: worker, ok: true}, prAt("sha1"), fakeProjects{}, launcher)
+		eng.pipelines = g
+		return eng, launcher
+	}
+
+	eng, launcher := build(suppressGuard(true))
+	res, err := eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, "")
+	if err != nil || res.SkipReason != "pipeline_active" || launcher.spawned {
+		t.Fatalf("auto review must be skipped: res=%+v err=%v spawned=%v", res, err, launcher.spawned)
+	}
+
+	eng, launcher = build(suppressGuard(false))
+	if res, err = eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, ""); err != nil || !res.Created || !launcher.spawned {
+		t.Fatalf("a finished pipeline lets auto review run: res=%+v err=%v", res, err)
+	}
+
+	eng, launcher = build(suppressGuard(true))
+	if res, err = eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, ""); err != nil || !res.Created || !launcher.spawned {
+		t.Fatalf("the engine only gates automatic triggers; manual gating belongs to later slices: res=%+v err=%v", res, err)
+	}
+}
+
 func TestTriggerKeepsOldReviewerUntilReplacementStarts(t *testing.T) {
 	old := domain.Review{ID: "rev-1", SessionID: "mer-1", Harness: domain.ReviewerCodex, ReviewerHandleID: "review-chat:rev-1", InterfaceMode: domain.ReviewerInterfaceChat}
 	store := &fakeStore{

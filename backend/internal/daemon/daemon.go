@@ -60,6 +60,7 @@ import (
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	linkpreviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/linkpreview"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
+	pipelineruns "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
 	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
@@ -791,10 +792,16 @@ func Run() error {
 	if reconcileErr := reviewSvc.RecoverChatReviewers(ctx); reconcileErr != nil {
 		log.Warn("reviewer chat recovery deferred", "err", reconcileErr)
 	}
+	// Interrupted pipeline execution pauses before anything can touch it: a run
+	// whose controller restarted or whose task ended is never replayed blindly.
+	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Logger: log})
+	if reconcileErr := pipelineRunSvc.ReconcileAll(ctx); reconcileErr != nil {
+		log.Warn("pipeline run reconcile deferred", "err", reconcileErr)
+	}
 	agentSvc.WarmCodexAccounts()
 	automationSvc, automationDone := startAutomations(ctx, store, sessionSvc, log)
 	lcStack.automationDone = automationDone
-	autoReview := autoreview.New(store, reviewSvc, autoreview.Config{Logger: log})
+	autoReview := autoreview.New(store, reviewSvc, autoreview.Config{Logger: log, Pipelines: pipelineruns.NewStoreGuard(store, log)})
 	lcStack.autoReviewDone = autoReview.Start(ctx)
 	// Push-device registry: persisted phones that receive OS push notifications.
 	// A load failure must not block boot — degrade to no push rather than refusing
@@ -881,6 +888,7 @@ func Run() error {
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectSvc,
 		Pipelines:          pipelinessvc.New(store),
+		PipelineRuns:       pipelineRunSvc,
 		HostID:             hostIdentity.HostID,
 		Endpoints:          bs,
 		Agents:             agentSvc,

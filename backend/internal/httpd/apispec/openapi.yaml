@@ -6413,6 +6413,147 @@ paths:
       summary: Pin a session
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/pipeline:
+    get:
+      operationId: getSessionPipeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRunEnvelope'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read the task's pipeline run (latest), with stages, attempts, checkpoint,
+        and rejections
+      tags:
+      - sessions
+    post:
+      operationId: startSessionPipeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartPipelineRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRunEnvelope'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Start a snapshotted pipeline run on an existing worker task
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/pipeline/results:
+    post:
+      operationId: submitSessionPipelineResult
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitPipelineResultRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitPipelineResultResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Submit an idempotent, revision-bound stage result for the active attempt
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/pr:
     get:
       operationId: listSessionPRs
@@ -13231,6 +13372,76 @@ components:
       - targetSha
       - status
       type: object
+    PipelineAttemptView:
+      properties:
+        attemptNo:
+          type: integer
+        controllerGeneration:
+          type: string
+        executorSessionId:
+          type: string
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        id:
+          type: string
+        inputCommit:
+          type: string
+        instructionDelivery:
+          enum:
+          - pending
+          - delivered
+          - failed
+          type: string
+        noChange:
+          type: boolean
+        outcome:
+          type: string
+        outputCommit:
+          type: string
+        stageId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        state:
+          enum:
+          - active
+          - accepted
+          - failed
+          - interrupted
+          - cancelled
+          type: string
+        summary:
+          type: string
+      required:
+      - id
+      - stageId
+      - attemptNo
+      - state
+      - executorSessionId
+      - noChange
+      - instructionDelivery
+      - startedAt
+      type: object
+    PipelineCheckpointView:
+      properties:
+        inputCommit:
+          type: string
+        noChange:
+          type: boolean
+        outputCommit:
+          type: string
+        stageId:
+          type: string
+      required:
+      - stageId
+      - inputCommit
+      - outputCommit
+      - noChange
+      type: object
     PipelineDiagnostic:
       properties:
         field:
@@ -13242,12 +13453,29 @@ components:
       required:
       - message
       type: object
+    PipelineEventView:
+      properties:
+        at:
+          format: date-time
+          type: string
+        attemptId:
+          type: string
+        kind:
+          type: string
+        message:
+          type: string
+      required:
+      - kind
+      - at
+      type: object
     PipelineProfile:
       properties:
         allowedPaths:
           items:
             type: string
           type: array
+        definitionSha256:
+          type: string
         description:
           type: string
         harness:
@@ -13269,6 +13497,7 @@ components:
       - description
       - instructionsSource
       - instructionsSha256
+      - definitionSha256
       - allowedPaths
       - validation
       type: object
@@ -13291,6 +13520,123 @@ components:
       - file
       - valid
       - diagnostics
+      type: object
+    PipelineRejectionView:
+      properties:
+        at:
+          format: date-time
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        paths:
+          items:
+            type: string
+          type: array
+      required:
+      - code
+      - message
+      - at
+      type: object
+    PipelineRunEnvelope:
+      properties:
+        run:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/PipelineRunView'
+            type: object
+      required:
+      - run
+      type: object
+    PipelineRunView:
+      properties:
+        attempts:
+          items:
+            $ref: '#/components/schemas/PipelineAttemptView'
+          type: array
+        checkpoint:
+          $ref: '#/components/schemas/PipelineCheckpointView'
+        completedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        createdAt:
+          format: date-time
+          type: string
+        currentStageId:
+          type: string
+        events:
+          items:
+            $ref: '#/components/schemas/PipelineEventView'
+          type: array
+        expectedBranch:
+          type: string
+        id:
+          type: string
+        lastRejection:
+          $ref: '#/components/schemas/PipelineRejectionView'
+        pauseDetail:
+          type: string
+        pauseReason:
+          type: string
+        projectId:
+          type: string
+        repairBudget:
+          type: integer
+        repairsRemaining:
+          type: integer
+        repairsUsed:
+          type: integer
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        revision:
+          format: int64
+          type: integer
+        sessionId:
+          type: string
+        snapshotCapturedAt:
+          type: string
+        snapshotSha256:
+          type: string
+        stages:
+          items:
+            $ref: '#/components/schemas/PipelineStageView'
+          type: array
+        state:
+          enum:
+          - running
+          - paused
+          - completed
+          - cancelled
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        workflowId:
+          type: string
+      required:
+      - id
+      - sessionId
+      - projectId
+      - workflowId
+      - state
+      - requestedBy
+      - repairBudget
+      - repairsUsed
+      - repairsRemaining
+      - snapshotSha256
+      - snapshotCapturedAt
+      - stages
+      - attempts
+      - events
+      - revision
+      - createdAt
+      - updatedAt
       type: object
     PipelineSelection:
       properties:
@@ -13320,6 +13666,44 @@ components:
       - id
       - kind
       type: object
+    PipelineStageOverride:
+      properties:
+        harness:
+          type: string
+        model:
+          type: string
+      type: object
+    PipelineStageView:
+      properties:
+        harness:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        model:
+          type: string
+        profile:
+          type: string
+        repairTo:
+          type: string
+        settingsSource:
+          type: string
+        state:
+          enum:
+          - pending
+          - active
+          - accepted
+          - failed
+          - interrupted
+          - paused
+          type: string
+      required:
+      - id
+      - kind
+      - settingsSource
+      - state
+      type: object
     PipelineValidationCommand:
       properties:
         command:
@@ -13338,6 +13722,8 @@ components:
       type: object
     PipelineWorkflow:
       properties:
+        definitionSha256:
+          type: string
         description:
           type: string
         id:
@@ -13355,6 +13741,7 @@ components:
       required:
       - id
       - description
+      - definitionSha256
       - repairBudget
       - stages
       type: object
@@ -15213,6 +15600,23 @@ components:
       - targetAccountId
       - idempotencyKey
       type: object
+    StartPipelineRequest:
+      properties:
+        overrides:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineStageOverride'
+          type: object
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        workflowId:
+          type: string
+      required:
+      - workflowId
+      - requestedBy
+      type: object
     StartPreviewServerRequest:
       properties:
         configuration:
@@ -15316,6 +15720,51 @@ components:
       required:
       - sourceGenerationId
       - handoff
+      type: object
+    SubmitPipelineResultRequest:
+      properties:
+        attemptId:
+          type: string
+        controllerGeneration:
+          type: string
+        expectedInputCommit:
+          type: string
+        idempotencyKey:
+          type: string
+        outcome:
+          enum:
+          - succeeded
+          - failed
+          type: string
+        outputCommit:
+          type: string
+        runId:
+          type: string
+        summary:
+          type: string
+      required:
+      - runId
+      - attemptId
+      - controllerGeneration
+      - idempotencyKey
+      - outcome
+      - expectedInputCommit
+      type: object
+    SubmitPipelineResultResponse:
+      properties:
+        accepted:
+          type: boolean
+        attempt:
+          $ref: '#/components/schemas/PipelineAttemptView'
+        replayed:
+          type: boolean
+        run:
+          $ref: '#/components/schemas/PipelineRunView'
+      required:
+      - run
+      - attempt
+      - accepted
+      - replayed
       type: object
     SubmitReviewInput:
       properties:

@@ -1,0 +1,145 @@
+package cli
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+)
+
+func runServer(t *testing.T, handle func(w http.ResponseWriter, r *http.Request)) {
+	t.Helper()
+	cfg := setConfigEnv(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/internal/telemetry/cli-invoked" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		handle(w, r)
+	}))
+	t.Cleanup(server.Close)
+	writeRunFileFor(t, cfg, server)
+}
+
+const runningRunJSON = `{"run":{"id":"prun_1","workflowId":"wf","state":"running","currentStageId":"build","requestedBy":"user","expectedBranch":"task","repairBudget":3,"repairsUsed":0,"repairsRemaining":3,
+ "stages":[{"id":"build","kind":"build","state":"active","harness":"claude-code","model":"opus","settingsSource":"worker"}],
+ "attempts":[{"id":"pstg_1","stageId":"build","attemptNo":1,"state":"active","controllerGeneration":"gen-1","inputCommit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}}`
+
+func TestPipelineStartIdentifiesCallerAndRefusesAgentOverrides(t *testing.T) {
+	var got pipelineStartRequestDTO
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions/w-1/pipeline" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, runningRunJSON)
+	})
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+
+	t.Setenv("AO_SESSION_ID", "")
+	out, stderr, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1")
+	if err != nil || got.RequestedBy != "user" || got.WorkflowID != "wf" || !strings.Contains(out, "prun_1") {
+		t.Fatalf("user start: err=%v stderr=%s body=%+v out=%s", err, stderr, got, out)
+	}
+
+	t.Setenv("AO_SESSION_ID", "orchestrator-1")
+	if _, _, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1"); err != nil || got.RequestedBy != "orchestrator" {
+		t.Fatalf("a session caller is an orchestrator: err=%v body=%+v", err, got)
+	}
+	if _, _, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1", "--override-stage", "test", "--model", "x"); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("agents cannot override stage settings: %v", err)
+	}
+
+	t.Setenv("AO_SESSION_ID", "")
+	if _, _, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1", "--override-stage", "test", "--model", "x"); err != nil || got.Overrides["test"].Model != "x" || got.RequestedBy != "user" {
+		t.Fatalf("user override: err=%v body=%+v", err, got)
+	}
+	if _, _, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1", "--model", "x"); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("--model without --override-stage is a usage error: %v", err)
+	}
+}
+
+func TestPipelineStatusWithoutRunSaysOrdinaryWorker(t *testing.T) {
+	runServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, `{"run":null}`) })
+	t.Setenv("AO_SESSION_ID", "w-1")
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "pipeline", "status")
+	if err != nil || !strings.Contains(out, "ordinary worker") {
+		t.Fatalf("err=%v out=%s", err, out)
+	}
+}
+
+func TestPipelineSubmitReportsVerifiedHeadWithStableIdempotencyKey(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "task"}, {"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	head, _ := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	wantHead := strings.TrimSpace(string(head))
+	var bodies []pipelineSubmitRequestDTO
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, runningRunJSON)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/w-1/pipeline/results":
+			var b pipelineSubmitRequestDTO
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			bodies = append(bodies, b)
+			_, _ = io.WriteString(w, `{"run":{"id":"prun_1","workflowId":"wf","state":"completed","stages":[{"id":"build","kind":"build","state":"accepted","settingsSource":"worker"}],"attempts":[],"checkpoint":{"stageId":"build","inputCommit":"aaaa","outputCommit":"`+wantHead+`","noChange":false}},"attempt":{"id":"pstg_1","stageId":"build","attemptNo":1,"state":"accepted"},"accepted":true,"replayed":false}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	t.Setenv("AO_SESSION_ID", "w-1")
+	old, _ := os.Getwd()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+	out, stderr, err := executeCLI(t, deps, "pipeline", "submit", "--outcome", "succeeded", "--summary", "done")
+	if err != nil {
+		t.Fatalf("submit: %v stderr=%s", err, stderr)
+	}
+	if _, _, err := executeCLI(t, deps, "pipeline", "submit", "--outcome", "succeeded", "--summary", "done"); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("bodies: %+v", bodies)
+	}
+	b := bodies[0]
+	if b.OutputCommit != wantHead || b.RunID != "prun_1" || b.AttemptID != "pstg_1" || b.ControllerGeneration != "gen-1" || b.ExpectedInputCommit != strings.Repeat("a", 40) || b.Outcome != "succeeded" {
+		t.Fatalf("body: %+v", b)
+	}
+	if b.IdempotencyKey == "" || b.IdempotencyKey != bodies[1].IdempotencyKey {
+		t.Fatalf("a retry must reuse the same idempotency key: %q vs %q", b.IdempotencyKey, bodies[1].IdempotencyKey)
+	}
+	if !strings.Contains(out, "accepted") || !strings.Contains(out, "checkpoint") {
+		t.Fatalf("output: %s", out)
+	}
+}
+
+func TestPipelineSubmitValidatesBeforeCallingDaemon(t *testing.T) {
+	setConfigEnv(t)
+	t.Setenv("AO_SESSION_ID", "")
+	for _, args := range [][]string{
+		{"pipeline", "submit"},
+		{"pipeline", "submit", "--outcome", "done"},
+		{"pipeline", "submit", "--outcome", "failed"},
+	} {
+		if _, _, err := executeCLI(t, Deps{}, args...); err == nil || ExitCode(err) != 2 {
+			t.Fatalf("args=%v err=%v", args, err)
+		}
+	}
+}
