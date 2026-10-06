@@ -25,6 +25,14 @@ func (f *fakeStore) GetProject(_ context.Context, id string) (domain.ProjectReco
 	return f.row, true, nil
 }
 
+func (f *fakeStore) SetProjectPipelineCommandTrust(_ context.Context, id string, trusted bool) (domain.ProjectRecord, bool, error) {
+	if id != f.row.ID {
+		return domain.ProjectRecord{}, false, nil
+	}
+	f.row.Config.TrustPipelineCommands = trusted
+	return f.row, true, nil
+}
+
 func (f *fakeStore) SetProjectDefaultPipeline(_ context.Context, id string, sel *domain.PipelineSelection) (domain.ProjectRecord, bool, error) {
 	if id != f.row.ID {
 		return domain.ProjectRecord{}, false, nil
@@ -170,5 +178,27 @@ func TestUnknownProject(t *testing.T) {
 	}
 	if _, err := svc.SetDefault(context.Background(), "nope", pipelines.SetDefaultInput{}); apiCode(t, err) != "PROJECT_NOT_FOUND" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCommandTrustIsAUserDecisionSavedWithoutTouchingOtherSettings(t *testing.T) {
+	svc, st := newFixture(t, map[string]string{pipeline.ProfilesDir + "/tester.yaml": profileYAML})
+	cat, err := svc.Catalog(context.Background(), "p")
+	if err != nil || cat.CommandsTrusted {
+		t.Fatalf("repository commands are untrusted by default: %+v err=%v", cat.CommandsTrusted, err)
+	}
+	got, err := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: true})
+	if err != nil || !got.Trusted || !st.row.Config.TrustPipelineCommands || st.row.Config.AgentRules != "keep" {
+		t.Fatalf("grant: %+v err=%v config=%+v", got, err, st.row.Config)
+	}
+	cat, _ = svc.Catalog(context.Background(), "p")
+	if !cat.CommandsTrusted {
+		t.Fatal("the catalog reports the authorization")
+	}
+	if got, _ := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: false}); got.Trusted || st.row.Config.TrustPipelineCommands {
+		t.Fatal("revocation must take effect")
+	}
+	if _, err := svc.SetCommandTrust(context.Background(), "nope", pipelines.SetCommandTrustInput{Trusted: true}); apiCode(t, err) != "PROJECT_NOT_FOUND" {
+		t.Fatalf("unknown project: %v", err)
 	}
 }

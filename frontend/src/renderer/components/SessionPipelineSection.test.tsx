@@ -30,7 +30,7 @@ const run = (overrides: Record<string, unknown> = {}) => ({
 	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], revision: 1,
 	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 	stages: [{ id: "build", kind: "build", state: "active", model: "opus", settingsSource: "worker" }],
-	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now" }],
+	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] }],
 	...overrides,
 });
 
@@ -143,8 +143,8 @@ describe("SessionPipelineSection", () => {
 					{ id: "test", kind: "specialist", state: "active", harness: "claude-code", settingsSource: "profile" },
 				],
 				attempts: [
-					{ id: "a1", stageId: "build", attemptNo: 1, state: "accepted", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now" },
-					{ id: "a2", stageId: "test", attemptNo: 1, state: "active", executorSessionId: "w-1-att-2", conversationSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now" },
+					{ id: "a1", stageId: "build", attemptNo: 1, state: "accepted", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] },
+					{ id: "a2", stageId: "test", attemptNo: 1, state: "active", executorSessionId: "w-1-att-2", conversationSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] },
 				],
 			}),
 			[],
@@ -184,7 +184,7 @@ describe("SessionPipelineSection", () => {
 					{ id: "test", kind: "specialist", state: "failed", settingsSource: "profile", allowedPaths: ["**/*_test.go", "test/**"] },
 				],
 				attempts: [
-					{ id: "a2", stageId: "test", attemptNo: 1, state: "failed", outcome: "production_defect", executorSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now",
+					{ id: "a2", stageId: "test", attemptNo: 1, state: "failed", outcome: "production_defect", executorSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [],
 						report: { findings: [{ criterion: "c", status: "unmet" }], commands: [{ command: "go test", exitCode: 1 }], remainingIssues: ["flaky"], defects: [{ description: "Add overflows" }] } },
 				],
 				evidence: [{ stageId: "test", attemptId: "a2", revision: "abcdef1234567", outcome: "production_defect", findings: 1, commands: 1, defects: 1, remainingIssues: 1 }],
@@ -196,5 +196,32 @@ describe("SessionPipelineSection", () => {
 		expect(screen.getByText("Report: 1 findings, 1 commands, 1 remaining issues")).toBeInTheDocument();
 		expect(screen.getAllByText("Add overflows").length).toBeGreaterThan(0);
 		expect(screen.getByText("test: production defect at abcdef1")).toBeInTheDocument();
+	});
+
+	it("shows AO's own check results bound to the revision, with failing output", async () => {
+		mockGets(
+			run({
+				state: "paused",
+				pauseReason: "validation_failed",
+				pauseDetail: "Mandatory validation failed against abcdef1: unit (exit 3)",
+				currentStageId: "test",
+				stages: [
+					{ id: "build", kind: "build", state: "accepted", settingsSource: "worker" },
+					{ id: "test", kind: "specialist", state: "failed", settingsSource: "profile" },
+				],
+				attempts: [
+					{ id: "a2", stageId: "test", attemptNo: 1, state: "failed", executorSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now",
+						validation: [
+							{ round: 1, commandId: "unit", command: "go test", required: true, revision: "abcdef1234567", status: "failed", exitCode: 3, startedAt: "now", durationMs: 5, log: "FAIL: TestX", logTruncated: false },
+							{ round: 1, commandId: "lint", command: "lint", required: true, revision: "abcdef1234567", status: "skipped", exitCode: 0, startedAt: "now", durationMs: 0, logTruncated: false },
+						] },
+				],
+			}),
+			[],
+		);
+		renderSection();
+		expect(await screen.findByText(/failed \(3\) · abcdef1/)).toBeInTheDocument();
+		expect(screen.getByText("skipped · abcdef1")).toBeInTheDocument();
+		expect(screen.getByText("FAIL: TestX")).toBeInTheDocument();
 	});
 });

@@ -350,15 +350,15 @@ func (s *Store) SetProjectPermissions(ctx context.Context, id string, permission
 	return row, updated, err
 }
 
-// SetProjectDefaultPipeline sets or clears (nil) the project's default pipeline
-// selection as a focused read-modify-write so every other config field,
-// including ones a caller never loaded, is preserved.
-func (s *Store) SetProjectDefaultPipeline(ctx context.Context, id string, selection *domain.PipelineSelection) (domain.ProjectRecord, bool, error) {
+// patchProjectConfig is a focused read-modify-write of one project's config,
+// serialized with other writes, so a caller that never loaded the rest of the
+// config cannot clobber it.
+func (s *Store) patchProjectConfig(ctx context.Context, op, id string, mutate func(*domain.ProjectConfig)) (domain.ProjectRecord, bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	var row domain.ProjectRecord
 	var updated bool
-	err := s.inTx(ctx, "set project default pipeline", func(q *gen.Queries) error {
+	err := s.inTx(ctx, op, func(q *gen.Queries) error {
 		stored, err := q.GetProject(ctx, domain.ProjectID(id))
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
@@ -370,7 +370,7 @@ func (s *Store) SetProjectDefaultPipeline(ctx context.Context, id string, select
 		if !row.ArchivedAt.IsZero() {
 			return nil
 		}
-		row.Config.DefaultPipeline = selection
+		mutate(&row.Config)
 		config, err := marshalProjectConfig(row.Config)
 		if err != nil {
 			return err
@@ -380,4 +380,16 @@ func (s *Store) SetProjectDefaultPipeline(ctx context.Context, id string, select
 		return err
 	})
 	return row, updated, err
+}
+
+// SetProjectDefaultPipeline sets or clears (nil) the project's default pipeline
+// selection without touching any other config field.
+func (s *Store) SetProjectDefaultPipeline(ctx context.Context, id string, selection *domain.PipelineSelection) (domain.ProjectRecord, bool, error) {
+	return s.patchProjectConfig(ctx, "set project default pipeline", id, func(c *domain.ProjectConfig) { c.DefaultPipeline = selection })
+}
+
+// SetProjectPipelineCommandTrust records the user's authorization (or its
+// revocation) for running repository-declared pipeline validation commands.
+func (s *Store) SetProjectPipelineCommandTrust(ctx context.Context, id string, trusted bool) (domain.ProjectRecord, bool, error) {
+	return s.patchProjectConfig(ctx, "set project pipeline command trust", id, func(c *domain.ProjectConfig) { c.TrustPipelineCommands = trusted })
 }

@@ -3084,6 +3084,52 @@ paths:
         pipelines
       tags:
       - projects
+  /api/v1/projects/{id}/pipelines/command-trust:
+    put:
+      operationId: setProjectPipelineCommandTrust
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPipelineCommandTrustRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineCommandTrust'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Authorize or revoke AO running validation commands declared in repository
+        pipeline profiles
+      tags:
+      - projects
   /api/v1/projects/{id}/pipelines/default:
     get:
       operationId: getProjectDefaultPipeline
@@ -13422,6 +13468,10 @@ components:
           type: string
         summary:
           type: string
+        validation:
+          items:
+            $ref: '#/components/schemas/PipelineCommandResultView'
+          type: array
       required:
       - id
       - stageId
@@ -13430,6 +13480,7 @@ components:
       - executorSessionId
       - noChange
       - instructionDelivery
+      - validation
       - startedAt
       type: object
     PipelineCheckpointView:
@@ -13447,6 +13498,67 @@ components:
       - inputCommit
       - outputCommit
       - noChange
+      type: object
+    PipelineCommandResultView:
+      properties:
+        command:
+          type: string
+        commandId:
+          type: string
+        detail:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        exitCode:
+          type: integer
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        log:
+          type: string
+        logTruncated:
+          type: boolean
+        required:
+          type: boolean
+        revision:
+          type: string
+        round:
+          type: integer
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          enum:
+          - running
+          - passed
+          - failed
+          - operational
+          - timeout
+          - cancelled
+          - skipped
+          - unknown
+          type: string
+      required:
+      - round
+      - commandId
+      - command
+      - required
+      - revision
+      - status
+      - exitCode
+      - startedAt
+      - durationMs
+      - logTruncated
+      type: object
+    PipelineCommandTrust:
+      properties:
+        trusted:
+          type: boolean
+      required:
+      - trusted
       type: object
     PipelineDiagnostic:
       properties:
@@ -13803,6 +13915,7 @@ components:
           - pending
           - handoff
           - active
+          - validating
           - accepted
           - failed
           - interrupted
@@ -13857,6 +13970,8 @@ components:
       type: object
     PipelinesCatalogResponse:
       properties:
+        commandsTrusted:
+          type: boolean
         default:
           $ref: '#/components/schemas/PipelinesDefaultStatus'
         diagnostics:
@@ -13879,6 +13994,7 @@ components:
       - workflows
       - diagnostics
       - default
+      - commandsTrusted
       type: object
     PipelinesDefaultStatus:
       properties:
@@ -14091,6 +14207,8 @@ components:
           type: array
         trackerIntake:
           $ref: '#/components/schemas/TrackerIntakeConfig'
+        trustPipelineCommands:
+          type: boolean
         worker:
           $ref: '#/components/schemas/RoleOverride'
       type: object
@@ -15287,6 +15405,13 @@ components:
           type: string
       required:
       - title
+      type: object
+    SetPipelineCommandTrustRequest:
+      properties:
+        trusted:
+          type: boolean
+      required:
+      - trusted
       type: object
     SetProjectConfigInput:
       properties:

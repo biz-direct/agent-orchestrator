@@ -30,8 +30,11 @@ const (
 	// PipelineAttemptHandoff marks a successor attempt that has been created
 	// (inputs recorded, predecessor accepted) but whose executor is not yet
 	// confirmed started. Nothing executes in this state.
-	PipelineAttemptHandoff     PipelineAttemptState = "handoff"
-	PipelineAttemptActive      PipelineAttemptState = "active"
+	PipelineAttemptHandoff PipelineAttemptState = "handoff"
+	PipelineAttemptActive  PipelineAttemptState = "active"
+	// PipelineAttemptValidating marks an attempt whose result was verified but
+	// whose independent checks are still running. No agent may write.
+	PipelineAttemptValidating  PipelineAttemptState = "validating"
 	PipelineAttemptAccepted    PipelineAttemptState = "accepted"
 	PipelineAttemptFailed      PipelineAttemptState = "failed"
 	PipelineAttemptInterrupted PipelineAttemptState = "interrupted"
@@ -149,6 +152,54 @@ type PipelineAttemptFinish struct {
 	FinishedAt   time.Time
 }
 
+// PipelineAttemptValidation moves an active attempt into independent
+// validation, recording the result it will be judged on.
+type PipelineAttemptValidation struct {
+	ID           string
+	OutputCommit string
+	NoChange     bool
+	Outcome      string
+	Summary      string
+	ResultKey    string
+	ResultJSON   string
+}
+
+// PipelineCommandStatus is the outcome of one independently executed command.
+type PipelineCommandStatus string
+
+// Command statuses. Only passed and failed are genuine verdicts on the code;
+// operational, timeout, cancelled, and unknown are never counted as either.
+const (
+	PipelineCommandRunning     PipelineCommandStatus = "running"
+	PipelineCommandPassed      PipelineCommandStatus = "passed"
+	PipelineCommandFailed      PipelineCommandStatus = "failed"
+	PipelineCommandOperational PipelineCommandStatus = "operational"
+	PipelineCommandTimeout     PipelineCommandStatus = "timeout"
+	PipelineCommandCancelled   PipelineCommandStatus = "cancelled"
+	PipelineCommandSkipped     PipelineCommandStatus = "skipped"
+	PipelineCommandUnknown     PipelineCommandStatus = "unknown"
+)
+
+// PipelineCommandResult is the durable evidence of one command execution,
+// bound to the exact revision it ran against.
+type PipelineCommandResult struct {
+	ID           int64
+	AttemptID    string
+	Round        int
+	Ordinal      int
+	CommandID    string
+	Command      string
+	Required     bool
+	Revision     string
+	Status       PipelineCommandStatus
+	ExitCode     int
+	StartedAt    time.Time
+	FinishedAt   *time.Time
+	Log          string
+	LogTruncated bool
+	Detail       string
+}
+
 // PipelineAttemptActivation confirms a handoff attempt's executor started.
 type PipelineAttemptActivation struct {
 	ID                   string
@@ -168,6 +219,8 @@ type PipelineTransition struct {
 	NewAttempt *PipelineStageAttempt
 	// Activate flips a handoff attempt to active.
 	Activate *PipelineAttemptActivation
+	// Validate moves an active attempt into independent validation.
+	Validate *PipelineAttemptValidation
 	Events   []PipelineEvent
 	At       time.Time
 }

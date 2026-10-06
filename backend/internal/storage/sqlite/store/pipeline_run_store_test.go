@@ -155,3 +155,82 @@ func TestPipelineChangesEmitSessionUpdatedCDC(t *testing.T) {
 		t.Fatalf("expected session_updated events for pipeline writes, got %d", updates)
 	}
 }
+
+func TestPipelineCommandEvidenceLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s, sid := seedPipelineSession(t, "pr5")
+	at := time.Now().UTC().Truncate(time.Second)
+	run, attempt := newRun("run-1", sid, "pr5", at)
+	created, _, err := s.CreatePipelineRun(ctx, run, attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An active attempt moves into validation exactly once.
+	validate := domain.PipelineTransition{
+		RunID: run.ID, ExpectedRevision: created.Revision, At: at,
+		Validate: &domain.PipelineAttemptValidation{ID: attempt.ID, OutputCommit: "cafe", Outcome: "succeeded", ResultKey: "k", ResultJSON: "{}"},
+	}
+	if _, err := s.CommitPipelineTransition(ctx, validate); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := s.GetPipelineStageAttempt(ctx, attempt.ID); got.State != domain.PipelineAttemptValidating || got.OutputCommit != "cafe" || got.ResultKey != "k" {
+		t.Fatalf("attempt: %+v", got)
+	}
+	if _, err := s.CommitPipelineTransition(ctx, validate); !errors.Is(err, domain.ErrPipelineConflict) {
+		t.Fatalf("a second validation start must conflict, got %v", err)
+	}
+
+	id, err := s.CreatePipelineCommandResult(ctx, domain.PipelineCommandResult{AttemptID: attempt.ID, Round: 1, Ordinal: 0, CommandID: "unit", Command: "go test", Required: true, Revision: "cafe", Status: domain.PipelineCommandRunning, StartedAt: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := s.ListPipelineCommandResults(ctx, attempt.ID); len(res) != 1 || res[0].Status != domain.PipelineCommandRunning {
+		t.Fatalf("a command is recorded as running before it starts: %+v", res)
+	}
+	// A restart finds it still running and records it unknown; it is never inferred.
+	n, err := s.MarkRunningPipelineCommandsUnknown(ctx, run.ID, at.Add(time.Second), "daemon stopped")
+	if err != nil || n != 1 {
+		t.Fatalf("mark unknown: n=%d err=%v", n, err)
+	}
+	res, _ := s.ListPipelineCommandResults(ctx, attempt.ID)
+	if res[0].Status != domain.PipelineCommandUnknown || res[0].Detail != "daemon stopped" || res[0].FinishedAt == nil {
+		t.Fatalf("result: %+v", res[0])
+	}
+	if n, _ := s.MarkRunningPipelineCommandsUnknown(ctx, run.ID, at, "again"); n != 0 {
+		t.Fatal("settled commands are never re-marked")
+	}
+	done := at.Add(time.Minute)
+	if err := s.FinishPipelineCommandResult(ctx, id, domain.PipelineCommandResult{Status: domain.PipelineCommandPassed, ExitCode: 0, FinishedAt: &done, Log: "ok", LogTruncated: true}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = s.ListPipelineCommandResults(ctx, attempt.ID)
+	if res[0].Status != domain.PipelineCommandPassed || res[0].Log != "ok" || !res[0].LogTruncated || !res[0].Required {
+		t.Fatalf("finished: %+v", res[0])
+	}
+	// A validating attempt can still be finished by the validator.
+	if _, err := s.CommitPipelineTransition(ctx, domain.PipelineTransition{
+		RunID: run.ID, ExpectedRevision: created.Revision, At: done,
+		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: "cafe", Outcome: "succeeded", ResultKey: "k", FinishedAt: done},
+	}); err != nil {
+		t.Fatalf("validating attempts must be finishable: %v", err)
+	}
+}
+
+func TestProjectPipelineCommandTrustPreservesOtherSettings(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.UpsertProject(ctx, domain.ProjectRecord{ID: "trust", Path: "/tmp/trust", RegisteredAt: time.Now().UTC().Truncate(time.Second), Config: domain.ProjectConfig{AgentRules: "keep me"}}); err != nil {
+		t.Fatal(err)
+	}
+	row, ok, err := s.SetProjectPipelineCommandTrust(ctx, "trust", true)
+	if err != nil || !ok || !row.Config.TrustPipelineCommands || row.Config.AgentRules != "keep me" {
+		t.Fatalf("grant: %+v ok=%v err=%v", row.Config, ok, err)
+	}
+	got, _, _ := s.GetProject(ctx, "trust")
+	if !got.Config.TrustPipelineCommands || got.Config.AgentRules != "keep me" {
+		t.Fatalf("persisted: %+v", got.Config)
+	}
+	if _, ok, _ := s.SetProjectPipelineCommandTrust(ctx, "ghost", true); ok {
+		t.Fatal("unknown project")
+	}
+}

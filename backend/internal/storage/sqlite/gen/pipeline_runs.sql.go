@@ -60,6 +60,59 @@ func (q *Queries) ActivatePipelineStageAttempt(ctx context.Context, arg Activate
 	return i, err
 }
 
+const createPipelineCommandResult = `-- name: CreatePipelineCommandResult :one
+INSERT INTO pipeline_command_results (
+    attempt_id, round, ordinal, command_id, command, required, revision, status, started_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, attempt_id, round, ordinal, command_id, command, required, revision, status, exit_code, started_at, finished_at, log, log_truncated, detail
+`
+
+type CreatePipelineCommandResultParams struct {
+	AttemptID string
+	Round     int64
+	Ordinal   int64
+	CommandID string
+	Command   string
+	Required  int64
+	Revision  string
+	Status    string
+	StartedAt time.Time
+}
+
+func (q *Queries) CreatePipelineCommandResult(ctx context.Context, arg CreatePipelineCommandResultParams) (PipelineCommandResult, error) {
+	row := q.db.QueryRowContext(ctx, createPipelineCommandResult,
+		arg.AttemptID,
+		arg.Round,
+		arg.Ordinal,
+		arg.CommandID,
+		arg.Command,
+		arg.Required,
+		arg.Revision,
+		arg.Status,
+		arg.StartedAt,
+	)
+	var i PipelineCommandResult
+	err := row.Scan(
+		&i.ID,
+		&i.AttemptID,
+		&i.Round,
+		&i.Ordinal,
+		&i.CommandID,
+		&i.Command,
+		&i.Required,
+		&i.Revision,
+		&i.Status,
+		&i.ExitCode,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Log,
+		&i.LogTruncated,
+		&i.Detail,
+	)
+	return i, err
+}
+
 const createPipelineEvent = `-- name: CreatePipelineEvent :exec
 INSERT INTO pipeline_events (run_id, attempt_id, kind, detail, created_at)
 VALUES (?, ?, ?, ?, ?)
@@ -212,6 +265,40 @@ func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipe
 	return i, err
 }
 
+const finishPipelineCommandResult = `-- name: FinishPipelineCommandResult :exec
+UPDATE pipeline_command_results
+SET status = ?1,
+    exit_code = ?2,
+    finished_at = ?3,
+    log = ?4,
+    log_truncated = ?5,
+    detail = ?6
+WHERE id = ?7
+`
+
+type FinishPipelineCommandResultParams struct {
+	Status       string
+	ExitCode     int64
+	FinishedAt   sql.NullTime
+	Log          string
+	LogTruncated int64
+	Detail       string
+	ID           int64
+}
+
+func (q *Queries) FinishPipelineCommandResult(ctx context.Context, arg FinishPipelineCommandResultParams) error {
+	_, err := q.db.ExecContext(ctx, finishPipelineCommandResult,
+		arg.Status,
+		arg.ExitCode,
+		arg.FinishedAt,
+		arg.Log,
+		arg.LogTruncated,
+		arg.Detail,
+		arg.ID,
+	)
+	return err
+}
+
 const finishPipelineStageAttempt = `-- name: FinishPipelineStageAttempt :one
 UPDATE pipeline_stage_attempts
 SET state = ?1,
@@ -222,7 +309,7 @@ SET state = ?1,
     result_key = ?6,
     result_json = ?7,
     finished_at = ?8
-WHERE id = ?9 AND state IN ('active', 'handoff')
+WHERE id = ?9 AND state IN ('active', 'handoff', 'validating')
 RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json
 `
 
@@ -413,6 +500,49 @@ func (q *Queries) HasUnfinishedPipelineRun(ctx context.Context, sessionID string
 	return exists, err
 }
 
+const listPipelineCommandResults = `-- name: ListPipelineCommandResults :many
+SELECT id, attempt_id, round, ordinal, command_id, command, required, revision, status, exit_code, started_at, finished_at, log, log_truncated, detail FROM pipeline_command_results WHERE attempt_id = ? ORDER BY round, ordinal
+`
+
+func (q *Queries) ListPipelineCommandResults(ctx context.Context, attemptID string) ([]PipelineCommandResult, error) {
+	rows, err := q.db.QueryContext(ctx, listPipelineCommandResults, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PipelineCommandResult{}
+	for rows.Next() {
+		var i PipelineCommandResult
+		if err := rows.Scan(
+			&i.ID,
+			&i.AttemptID,
+			&i.Round,
+			&i.Ordinal,
+			&i.CommandID,
+			&i.Command,
+			&i.Required,
+			&i.Revision,
+			&i.Status,
+			&i.ExitCode,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Log,
+			&i.LogTruncated,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPipelineEvents = `-- name: ListPipelineEvents :many
 SELECT id, run_id, attempt_id, kind, detail, created_at FROM pipeline_events WHERE run_id = ? ORDER BY id DESC LIMIT ?
 `
@@ -499,6 +629,51 @@ func (q *Queries) ListPipelineStageAttempts(ctx context.Context, runID string) (
 	return items, nil
 }
 
+const listRunningPipelineCommandResults = `-- name: ListRunningPipelineCommandResults :many
+SELECT c.id, c.attempt_id, c.round, c.ordinal, c.command_id, c.command, c.required, c.revision, c.status, c.exit_code, c.started_at, c.finished_at, c.log, c.log_truncated, c.detail FROM pipeline_command_results c
+JOIN pipeline_stage_attempts a ON a.id = c.attempt_id
+WHERE c.status = 'running' AND a.run_id = ?
+`
+
+func (q *Queries) ListRunningPipelineCommandResults(ctx context.Context, runID string) ([]PipelineCommandResult, error) {
+	rows, err := q.db.QueryContext(ctx, listRunningPipelineCommandResults, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PipelineCommandResult{}
+	for rows.Next() {
+		var i PipelineCommandResult
+		if err := rows.Scan(
+			&i.ID,
+			&i.AttemptID,
+			&i.Round,
+			&i.Ordinal,
+			&i.CommandID,
+			&i.Command,
+			&i.Required,
+			&i.Revision,
+			&i.Status,
+			&i.ExitCode,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Log,
+			&i.LogTruncated,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnfinishedPipelineRuns = `-- name: ListUnfinishedPipelineRuns :many
 SELECT id, session_id, project_id, workflow_id, state, pause_reason, pause_detail, current_stage_id, requested_by, expected_branch, repair_budget, repairs_used, snapshot, snapshot_sha256, revision, created_at, updated_at, completed_at FROM pipeline_runs WHERE state IN ('running', 'paused') ORDER BY created_at, id
 `
@@ -543,6 +718,23 @@ func (q *Queries) ListUnfinishedPipelineRuns(ctx context.Context) ([]PipelineRun
 		return nil, err
 	}
 	return items, nil
+}
+
+const markPipelineCommandResultUnknown = `-- name: MarkPipelineCommandResultUnknown :exec
+UPDATE pipeline_command_results
+SET status = 'unknown', finished_at = ?, detail = ?
+WHERE id = ? AND status = 'running'
+`
+
+type MarkPipelineCommandResultUnknownParams struct {
+	FinishedAt sql.NullTime
+	Detail     string
+	ID         int64
+}
+
+func (q *Queries) MarkPipelineCommandResultUnknown(ctx context.Context, arg MarkPipelineCommandResultUnknownParams) error {
+	_, err := q.db.ExecContext(ctx, markPipelineCommandResultUnknown, arg.FinishedAt, arg.Detail, arg.ID)
+	return err
 }
 
 const setPipelineAttemptInstructionDelivery = `-- name: SetPipelineAttemptInstructionDelivery :exec
@@ -614,6 +806,64 @@ func (q *Queries) SetPipelineRunState(ctx context.Context, arg SetPipelineRunSta
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const startPipelineAttemptValidation = `-- name: StartPipelineAttemptValidation :one
+UPDATE pipeline_stage_attempts
+SET state = 'validating',
+    output_commit = ?1,
+    no_change = ?2,
+    outcome = ?3,
+    summary = ?4,
+    result_key = ?5,
+    result_json = ?6
+WHERE id = ?7 AND state = 'active'
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json
+`
+
+type StartPipelineAttemptValidationParams struct {
+	OutputCommit string
+	NoChange     int64
+	Outcome      string
+	Summary      string
+	ResultKey    string
+	ResultJson   string
+	ID           string
+}
+
+func (q *Queries) StartPipelineAttemptValidation(ctx context.Context, arg StartPipelineAttemptValidationParams) (PipelineStageAttempt, error) {
+	row := q.db.QueryRowContext(ctx, startPipelineAttemptValidation,
+		arg.OutputCommit,
+		arg.NoChange,
+		arg.Outcome,
+		arg.Summary,
+		arg.ResultKey,
+		arg.ResultJson,
+		arg.ID,
+	)
+	var i PipelineStageAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.StageID,
+		&i.StageKind,
+		&i.AttemptNo,
+		&i.State,
+		&i.ExecutorSessionID,
+		&i.ControllerGeneration,
+		&i.InputCommit,
+		&i.OutputCommit,
+		&i.NoChange,
+		&i.Outcome,
+		&i.Summary,
+		&i.ResultKey,
+		&i.InstructionDelivery,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.PredecessorAttemptID,
+		&i.ResultJson,
 	)
 	return i, err
 }

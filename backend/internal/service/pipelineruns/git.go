@@ -21,6 +21,10 @@ type GitState struct {
 	// Dirty lists tracked changes and untracked, non-ignored files (bounded).
 	Dirty      []string
 	DirtyTotal int
+	// Tracked lists changes to tracked files only (untracked build output is
+	// tolerated after independent checks run, tracked edits are not).
+	Tracked      []string
+	TrackedTotal int
 }
 
 // Git inspects a workspace. Implementations must be read-only: pipeline code
@@ -57,6 +61,12 @@ func (ExecGit) Inspect(ctx context.Context, workspace string) (GitState, error) 
 		state.DirtyTotal++
 		if len(state.Dirty) < maxReportedDirtyPaths {
 			state.Dirty = append(state.Dirty, entry)
+		}
+		if !strings.HasPrefix(entry, "??") {
+			state.TrackedTotal++
+			if len(state.Tracked) < maxReportedDirtyPaths {
+				state.Tracked = append(state.Tracked, entry)
+			}
 		}
 	}
 	return state, nil

@@ -114,13 +114,23 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	var pending *domain.PipelineStageAttempt
+	var pending, validating *domain.PipelineStageAttempt
 	byID := map[string]domain.PipelineStageAttempt{}
 	for i := range attempts {
 		byID[attempts[i].ID] = attempts[i]
-		if attempts[i].State == domain.PipelineAttemptHandoff {
+		switch attempts[i].State {
+		case domain.PipelineAttemptHandoff:
 			pending = &attempts[i]
+		case domain.PipelineAttemptValidating:
+			validating = &attempts[i]
 		}
+	}
+	if validating != nil && validating.StageID == run.CurrentStageID {
+		snap, err := parseSnapshot(run.Snapshot)
+		if err != nil {
+			return err
+		}
+		return s.driveValidation(ctx, run, *validating, snap)
 	}
 	if pending == nil || pending.StageID != run.CurrentStageID {
 		return nil

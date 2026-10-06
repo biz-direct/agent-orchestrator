@@ -49,13 +49,24 @@ type pipelineStageViewDTO struct {
 }
 
 type pipelineAttemptViewDTO struct {
-	ID                   string `json:"id"`
-	StageID              string `json:"stageId"`
-	AttemptNo            int    `json:"attemptNo"`
-	State                string `json:"state"`
-	ControllerGeneration string `json:"controllerGeneration,omitempty"`
-	InputCommit          string `json:"inputCommit,omitempty"`
-	OutputCommit         string `json:"outputCommit,omitempty"`
+	ID                   string             `json:"id"`
+	StageID              string             `json:"stageId"`
+	AttemptNo            int                `json:"attemptNo"`
+	State                string             `json:"state"`
+	ControllerGeneration string             `json:"controllerGeneration,omitempty"`
+	InputCommit          string             `json:"inputCommit,omitempty"`
+	OutputCommit         string             `json:"outputCommit,omitempty"`
+	Validation           []pipelineCheckDTO `json:"validation"`
+}
+
+type pipelineCheckDTO struct {
+	Round     int    `json:"round"`
+	CommandID string `json:"commandId"`
+	Required  bool   `json:"required"`
+	Revision  string `json:"revision"`
+	Status    string `json:"status"`
+	ExitCode  int    `json:"exitCode"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 type pipelineCheckpointDTO struct {
@@ -319,6 +330,26 @@ func writePipelineRun(w io.Writer, run *pipelineRunDTO) error {
 		}
 		if _, err := fmt.Fprintf(w, "checkpoint: %s -> %s\n", shortHash(run.Checkpoint.InputCommit), change); err != nil {
 			return err
+		}
+	}
+	for _, a := range run.Attempts {
+		if len(a.Validation) == 0 {
+			continue
+		}
+		round := 0
+		for _, c := range a.Validation {
+			round = max(round, c.Round)
+		}
+		if _, err := fmt.Fprintf(w, "validation for stage %s (round %d):\n", a.StageID, round); err != nil {
+			return err
+		}
+		for _, c := range a.Validation {
+			if c.Round != round {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "  %-12s %-11s exit=%d rev=%s %s\n", c.CommandID, c.Status, c.ExitCode, shortHash(c.Revision), c.Detail); err != nil {
+				return err
+			}
 		}
 	}
 	if r := run.LastRejection; r != nil {

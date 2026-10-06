@@ -146,3 +146,27 @@ func TestPipelineKeepsDaemonErrorEnvelope(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestPipelineTrustAuthorizesAndRevokes(t *testing.T) {
+	var bodies []string
+	pipelineServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/projects/demo/pipelines/command-trust" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, strings.TrimSpace(string(raw)))
+		_, _ = w.Write(raw)
+	})
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+	if out, _, err := executeCLI(t, deps, "pipeline", "trust", "--project", "demo"); err != nil || !strings.Contains(out, "authorized") {
+		t.Fatalf("trust: err=%v out=%s", err, out)
+	}
+	if out, _, err := executeCLI(t, deps, "pipeline", "trust", "--revoke", "--project", "demo"); err != nil || !strings.Contains(out, "revoked") {
+		t.Fatalf("revoke: err=%v out=%s", err, out)
+	}
+	if len(bodies) != 2 || bodies[0] != `{"trusted":true}` || bodies[1] != `{"trusted":false}` {
+		t.Fatalf("bodies: %v", bodies)
+	}
+}

@@ -32,6 +32,7 @@ function catalog(overrides: Record<string, unknown> = {}) {
 		],
 		diagnostics: [],
 		default: { selection: null, state: "unset", executable: false, message: "No default pipeline is set." },
+		commandsTrusted: false,
 		...overrides,
 	};
 }
@@ -131,5 +132,31 @@ describe("ProjectPipelineSettings", () => {
 		await userEvent.click(await screen.findByRole("button", { name: "Default pipeline" }));
 		await userEvent.click(screen.getByRole("menuitem", { name: /build-test-review/ }));
 		expect(await screen.findByRole("alert")).toHaveTextContent("Workflow has validation errors");
+	});
+
+	it("lets the user authorize repository validation commands, and only when profiles declare them", async () => {
+		getMock.mockResolvedValue({ data: catalog() });
+		const { unmount } = renderSettings();
+		await screen.findByRole("button", { name: "Default pipeline" });
+		expect(screen.queryByRole("switch", { name: "Run repository validation commands" })).not.toBeInTheDocument();
+		unmount();
+
+		getMock.mockResolvedValue({
+			data: catalog({
+				profiles: [{ id: "tester", file: "f", valid: true, diagnostics: [], profile: { id: "tester", validation: [{ id: "unit", command: "go test", timeoutSeconds: 60, required: true }] } }],
+			}),
+		});
+		putMock.mockResolvedValue({ data: { trusted: true } });
+		renderSettings();
+		const toggle = await screen.findByRole("switch", { name: "Run repository validation commands" });
+		expect(screen.getByText(/AO runs them only after you allow it here/)).toBeInTheDocument();
+		await userEvent.click(toggle);
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/projects/{id}/pipelines/command-trust", {
+				params: { path: { id: "proj-1" } },
+				body: { trusted: true },
+			}),
+		);
+		await waitFor(() => expect(screen.queryByText(/AO runs them only after you allow it here/)).not.toBeInTheDocument());
 	});
 });

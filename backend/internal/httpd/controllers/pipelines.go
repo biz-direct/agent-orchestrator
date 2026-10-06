@@ -22,6 +22,7 @@ func (c *PipelinesController) Register(r chi.Router) {
 	r.Get("/projects/{id}/pipelines", c.catalog)
 	r.Get("/projects/{id}/pipelines/default", c.getDefault)
 	r.Put("/projects/{id}/pipelines/default", c.setDefault)
+	r.Put("/projects/{id}/pipelines/command-trust", c.setCommandTrust)
 }
 
 func (c *PipelinesController) catalog(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +62,24 @@ func (c *PipelinesController) setDefault(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	out, err := c.Mgr.SetDefault(r.Context(), projectID(r), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *PipelinesController) setCommandTrust(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/projects/{id}/pipelines/command-trust")
+		return
+	}
+	var in pipelinessvc.SetCommandTrustInput
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	out, err := c.Mgr.SetCommandTrust(r.Context(), projectID(r), in)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

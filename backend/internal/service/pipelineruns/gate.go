@@ -84,6 +84,8 @@ func (g *StoreGate) AdmitSessionExecution(ctx context.Context, id domain.Session
 			return true, ""
 		}
 		return false, fmt.Sprintf("this task is running pipeline stage %q in a different conversation", current.StageID)
+	case domain.PipelineAttemptValidating:
+		return false, fmt.Sprintf("AO is running independent validation checks for stage %q; nothing may write the worktree meanwhile", current.StageID)
 	case domain.PipelineAttemptHandoff:
 		return false, fmt.Sprintf("this task is handing off to pipeline stage %q; no stage is executing yet", current.StageID)
 	default:

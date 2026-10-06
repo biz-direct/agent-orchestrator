@@ -71,12 +71,17 @@ type pipelineDefaultDTO struct {
 	Message    string                `json:"message"`
 }
 
+type pipelineTrustDTO struct {
+	Trusted bool `json:"trusted"`
+}
+
 type pipelineCatalogDTO struct {
-	ProjectID   string                    `json:"projectId"`
-	Profiles    []pipelineProfileEntryDTO `json:"profiles"`
-	Workflows   []pipelineWorkflowDTO     `json:"workflows"`
-	Diagnostics []pipelineDiagnosticDTO   `json:"diagnostics"`
-	Default     pipelineDefaultDTO        `json:"default"`
+	ProjectID       string                    `json:"projectId"`
+	Profiles        []pipelineProfileEntryDTO `json:"profiles"`
+	Workflows       []pipelineWorkflowDTO     `json:"workflows"`
+	Diagnostics     []pipelineDiagnosticDTO   `json:"diagnostics"`
+	Default         pipelineDefaultDTO        `json:"default"`
+	CommandsTrusted bool                      `json:"commandsTrusted"`
 }
 
 type pipelineSetDefaultDTO struct {
@@ -97,6 +102,7 @@ func newPipelineCommand(ctx *commandContext) *cobra.Command {
 		newPipelineListCommand(ctx),
 		newPipelineValidateCommand(ctx),
 		newPipelineDefaultCommand(ctx),
+		newPipelineTrustCommand(ctx),
 		newPipelineStartCommand(ctx),
 		newPipelineStatusCommand(ctx),
 		newPipelineSubmitCommand(ctx),
@@ -361,4 +367,40 @@ func writePipelineCatalog(w io.Writer, res pipelineCatalogDTO) error {
 		return err
 	}
 	return nil
+}
+
+func newPipelineTrustCommand(ctx *commandContext) *cobra.Command {
+	var project string
+	var revoke, jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "trust",
+		Short: "Authorize (or --revoke) AO running validation commands declared in repository pipeline profiles",
+		Long: "Pipeline profiles can declare validation commands in repository files. Those are repository-controlled, " +
+			"so AO runs them only after you authorize it for the project. Authorization is checked each time commands " +
+			"are about to run, so --revoke takes effect immediately.",
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			resolved, err := ctx.resolveSpawnProject(cmd.Context(), project)
+			if err != nil {
+				return err
+			}
+			var res pipelineTrustDTO
+			if err := ctx.putJSON(cmd.Context(), "projects/"+url.PathEscape(resolved.ID)+"/pipelines/command-trust", pipelineTrustDTO{Trusted: !revoke}, &res); err != nil {
+				return err
+			}
+			if jsonOutput {
+				return writeJSON(cmd.OutOrStdout(), res)
+			}
+			state := "revoked"
+			if res.Trusted {
+				state = "authorized"
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "repository pipeline commands %s for project %s\n", state, resolved.ID)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", "", pipelineProjectFlagHelp)
+	cmd.Flags().BoolVar(&revoke, "revoke", false, "Revoke the authorization")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
 }

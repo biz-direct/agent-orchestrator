@@ -229,6 +229,9 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainProjectConfig":             "ProjectConfig",
 	"DomainPipelineSelection":         "PipelineSelection",
 	"PipelinerunsStageReport":         "PipelineStageReport",
+	"PipelinerunsCommandResultView":   "PipelineCommandResultView",
+	"PipelinesCommandTrust":           "PipelineCommandTrust",
+	"PipelinesSetCommandTrustInput":   "SetPipelineCommandTrustRequest",
 	"PipelinerunsReportFinding":       "PipelineReportFinding",
 	"PipelinerunsReportCommand":       "PipelineReportCommand",
 	"PipelinerunsReportDefect":        "PipelineReportDefect",
@@ -2252,6 +2255,18 @@ func projectOperations() []operation {
 			reqBody:    pipelinessvc.SetDefaultInput{},
 			resps: []respUnit{
 				{http.StatusOK, pipelinessvc.DefaultStatus{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/projects/{id}/pipelines/command-trust", id: "setProjectPipelineCommandTrust", tag: "projects",
+			summary:    "Authorize or revoke AO running validation commands declared in repository pipeline profiles",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			reqBody:    pipelinessvc.SetCommandTrustInput{},
+			resps: []respUnit{
+				{http.StatusOK, pipelinessvc.CommandTrust{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},

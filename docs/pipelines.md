@@ -12,7 +12,8 @@ Status by delivery slice (parent design: issue #1):
 | Single-stage Build run on an existing Chat worker, snapshots, verified results | shipped |
 | Attached Chat specialists run sequentially in the same worktree | shipped |
 | Specialist scope enforcement and structured result contract | shipped |
-| Validation commands, Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
+| Independent validation commands with revision-bound evidence | shipped |
+| Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
 
 A valid workflow that this build cannot execute (one with a `review` stage today) can be selected but is shown as **unavailable**. AO never silently
 substitutes a normal worker for a selected workflow that cannot run, and a
@@ -212,3 +213,44 @@ advance a stage whose commits do.
 
 Specialist results are listed as **evidence bound to the exact revision they
 cover**; they are never presented as validation of a later head.
+
+## Independent validation
+
+A profile may declare `validation` commands. For a specialist's **passing** result
+the agent's report is only half the gate: after the daemon verifies the commit
+and scope it moves the attempt to `validating`, proves the executor stopped, and
+**runs the snapshotted commands itself** against the exact committed checkpoint.
+The stage advances only when the structured outcome *and* every `required` check
+agree.
+
+- **Trusted execution.** Commands come from repository files, so AO runs them
+  only after the user authorizes it: **Settings → Project → Pipeline → Run
+  repository validation commands**, or `ao pipeline trust` / `--revoke`. The flag
+  is never read from a repository file and is checked every time commands are
+  about to run, so revoking it stops later commands. Without it the run pauses
+  with `commands_not_authorized` and nothing runs.
+- **Snapshot.** The command list and timeouts come from the run's startup
+  snapshot; neither the agent nor a later repository edit can replace them for
+  an active run.
+- **Exclusive.** While `validating`, the execution gate refuses every session, and
+  one driver slot per run collapses overlapping requests into one.
+- **Evidence.** Each command is recorded *before* it starts (so a crash leaves
+  proof it may have run) and then with its identity, revision, timing, exit
+  status, and a bounded log (first 8 KiB + last 24 KiB). Logs are sanitized
+  (terminal escapes and control bytes removed; token-shaped strings and the
+  values of secret-named environment variables redacted). Commands run with the
+  daemon's environment minus every `AO_*` variable.
+- **Verdicts.** A clean exit passes; an ordinary non-zero exit of a `required`
+  check is a genuine failure (`validation_failed`, retained for repair routing).
+  Launch failures (exit 126/127, cannot start), timeouts, cancellation, and
+  unknown results are **operational**: the run pauses (`validation_operational`)
+  and they are never read as code defects or spend the repair budget.
+- **Cleanup.** Every command runs in its own process group with an explicit
+  timeout; on timeout or cancellation the whole group is killed, so nothing
+  outlives its round (on Windows only the shell process is killed).
+- **After the checks.** Branch, `HEAD`, and tracked files must be unchanged
+  (untracked build output is tolerated). Anything else pauses
+  (`validation_mutated_workspace`) with the changes preserved.
+- **Restart.** A command still marked running when AO restarts is recorded as
+  `unknown`, the run pauses (`validation_interrupted`), and it is neither assumed
+  to have passed nor retried.

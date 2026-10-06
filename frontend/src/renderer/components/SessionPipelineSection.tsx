@@ -15,6 +15,7 @@ type RunView = components["schemas"]["PipelineRunView"];
 type StageView = components["schemas"]["PipelineStageView"];
 type AttemptView = components["schemas"]["PipelineAttemptView"];
 type EvidenceView = components["schemas"]["PipelineEvidenceView"];
+type CommandResult = components["schemas"]["PipelineCommandResultView"];
 type Catalog = components["schemas"]["PipelinesCatalogResponse"];
 
 export const sessionPipelineQueryKey = (sessionId: string, hostId?: string) =>
@@ -151,6 +152,7 @@ function RunSummary({ run, session, hostId }: { run: RunView; session: Workspace
 							key={stage.id}
 							stage={stage}
 							report={latestReport(run.attempts, stage.id)}
+							validation={latestValidation(run.attempts, stage.id)}
 							onOpenConversation={conversation ? () => setOpenStage({ stageId: stage.id, sessionId: conversation, provider: stage.harness }) : undefined}
 						/>
 					);
@@ -197,6 +199,42 @@ function latestReport(attempts: AttemptView[], stageId: string) {
 	return withReport[withReport.length - 1]?.report;
 }
 
+function latestValidation(attempts: AttemptView[], stageId: string): CommandResult[] {
+	const withChecks = attempts.filter((a) => a.stageId === stageId && a.validation.length > 0);
+	const latest = withChecks[withChecks.length - 1]?.validation ?? [];
+	const round = Math.max(0, ...latest.map((c) => c.round));
+	return latest.filter((c) => c.round === round);
+}
+
+function ValidationList({ checks }: { checks: CommandResult[] }) {
+	const { t } = useTranslation();
+	return (
+		<ul className="mt-1 flex flex-col gap-0.5 text-2xs leading-normal">
+			{checks.map((check) => {
+				const bad = check.status !== "passed" && check.status !== "skipped";
+				return (
+					<li key={`${check.round}-${check.commandId}`} data-check-status={check.status}>
+						<div className="flex items-baseline justify-between gap-2">
+							<span className="min-w-0 truncate font-mono">{check.commandId}</span>
+							<span className={cn("shrink-0", check.status === "passed" ? "text-success" : bad ? "text-error" : "text-settings-muted")}>
+								{t(`inspector.pipeline.check.${check.status}`)}
+								{check.status === "failed" ? ` (${check.exitCode})` : ""} · {check.revision.slice(0, 7)}
+							</span>
+						</div>
+						{bad && check.detail ? <p className="text-pretty text-settings-muted">{check.detail}</p> : null}
+						{bad && check.log ? (
+							<details>
+								<summary className="cursor-pointer text-settings-muted">{t("inspector.pipeline.checkOutput")}</summary>
+								<pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-2xs">{check.log}</pre>
+							</details>
+						) : null}
+					</li>
+				);
+			})}
+		</ul>
+	);
+}
+
 function EvidenceList({ evidence }: { evidence: EvidenceView[] }) {
 	const { t } = useTranslation();
 	return (
@@ -214,7 +252,7 @@ function EvidenceList({ evidence }: { evidence: EvidenceView[] }) {
 	);
 }
 
-function StageRow({ stage, report, onOpenConversation }: { stage: StageView; report?: AttemptView["report"]; onOpenConversation?: () => void }) {
+function StageRow({ stage, report, validation, onOpenConversation }: { stage: StageView; report?: AttemptView["report"]; validation: CommandResult[]; onOpenConversation?: () => void }) {
 	const { t } = useTranslation();
 	return (
 		<li className="py-1.5 text-sm" data-stage-state={stage.state}>
@@ -243,6 +281,7 @@ function StageRow({ stage, report, onOpenConversation }: { stage: StageView; rep
 					{t("inspector.pipeline.scope", { paths: stage.allowedPaths.join(", ") })}
 				</p>
 			) : null}
+			{validation.length > 0 ? <ValidationList checks={validation} /> : null}
 			{report ? (
 				<div className="mt-0.5 text-pretty text-2xs leading-normal text-settings-muted">
 					<p>

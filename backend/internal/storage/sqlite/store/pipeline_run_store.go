@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/gen"
@@ -186,6 +187,19 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 			}
 			out = row
 		}
+		if t.Validate != nil {
+			v := t.Validate
+			_, err := q.StartPipelineAttemptValidation(ctx, gen.StartPipelineAttemptValidationParams{
+				OutputCommit: v.OutputCommit, NoChange: boolInt(v.NoChange), Outcome: v.Outcome, Summary: v.Summary,
+				ResultKey: v.ResultKey, ResultJson: v.ResultJSON, ID: v.ID,
+			})
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.ErrPipelineConflict
+			}
+			if err != nil {
+				return err
+			}
+		}
 		if t.NewAttempt != nil {
 			na := t.NewAttempt
 			if _, err := q.CreatePipelineStageAttempt(ctx, gen.CreatePipelineStageAttemptParams{
@@ -337,4 +351,87 @@ func (s *Store) ListAttachedSessionIDs(ctx context.Context, owner domain.Session
 		return nil, fmt.Errorf("list attached sessions: %w", err)
 	}
 	return append(make([]domain.SessionID, 0, len(ids)), ids...), nil
+}
+
+// CreatePipelineCommandResult records a command as running before its process
+// starts, so a crash leaves evidence that it may have executed.
+func (s *Store) CreatePipelineCommandResult(ctx context.Context, r domain.PipelineCommandResult) (int64, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var id int64
+	err := s.inTx(ctx, "create pipeline command result", func(q *gen.Queries) error {
+		row, err := q.CreatePipelineCommandResult(ctx, gen.CreatePipelineCommandResultParams{
+			AttemptID: r.AttemptID, Round: int64(r.Round), Ordinal: int64(r.Ordinal), CommandID: r.CommandID, Command: r.Command,
+			Required: boolInt(r.Required), Revision: r.Revision, Status: string(r.Status), StartedAt: r.StartedAt,
+		})
+		id = row.ID
+		return err
+	})
+	return id, err
+}
+
+// FinishPipelineCommandResult settles a command's evidence.
+func (s *Store) FinishPipelineCommandResult(ctx context.Context, id int64, r domain.PipelineCommandResult) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.inTx(ctx, "finish pipeline command result", func(q *gen.Queries) error {
+		return q.FinishPipelineCommandResult(ctx, gen.FinishPipelineCommandResultParams{
+			Status: string(r.Status), ExitCode: int64(r.ExitCode), FinishedAt: nullTime(derefTime(r.FinishedAt)),
+			Log: r.Log, LogTruncated: boolInt(r.LogTruncated), Detail: r.Detail, ID: id,
+		})
+	})
+}
+
+// ListPipelineCommandResults returns an attempt's command evidence in order.
+func (s *Store) ListPipelineCommandResults(ctx context.Context, attemptID string) ([]domain.PipelineCommandResult, error) {
+	rows, err := s.qr.ListPipelineCommandResults(ctx, attemptID)
+	if err != nil {
+		return nil, fmt.Errorf("list pipeline command results: %w", err)
+	}
+	out := make([]domain.PipelineCommandResult, 0, len(rows))
+	for _, r := range rows {
+		res := domain.PipelineCommandResult{
+			ID: r.ID, AttemptID: r.AttemptID, Round: int(r.Round), Ordinal: int(r.Ordinal), CommandID: r.CommandID,
+			Command: r.Command, Required: r.Required != 0, Revision: r.Revision, Status: domain.PipelineCommandStatus(r.Status),
+			ExitCode: int(r.ExitCode), StartedAt: r.StartedAt, Log: r.Log, LogTruncated: r.LogTruncated != 0, Detail: r.Detail,
+		}
+		if r.FinishedAt.Valid {
+			t := r.FinishedAt.Time
+			res.FinishedAt = &t
+		}
+		out = append(out, res)
+	}
+	return out, nil
+}
+
+// MarkRunningPipelineCommandsUnknown reconciles commands that were running when
+// the daemon stopped. Their outcome is genuinely unknown: it is recorded as
+// such and never inferred passed, failed, or retried.
+func (s *Store) MarkRunningPipelineCommandsUnknown(ctx context.Context, runID string, at time.Time, detail string) (int, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n := 0
+	err := s.inTx(ctx, "mark running pipeline commands unknown", func(q *gen.Queries) error {
+		rows, err := q.ListRunningPipelineCommandResults(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if err := q.MarkPipelineCommandResultUnknown(ctx, gen.MarkPipelineCommandResultUnknownParams{
+				FinishedAt: sql.NullTime{Time: at, Valid: true}, Detail: detail, ID: r.ID,
+			}); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
+}
+
+func derefTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }

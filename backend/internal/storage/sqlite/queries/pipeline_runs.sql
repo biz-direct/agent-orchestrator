@@ -68,7 +68,7 @@ SET state = sqlc.arg(state),
     result_key = sqlc.arg(result_key),
     result_json = sqlc.arg(result_json),
     finished_at = sqlc.arg(finished_at)
-WHERE id = sqlc.arg(id) AND state IN ('active', 'handoff')
+WHERE id = sqlc.arg(id) AND state IN ('active', 'handoff', 'validating')
 RETURNING *;
 
 -- name: SetPipelineAttemptInstructionDelivery :exec
@@ -85,3 +85,45 @@ SELECT * FROM pipeline_events WHERE run_id = ? ORDER BY id DESC LIMIT ?;
 SELECT EXISTS (
     SELECT 1 FROM pipeline_runs WHERE session_id = ? AND state IN ('running', 'paused')
 );
+
+-- name: StartPipelineAttemptValidation :one
+UPDATE pipeline_stage_attempts
+SET state = 'validating',
+    output_commit = sqlc.arg(output_commit),
+    no_change = sqlc.arg(no_change),
+    outcome = sqlc.arg(outcome),
+    summary = sqlc.arg(summary),
+    result_key = sqlc.arg(result_key),
+    result_json = sqlc.arg(result_json)
+WHERE id = sqlc.arg(id) AND state = 'active'
+RETURNING *;
+
+-- name: CreatePipelineCommandResult :one
+INSERT INTO pipeline_command_results (
+    attempt_id, round, ordinal, command_id, command, required, revision, status, started_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: FinishPipelineCommandResult :exec
+UPDATE pipeline_command_results
+SET status = sqlc.arg(status),
+    exit_code = sqlc.arg(exit_code),
+    finished_at = sqlc.arg(finished_at),
+    log = sqlc.arg(log),
+    log_truncated = sqlc.arg(log_truncated),
+    detail = sqlc.arg(detail)
+WHERE id = sqlc.arg(id);
+
+-- name: ListPipelineCommandResults :many
+SELECT * FROM pipeline_command_results WHERE attempt_id = ? ORDER BY round, ordinal;
+
+-- name: ListRunningPipelineCommandResults :many
+SELECT c.* FROM pipeline_command_results c
+JOIN pipeline_stage_attempts a ON a.id = c.attempt_id
+WHERE c.status = 'running' AND a.run_id = ?;
+
+-- name: MarkPipelineCommandResultUnknown :exec
+UPDATE pipeline_command_results
+SET status = 'unknown', finished_at = ?, detail = ?
+WHERE id = ? AND status = 'running';

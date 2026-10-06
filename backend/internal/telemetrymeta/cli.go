@@ -151,6 +151,7 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao pipeline start":         {},
 	"ao pipeline status":        {},
 	"ao pipeline submit":        {},
+	"ao pipeline trust":         {},
 	"ao pipeline validate":      {},
 	"ao pr":                     {},
 	"ao pr merge":               {},

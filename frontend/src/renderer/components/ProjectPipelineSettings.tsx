@@ -8,6 +8,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { clientForHost } from "../lib/host-clients";
 import { cn } from "../lib/utils";
 import { SettingsOptionMenu, type SettingsOption } from "./settings/SettingsOptionMenu";
+import { Switch } from "./ui/switch";
 
 type Catalog = components["schemas"]["PipelinesCatalogResponse"];
 type DefaultStatus = components["schemas"]["PipelinesDefaultStatus"];
@@ -77,7 +78,22 @@ export function ProjectPipelineSettings({ projectId, hostId }: { projectId: stri
 		},
 	});
 
+	const trustMutation = useMutation({
+		mutationFn: async (trusted: boolean) => {
+			const { data, error } = await (hostId ? clientForHost(hostId) : apiClient).PUT("/api/v1/projects/{id}/pipelines/command-trust", {
+				params: { path: { id: projectId } },
+				body: { trusted },
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data;
+		},
+		onSuccess: (data) => {
+			queryClient.setQueryData<Catalog>(queryKey, (current) => (current ? { ...current, commandsTrusted: data?.trusted ?? false } : current));
+		},
+	});
+
 	const catalog = query.data;
+	const declaresCommands = (catalog?.profiles ?? []).some((p) => (p.profile?.validation?.length ?? 0) > 0);
 	const status = mutation.data ?? catalog?.default;
 	const problems = catalog ? collectDiagnostics(catalog) : [];
 
@@ -128,6 +144,27 @@ export function ProjectPipelineSettings({ projectId, hostId }: { projectId: stri
 					)}
 				</div>
 			</div>
+			{declaresCommands ? (
+				<div className="settings-row-bar">
+					<span className="text-sm leading-5 text-settings-label">{t("settings.project.pipeline.trustCommands")}</span>
+					<div className="flex min-w-0 flex-1 items-center justify-end">
+						<Switch
+							aria-label={t("settings.project.pipeline.trustCommands")}
+							checked={catalog?.commandsTrusted ?? false}
+							disabled={trustMutation.isPending}
+							onCheckedChange={(checked) => trustMutation.mutate(checked)}
+						/>
+					</div>
+				</div>
+			) : null}
+			{declaresCommands && !catalog?.commandsTrusted ? (
+				<p className="text-pretty py-2 text-sm text-settings-muted">{t("settings.project.pipeline.trustCommandsHint")}</p>
+			) : null}
+			{trustMutation.isError ? (
+				<p role="alert" className="text-pretty py-2 text-sm text-error">
+					{trustMutation.error instanceof Error ? trustMutation.error.message : t("settings.project.pipeline.saveFailed")}
+				</p>
+			) : null}
 			{note ? (
 				<p role={attention ? "alert" : "status"} className={cn("text-pretty py-2 text-sm", attention ? "text-error" : "text-settings-muted")}>
 					{note}

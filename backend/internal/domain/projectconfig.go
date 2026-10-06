@@ -80,6 +80,11 @@ type ProjectConfig struct {
 	// Definitions themselves live in repository files; this stores only the
 	// reference (see package pipeline).
 	DefaultPipeline *PipelineSelection `json:"defaultPipeline,omitempty"`
+	// TrustPipelineCommands is the user's explicit authorization for AO to run
+	// the validation commands that repository pipeline profiles declare. It is
+	// only ever set by the user (never read from a repository file) and is
+	// checked at execution time, so revoking it stops later commands.
+	TrustPipelineCommands bool `json:"trustPipelineCommands,omitempty"`
 }
 
 // PipelineMode is how a project (or task) chooses between a normal worker and a

@@ -31,6 +31,7 @@ const (
 type Store interface {
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
 	SetProjectDefaultPipeline(ctx context.Context, id string, selection *domain.PipelineSelection) (domain.ProjectRecord, bool, error)
+	SetProjectPipelineCommandTrust(ctx context.Context, id string, trusted bool) (domain.ProjectRecord, bool, error)
 }
 
 // Manager is the controller-facing contract.
@@ -43,6 +44,20 @@ type Manager interface {
 	// SetDefault saves (or, with a nil selection, clears) the project default
 	// without touching any other project setting.
 	SetDefault(ctx context.Context, id domain.ProjectID, in SetDefaultInput) (DefaultStatus, error)
+	// SetCommandTrust records the user's authorization (or its revocation) for
+	// AO to run validation commands declared in repository files.
+	SetCommandTrust(ctx context.Context, id domain.ProjectID, in SetCommandTrustInput) (CommandTrust, error)
+}
+
+// CommandTrust is the project's authorization for repository-controlled
+// pipeline commands.
+type CommandTrust struct {
+	Trusted bool `json:"trusted"`
+}
+
+// SetCommandTrustInput is the body of PUT /projects/{id}/pipelines/command-trust.
+type SetCommandTrustInput struct {
+	Trusted bool `json:"trusted"`
 }
 
 // WorkflowView is one discovered workflow plus whether this build can run it.
@@ -63,6 +78,9 @@ type CatalogResponse struct {
 	Workflows   []WorkflowView          `json:"workflows"`
 	Diagnostics []pipeline.Diagnostic   `json:"diagnostics"`
 	Default     DefaultStatus           `json:"default"`
+	// CommandsTrusted is whether the user has authorized AO to run the
+	// validation commands declared in repository profiles.
+	CommandsTrusted bool `json:"commandsTrusted"`
 }
 
 // DefaultStatus describes the stored selection and its current resolution.
@@ -114,11 +132,12 @@ func (s *Service) Catalog(ctx context.Context, id domain.ProjectID) (CatalogResp
 	}
 	cat := pipeline.Discover(row.Path)
 	return CatalogResponse{
-		ProjectID:   id,
-		Profiles:    cat.Profiles,
-		Workflows:   workflowViews(cat),
-		Diagnostics: cat.Diagnostics,
-		Default:     resolveDefault(row.Config.DefaultPipeline, cat),
+		ProjectID:       id,
+		Profiles:        cat.Profiles,
+		Workflows:       workflowViews(cat),
+		Diagnostics:     cat.Diagnostics,
+		Default:         resolveDefault(row.Config.DefaultPipeline, cat),
+		CommandsTrusted: row.Config.TrustPipelineCommands,
 	}, nil
 }
 
@@ -206,4 +225,19 @@ func resolveDefault(sel *domain.PipelineSelection, cat pipeline.Catalog) Default
 	}
 	return DefaultStatus{Selection: sel, State: StateWorkflowAvailable, Executable: true,
 		Message: fmt.Sprintf("Workflow %q can be started on a task. New tasks do not start it automatically yet.", sel.WorkflowID)}
+}
+
+// SetCommandTrust implements Manager.
+func (s *Service) SetCommandTrust(ctx context.Context, id domain.ProjectID, in SetCommandTrustInput) (CommandTrust, error) {
+	if _, err := s.project(ctx, id); err != nil {
+		return CommandTrust{}, err
+	}
+	row, ok, err := s.store.SetProjectPipelineCommandTrust(ctx, string(id), in.Trusted)
+	if err != nil {
+		return CommandTrust{}, apierr.Internal("PIPELINE_TRUST_UPDATE_FAILED", "Failed to save the command authorization")
+	}
+	if !ok {
+		return CommandTrust{}, apierr.NotFound("PROJECT_NOT_FOUND", "Unknown project")
+	}
+	return CommandTrust{Trusted: row.Config.TrustPipelineCommands}, nil
 }

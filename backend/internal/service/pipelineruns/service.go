@@ -72,6 +72,10 @@ type Store interface {
 	AddPipelineEvent(ctx context.Context, ev domain.PipelineEvent) error
 	SetPipelineAttemptInstructionDelivery(ctx context.Context, attemptID, state string) error
 	CommitPipelineTransition(ctx context.Context, t domain.PipelineTransition) (domain.PipelineRun, error)
+	CreatePipelineCommandResult(ctx context.Context, r domain.PipelineCommandResult) (int64, error)
+	FinishPipelineCommandResult(ctx context.Context, id int64, r domain.PipelineCommandResult) error
+	ListPipelineCommandResults(ctx context.Context, attemptID string) ([]domain.PipelineCommandResult, error)
+	MarkRunningPipelineCommandsUnknown(ctx context.Context, runID string, at time.Time, detail string) (int, error)
 }
 
 // Messenger delivers coordination messages to a session's conversation.
@@ -129,9 +133,11 @@ type Deps struct {
 	// Executor starts, quiesces, and stops stage executors. Without it only
 	// single-stage Build workflows can run.
 	Executor ports.PipelineExecutor
-	Clock    func() time.Time
-	NewID    func(prefix string) string
-	Logger   *slog.Logger
+	// Runner executes validation commands; defaults to ExecRunner.
+	Runner CommandRunner
+	Clock  func() time.Time
+	NewID  func(prefix string) string
+	Logger *slog.Logger
 }
 
 // Service implements Manager and the lifecycle guard.
@@ -140,6 +146,7 @@ type Service struct {
 	git       Git
 	messenger Messenger
 	executor  ports.PipelineExecutor
+	runner    CommandRunner
 	wakeCh    chan struct{}
 	driving   sync.Map // run id -> struct{}: at most one handoff driver per run
 	clock     func() time.Time
@@ -152,9 +159,12 @@ var _ Manager = (*Service)(nil)
 
 // New returns a pipeline run service.
 func New(d Deps) *Service {
-	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, executor: d.Executor, wakeCh: make(chan struct{}, 1), clock: d.Clock, newID: d.NewID, logger: d.Logger}
+	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, executor: d.Executor, runner: d.Runner, wakeCh: make(chan struct{}, 1), clock: d.Clock, newID: d.NewID, logger: d.Logger}
 	if s.git == nil {
 		s.git = ExecGit{}
+	}
+	if s.runner == nil {
+		s.runner = ExecRunner{}
 	}
 	if s.clock == nil {
 		s.clock = func() time.Time { return time.Now().UTC() }
@@ -422,7 +432,17 @@ func (s *Service) view(ctx context.Context, runID string) (RunView, error) {
 	if err != nil {
 		return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load pipeline events")
 	}
-	return buildRunView(run, snap, attempts, events), nil
+	commands := map[string][]domain.PipelineCommandResult{}
+	for _, a := range attempts {
+		results, cerr := s.store.ListPipelineCommandResults(ctx, a.ID)
+		if cerr != nil {
+			return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load validation evidence")
+		}
+		if len(results) > 0 {
+			commands[a.ID] = results
+		}
+	}
+	return buildRunView(run, snap, attempts, events, commands), nil
 }
 
 // Submit implements Manager.
@@ -628,16 +648,33 @@ func (s *Service) acceptCommitted(ctx context.Context, run domain.PipelineRun, a
 			return SubmitResult{}, s.reject(ctx, run, attempt, rejection.code, rejection.message, rejection.paths)
 		}
 	}
-	now := s.clock()
-	message := fmt.Sprintf("Stage %q accepted at %s", attempt.StageID, shortCommit(state.Head))
-	if noChange {
-		message = fmt.Sprintf("Stage %q accepted with no new commits (input commit retained: %s)", attempt.StageID, shortCommit(state.Head))
-	}
-	events := []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventStageAccepted, Detail: eventDetail{Message: message}.marshal()}}
-	update := &domain.PipelineRunUpdate{State: domain.PipelineRunRunning, CurrentStageID: run.CurrentStageID}
 	if in.Outcome == OutcomeProductionDefect {
 		return s.recordProductionDefect(ctx, run, attempt, in, state.Head, noChange)
 	}
+	if needsValidation(snap, attempt, in) {
+		return s.beginValidation(ctx, run, attempt, in, state.Head, noChange)
+	}
+	now := s.clock()
+	err = s.commitAcceptance(ctx, run, attempt, snap, &domain.PipelineAttemptFinish{
+		ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: state.Head, NoChange: noChange,
+		Outcome: OutcomeSucceeded, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now,
+	})
+	return s.finishSubmit(ctx, run, attempt, in, err, true)
+}
+
+// commitAcceptance records an accepted stage and moves the run on: to a
+// successor waiting in `handoff`, or to completion when this was the last stage.
+// Every acceptance path (a direct result, or one that passed independent
+// validation) goes through here so they cannot diverge.
+func (s *Service) commitAcceptance(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, snap Snapshot, fin *domain.PipelineAttemptFinish) error {
+	now := fin.FinishedAt
+	head := fin.OutputCommit
+	message := fmt.Sprintf("Stage %q accepted at %s", attempt.StageID, shortCommit(head))
+	if fin.NoChange {
+		message = fmt.Sprintf("Stage %q accepted with no new commits (input commit retained: %s)", attempt.StageID, shortCommit(head))
+	}
+	events := []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventStageAccepted, Detail: eventDetail{Message: message}.marshal()}}
+	update := &domain.PipelineRunUpdate{State: domain.PipelineRunRunning, CurrentStageID: run.CurrentStageID}
 	var successor *domain.PipelineStageAttempt
 	if _, idx, found := snap.stage(attempt.StageID); found && idx+1 < len(snap.Stages) {
 		next := snap.Stages[idx+1]
@@ -648,25 +685,24 @@ func (s *Service) acceptCommitted(ctx context.Context, run domain.PipelineRun, a
 		successor = &domain.PipelineStageAttempt{
 			ID: s.newID("pstg"), RunID: run.ID, StageID: next.ID, StageKind: string(next.Kind),
 			AttemptNo: s.nextAttemptNo(ctx, run.ID, next.ID), State: domain.PipelineAttemptHandoff,
-			InputCommit: state.Head, PredecessorAttemptID: attempt.ID, StartedAt: now,
+			InputCommit: head, PredecessorAttemptID: attempt.ID, StartedAt: now,
 		}
-		events = append(events, domain.PipelineEvent{AttemptID: successor.ID, Kind: eventHandoffStarted, Detail: eventDetail{Message: fmt.Sprintf("Handing off to stage %q at %s", next.ID, shortCommit(state.Head))}.marshal()})
+		events = append(events, domain.PipelineEvent{AttemptID: successor.ID, Kind: eventHandoffStarted, Detail: eventDetail{Message: fmt.Sprintf("Handing off to stage %q at %s", next.ID, shortCommit(head))}.marshal()})
 	} else {
 		// No further stage: the run is complete. Ordinary lifecycle shortcuts
 		// resume because the pipeline has reached its end.
 		update = &domain.PipelineRunUpdate{State: domain.PipelineRunCompleted, CurrentStageID: "", CompletedAt: &now}
 		events = append(events, domain.PipelineEvent{AttemptID: attempt.ID, Kind: eventRunCompleted, Detail: eventDetail{Message: "All stages accepted; the pipeline run is complete"}.marshal()})
 	}
-	_, err = s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
-		RunID: run.ID, ExpectedRevision: run.Revision, At: now, Run: update, Events: events, NewAttempt: successor,
-		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: state.Head, NoChange: noChange, Outcome: OutcomeSucceeded, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now},
+	_, err := s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
+		RunID: run.ID, ExpectedRevision: run.Revision, At: now, Run: update, Events: events, NewAttempt: successor, Attempt: fin,
 	})
 	if err == nil && successor != nil {
-		// The submitting executor is still mid-turn (it is blocked inside this very
+		// The submitting executor may still be mid-turn (blocked inside its own
 		// request), so the handoff must run after we answer, never inside it.
 		s.wake()
 	}
-	return s.finishSubmit(ctx, run, attempt, in, err, true)
+	return err
 }
 
 // nextAttemptNo numbers the next attempt of a stage within a run.
@@ -786,7 +822,12 @@ func (s *Service) ReconcileAll(ctx context.Context) error {
 			continue
 		}
 		unlock := s.lock(run.SessionID)
-		err := s.reconcileRun(ctx, run)
+		err := s.reconcileValidation(ctx, run)
+		if err == nil {
+			if current, ok, gerr := s.store.GetPipelineRun(ctx, run.ID); gerr == nil && ok && current.State == domain.PipelineRunRunning {
+				err = s.reconcileRun(ctx, current)
+			}
+		}
 		unlock()
 		if err != nil && firstErr == nil {
 			firstErr = err
@@ -914,4 +955,26 @@ func (s *Service) recordProductionDefect(ctx context.Context, run domain.Pipelin
 		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventProductionDefect, Detail: eventDetail{Code: OutcomeProductionDefect, Message: detail}.marshal()}},
 	})
 	return s.finishSubmit(ctx, run, attempt, in, err, false)
+}
+
+// reconcileValidation runs once at startup, before the driver does. A command
+// still marked running belonged to a previous process: its outcome is unknown,
+// so it is recorded as such and the run pauses. AO never infers that it passed
+// and never runs it again without a person resuming the run.
+func (s *Service) reconcileValidation(ctx context.Context, run domain.PipelineRun) error {
+	n, err := s.store.MarkRunningPipelineCommandsUnknown(ctx, run.ID, s.clock(), "AO stopped while this command was running; its outcome is unknown")
+	if err != nil || n == 0 {
+		return err
+	}
+	attempts, err := s.store.ListPipelineStageAttempts(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	var validating *domain.PipelineStageAttempt
+	for i := range attempts {
+		if attempts[i].State == domain.PipelineAttemptValidating {
+			validating = &attempts[i]
+		}
+	}
+	return s.pause(ctx, run, validating, PauseValidationInterrupted, fmt.Sprintf("AO stopped while %d validation command(s) were running; their outcomes are unknown and they were not retried", n))
 }

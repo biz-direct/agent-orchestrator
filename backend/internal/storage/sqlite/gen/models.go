@@ -535,6 +535,24 @@ type PRURLAlias struct {
 	CanonicalURL string
 }
 
+type PipelineCommandResult struct {
+	ID           int64
+	AttemptID    string
+	Round        int64
+	Ordinal      int64
+	CommandID    string
+	Command      string
+	Required     int64
+	Revision     string
+	Status       string
+	ExitCode     int64
+	StartedAt    time.Time
+	FinishedAt   sql.NullTime
+	Log          string
+	LogTruncated int64
+	Detail       string
+}
+
 type PipelineEvent struct {
 	ID        int64
 	RunID     string

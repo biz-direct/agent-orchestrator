@@ -18,6 +18,7 @@ const (
 	StageStateInterrupted = "interrupted"
 	StageStatePaused      = "paused"
 	StageStateHandoff     = "handoff"
+	StageStateValidating  = "validating"
 )
 
 // RunView is the API read model of one run.
@@ -67,7 +68,7 @@ type StageView struct {
 	// AllowedPaths is the change scope snapshotted for a specialist stage. It is
 	// a hand-off constraint checked on commits, not a filesystem or process sandbox.
 	AllowedPaths []string `json:"allowedPaths,omitempty"`
-	State        string   `json:"state" enum:"pending,handoff,active,accepted,failed,interrupted,paused"`
+	State        string   `json:"state" enum:"pending,handoff,active,validating,accepted,failed,interrupted,paused"`
 }
 
 // AttemptView is one stage attempt.
@@ -91,9 +92,31 @@ type AttemptView struct {
 	ConversationSessionID string `json:"conversationSessionId,omitempty"`
 	// Report is the specialist's structured result, retained even when the
 	// attempt did not advance the run.
-	Report     *StageReport `json:"report,omitempty"`
-	StartedAt  time.Time    `json:"startedAt"`
-	FinishedAt *time.Time   `json:"finishedAt,omitempty"`
+	Report *StageReport `json:"report,omitempty"`
+	// Validation is AO's own execution of the stage's checks, bound to the
+	// revision each ran against. It is independent of anything the agent said.
+	Validation []CommandResultView `json:"validation"`
+	StartedAt  time.Time           `json:"startedAt"`
+	FinishedAt *time.Time          `json:"finishedAt,omitempty"`
+}
+
+// CommandResultView is the evidence of one independently executed command.
+type CommandResultView struct {
+	Round     int    `json:"round"`
+	CommandID string `json:"commandId"`
+	Command   string `json:"command"`
+	Required  bool   `json:"required"`
+	// Revision is the commit the command ran against.
+	Revision   string     `json:"revision"`
+	Status     string     `json:"status" enum:"running,passed,failed,operational,timeout,cancelled,skipped,unknown"`
+	ExitCode   int        `json:"exitCode"`
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	DurationMs int64      `json:"durationMs"`
+	// Log is the bounded, sanitized output (head and tail of a long log).
+	Log          string `json:"log,omitempty"`
+	LogTruncated bool   `json:"logTruncated"`
+	Detail       string `json:"detail,omitempty"`
 }
 
 // CheckpointView names a committed revision recorded for the run.
@@ -161,7 +184,7 @@ func parseEventDetail(raw string) eventDetail {
 }
 
 // buildRunView derives the presentation from durable facts.
-func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.PipelineStageAttempt, events []domain.PipelineEvent) RunView {
+func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.PipelineStageAttempt, events []domain.PipelineEvent, commands map[string][]domain.PipelineCommandResult) RunView {
 	v := RunView{
 		ID: run.ID, SessionID: string(run.SessionID), ProjectID: string(run.ProjectID), WorkflowID: run.WorkflowID,
 		State: string(run.State), PauseReason: string(run.PauseReason), PauseDetail: run.PauseDetail,
@@ -181,7 +204,7 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 			InputCommit: a.InputCommit, OutputCommit: a.OutputCommit, NoChange: a.NoChange, Outcome: a.Outcome,
 			Summary: a.Summary, InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
 			PredecessorAttemptID: a.PredecessorAttemptID, ConversationSessionID: attachedConversation(run, a),
-			Report: parseReport(a.ResultJSON),
+			Report: parseReport(a.ResultJSON), Validation: commandViews(commands[a.ID]),
 		})
 		if rep := parseReport(a.ResultJSON); rep != nil && a.OutputCommit != "" {
 			profile := ""
@@ -193,7 +216,7 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 				Findings: len(rep.Findings), Commands: len(rep.Commands), Defects: len(rep.Defects), Issues: len(rep.RemainingIssues),
 			})
 		}
-		if a.State == domain.PipelineAttemptActive || a.State == domain.PipelineAttemptHandoff {
+		if a.State == domain.PipelineAttemptActive || a.State == domain.PipelineAttemptHandoff || a.State == domain.PipelineAttemptValidating {
 			activeAttempt = &attempts[i]
 		}
 		if a.State == domain.PipelineAttemptAccepted {
@@ -217,6 +240,8 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 				sv.State = StageStateInterrupted
 			case domain.PipelineAttemptHandoff:
 				sv.State = StageStateHandoff
+			case domain.PipelineAttemptValidating:
+				sv.State = StageStateValidating
 			case domain.PipelineAttemptActive:
 				sv.State = StageStateActive
 				if run.State == domain.PipelineRunPaused {
@@ -241,4 +266,20 @@ func attachedConversation(run domain.PipelineRun, a domain.PipelineStageAttempt)
 		return string(a.ExecutorSessionID)
 	}
 	return ""
+}
+
+func commandViews(results []domain.PipelineCommandResult) []CommandResultView {
+	out := make([]CommandResultView, 0, len(results))
+	for _, r := range results {
+		v := CommandResultView{
+			Round: r.Round, CommandID: r.CommandID, Command: r.Command, Required: r.Required, Revision: r.Revision,
+			Status: string(r.Status), ExitCode: r.ExitCode, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
+			Log: r.Log, LogTruncated: r.LogTruncated, Detail: r.Detail,
+		}
+		if r.FinishedAt != nil {
+			v.DurationMs = r.FinishedAt.Sub(r.StartedAt).Milliseconds()
+		}
+		out = append(out, v)
+	}
+	return out
 }

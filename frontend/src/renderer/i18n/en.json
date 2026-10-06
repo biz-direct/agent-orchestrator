@@ -2494,5 +2494,17 @@
 	"inspector.pipeline.evidence": "{{stage}}: {{outcome}} at {{revision}}",
 	"inspector.pipeline.outcome.succeeded": "passed",
 	"inspector.pipeline.outcome.production_defect": "production defect",
-	"inspector.pipeline.outcome.failed": "failed"
+	"inspector.pipeline.outcome.failed": "failed",
+	"settings.project.pipeline.trustCommands": "Run repository validation commands",
+	"settings.project.pipeline.trustCommandsHint": "Pipeline profiles in this repository declare validation commands. AO runs them only after you allow it here.",
+	"inspector.pipeline.stageState.validating": "Validating",
+	"inspector.pipeline.checkOutput": "Output",
+	"inspector.pipeline.check.running": "running",
+	"inspector.pipeline.check.passed": "passed",
+	"inspector.pipeline.check.failed": "failed",
+	"inspector.pipeline.check.operational": "setup problem",
+	"inspector.pipeline.check.timeout": "timed out",
+	"inspector.pipeline.check.cancelled": "cancelled",
+	"inspector.pipeline.check.skipped": "skipped",
+	"inspector.pipeline.check.unknown": "unknown"
 }
