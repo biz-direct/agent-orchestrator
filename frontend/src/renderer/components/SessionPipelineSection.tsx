@@ -158,6 +158,25 @@ function RunSummary({ run, session, hostId }: { run: RunView; session: Workspace
 					);
 				})}
 			</ul>
+			{run.repairBudget > 0 || run.repairs.length > 0 ? (
+				<p className="text-xs text-settings-muted" data-testid="repair-budget">
+					{t("inspector.pipeline.repairs", { used: run.repairsUsed, budget: run.repairBudget, remaining: run.repairsRemaining })}
+				</p>
+			) : null}
+			{run.repairs.length > 0 ? (
+				<ul className="flex flex-col gap-0.5 text-xs text-settings-muted">
+					{run.repairs.map((repair) => (
+						<li key={repair.ordinal} className="text-pretty">
+							{t("inspector.pipeline.repairItem", {
+								ordinal: repair.ordinal,
+								source: repair.sourceStageId,
+								target: repair.targetStageId,
+								kind: t(`inspector.pipeline.repairKind.${repair.kind}`, { defaultValue: repair.kind }),
+							})}
+						</li>
+					))}
+				</ul>
+			) : null}
 			{run.evidence.length > 0 ? <EvidenceList evidence={run.evidence} /> : null}
 			{run.checkpoint ? (
 				<p className="text-xs text-settings-muted">
@@ -241,7 +260,7 @@ function EvidenceList({ evidence }: { evidence: EvidenceView[] }) {
 		<ul className="flex flex-col gap-0.5 text-xs text-settings-muted">
 			{evidence.map((item) => (
 				<li key={item.attemptId} className="text-pretty">
-					{t("inspector.pipeline.evidence", {
+					{t(item.current ? "inspector.pipeline.evidence" : "inspector.pipeline.evidenceSuperseded", {
 						stage: item.stageId,
 						outcome: t(`inspector.pipeline.outcome.${item.outcome}`, { defaultValue: item.outcome }),
 						revision: item.revision.slice(0, 7),

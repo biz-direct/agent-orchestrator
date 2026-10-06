@@ -27,7 +27,7 @@ const multi = { id: "build-test", file: "f", valid: true, executable: false, una
 
 const run = (overrides: Record<string, unknown> = {}) => ({
 	id: "prun_1", sessionId: "w-1", projectId: "proj", workflowId: "build-only", state: "running", currentStageId: "build", requestedBy: "user",
-	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], revision: 1,
+	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], repairs: [], revision: 1,
 	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 	stages: [{ id: "build", kind: "build", state: "active", model: "opus", settingsSource: "worker" }],
 	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] }],
@@ -187,7 +187,7 @@ describe("SessionPipelineSection", () => {
 					{ id: "a2", stageId: "test", attemptNo: 1, state: "failed", outcome: "production_defect", executorSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [],
 						report: { findings: [{ criterion: "c", status: "unmet" }], commands: [{ command: "go test", exitCode: 1 }], remainingIssues: ["flaky"], defects: [{ description: "Add overflows" }] } },
 				],
-				evidence: [{ stageId: "test", attemptId: "a2", revision: "abcdef1234567", outcome: "production_defect", findings: 1, commands: 1, defects: 1, remainingIssues: 1 }],
+				evidence: [{ stageId: "test", attemptId: "a2", revision: "abcdef1234567", outcome: "production_defect", findings: 1, commands: 1, defects: 1, remainingIssues: 1, current: true }],
 			}),
 			[],
 		);
@@ -223,5 +223,25 @@ describe("SessionPipelineSection", () => {
 		expect(await screen.findByText(/failed \(3\) · abcdef1/)).toBeInTheDocument();
 		expect(screen.getByText("skipped · abcdef1")).toBeInTheDocument();
 		expect(screen.getByText("FAIL: TestX")).toBeInTheDocument();
+	});
+
+	it("shows the shared repair budget, each return, and marks superseded evidence", async () => {
+		mockGets(
+			run({
+				repairsUsed: 1,
+				repairsRemaining: 2,
+				repairs: [{ ordinal: 1, kind: "production_defect", sourceStageId: "test", sourceAttemptId: "a2", targetStageId: "build", returnStageId: "test", createdAt: "now" }],
+				evidence: [
+					{ stageId: "test", attemptId: "a2", revision: "aaaaaaa1111", outcome: "production_defect", findings: 1, commands: 0, defects: 1, remainingIssues: 0, current: false },
+					{ stageId: "test", attemptId: "a4", revision: "bbbbbbb2222", outcome: "succeeded", findings: 1, commands: 1, defects: 0, remainingIssues: 0, current: true },
+				],
+			}),
+			[],
+		);
+		renderSection();
+		expect(await screen.findByTestId("repair-budget")).toHaveTextContent("Repairs: 1 of 3 used, 2 remaining");
+		expect(screen.getByText("Return 1: test → build (production defect)")).toBeInTheDocument();
+		expect(screen.getByText("test: production defect at aaaaaaa (a newer commit exists; this no longer applies)")).toBeInTheDocument();
+		expect(screen.getByText("test: passed at bbbbbbb")).toBeInTheDocument();
 	});
 });

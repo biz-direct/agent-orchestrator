@@ -137,8 +137,8 @@ func TestFalseAgentSuccessCannotBypassAFailedMandatoryCheck(t *testing.T) {
 	v := newValidatedStage(t, "  - {id: unit, command: \"echo broken; exit 3\"}\n  - {id: after, command: \"echo never\"}\n", true)
 	v.submitPass()
 	view := v.validate()
-	if view.State != "paused" || view.PauseReason != "validation_failed" || view.RepairsUsed != 0 {
-		t.Fatalf("a genuine failure pauses for repair routing: %s", brief(view))
+	if view.State != "running" || view.CurrentStageID != "build" || view.RepairsUsed != 1 {
+		t.Fatalf("a genuine failure is routed to Build and counted once: %s", brief(view))
 	}
 	att := view.Attempts[1]
 	if att.State != "failed" || att.Outcome != "validation_failed" || att.Report == nil {

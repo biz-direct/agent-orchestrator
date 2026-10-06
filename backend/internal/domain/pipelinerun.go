@@ -110,6 +110,37 @@ type PipelineStageAttempt struct {
 	PredecessorAttemptID string
 	// ResultJSON is the structured report submitted for the attempt.
 	ResultJSON string
+	// RepairSourceAttemptID names the failed attempt that sent this Build
+	// attempt back for repair; empty for ordinary attempts.
+	RepairSourceAttemptID string
+	// ReturnStageID is where the run goes after this (repair) attempt is
+	// accepted, instead of the next stage in order.
+	ReturnStageID string
+	// FeedbackJSON is the revision-bound feedback delivered to the repairer.
+	FeedbackJSON string
+}
+
+// PipelineRepairKind says why a stage was sent back to Build.
+type PipelineRepairKind string
+
+// Repair kinds. Operational failures and policy violations are never repairs.
+const (
+	PipelineRepairProductionDefect PipelineRepairKind = "production_defect"
+	PipelineRepairValidationFailed PipelineRepairKind = "validation_failed"
+	PipelineRepairReviewFeedback   PipelineRepairKind = "review_feedback"
+)
+
+// PipelineRepair is one counted automatic return to Build.
+type PipelineRepair struct {
+	ID              string
+	RunID           string
+	Ordinal         int
+	SourceAttemptID string
+	SourceStageID   string
+	Kind            PipelineRepairKind
+	TargetStageID   string
+	ReturnStageID   string
+	CreatedAt       time.Time
 }
 
 // PipelineEvent is one append-only execution fact.
@@ -137,6 +168,9 @@ type PipelineRunUpdate struct {
 	PauseDetail    string
 	CurrentStageID string
 	CompletedAt    *time.Time
+	// RepairsDelta is added to the run's used repair budget in the same atomic
+	// change as the repair record, so it can never be spent twice.
+	RepairsDelta int
 }
 
 // PipelineAttemptFinish closes an active attempt.
@@ -221,6 +255,8 @@ type PipelineTransition struct {
 	Activate *PipelineAttemptActivation
 	// Validate moves an active attempt into independent validation.
 	Validate *PipelineAttemptValidation
-	Events   []PipelineEvent
-	At       time.Time
+	// Repair records one counted return to Build alongside NewAttempt.
+	Repair *PipelineRepair
+	Events []PipelineEvent
+	At     time.Time
 }

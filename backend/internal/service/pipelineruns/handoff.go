@@ -9,6 +9,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/pipeline"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -135,9 +136,16 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	if pending == nil || pending.StageID != run.CurrentStageID {
 		return nil
 	}
-	pred, ok := byID[pending.PredecessorAttemptID]
-	if !ok || pred.State != domain.PipelineAttemptAccepted {
-		return s.pauseHandoff(ctx, run, pending, PauseHandoffUncertain, "The handoff has no accepted predecessor to hand off from")
+	// A repair hands off from the failed attempt that sent the task back; every
+	// other handoff is from an accepted predecessor.
+	isRepair := pending.RepairSourceAttemptID != ""
+	predID, wantState := pending.PredecessorAttemptID, domain.PipelineAttemptAccepted
+	if isRepair {
+		predID, wantState = pending.RepairSourceAttemptID, domain.PipelineAttemptFailed
+	}
+	pred, ok := byID[predID]
+	if !ok || pred.State != wantState {
+		return s.pauseHandoff(ctx, run, pending, PauseHandoffUncertain, "The handoff has no settled predecessor to hand off from")
 	}
 	snap, err := parseSnapshot(run.Snapshot)
 	if err != nil {
@@ -150,8 +158,10 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	if s.executor == nil {
 		return s.pauseHandoff(ctx, run, pending, PauseStageUnsupported, "This build has no executor for attached specialist stages")
 	}
-	if err := s.executor.PreflightStage(ctx, domain.AgentHarness(stage.Harness)); err != nil {
-		return s.pauseHandoff(ctx, run, pending, PauseStageUnsupported, fmt.Sprintf("Stage %q cannot run as a Chat specialist: %v", stage.ID, err))
+	if stage.Kind != pipeline.StageBuild {
+		if err := s.executor.PreflightStage(ctx, domain.AgentHarness(stage.Harness)); err != nil {
+			return s.pauseHandoff(ctx, run, pending, PauseStageUnsupported, fmt.Sprintf("Stage %q cannot run as a Chat specialist: %v", stage.ID, err))
+		}
 	}
 
 	owner, ok, err := s.store.GetSession(ctx, run.SessionID)
@@ -188,19 +198,36 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 		return s.pauseHandoff(ctx, run, pending, PauseUnexpectedChanges, fmt.Sprintf("HEAD moved to %s after stage %q was accepted at %s", shortCommit(state.Head), pred.StageID, shortCommit(pred.OutputCommit)))
 	}
 
-	// 3. Start (or resume) the stage's own conversation. The prompt carries the
+	// 3. Start, or resume, the stage's own conversation. The prompt carries the
 	// task, input revision, and handoff summary; it does not pretend the
-	// specialist inherited the previous executor's reasoning.
-	existing := s.retainedStageSession(attempts, stage.ID)
-	started, err := s.executor.StartStage(ctx, ports.PipelineStageStart{
-		RunID: run.ID, StageID: stage.ID, AttemptID: pending.ID, Owner: run.SessionID, ExistingSessionID: existing,
-		Harness: domain.AgentHarness(stage.Harness), Model: stage.Model,
-		SystemPrompt: specialistSystemPrompt(snap, stage, run),
-		Prompt:       specialistPrompt(owner, run, pred, *pending, stage),
-	})
+	// executor inherited anyone else's reasoning. A stage that already has a
+	// conversation resumes exactly that one (the original Builder after a repair,
+	// the same Tester on a re-run); if it cannot be resumed safely the run asks a
+	// person rather than silently starting a fresh conversation in its place.
+	var started ports.PipelineStageStarted
+	resumed := false
+	switch existing := s.retainedStageSession(attempts, stage.ID); {
+	case stage.Kind == pipeline.StageBuild:
+		resumed = true
+		started, err = s.executor.ResumeExecutor(ctx, run.SessionID, s.repairPromptFor(ctx, run, *pending))
+	case existing != "":
+		resumed = true
+		started, err = s.executor.ResumeExecutor(ctx, existing, specialistPrompt(owner, run, pred, *pending, stage))
+	default:
+		started, err = s.executor.StartStage(ctx, ports.PipelineStageStart{
+			RunID: run.ID, StageID: stage.ID, AttemptID: pending.ID, Owner: run.SessionID,
+			Harness: domain.AgentHarness(stage.Harness), Model: stage.Model,
+			SystemPrompt: specialistSystemPrompt(snap, stage, run),
+			Prompt:       specialistPrompt(owner, run, pred, *pending, stage),
+		})
+	}
 	if err != nil {
 		reason := PauseStageStartFailed
-		if errors.Is(err, ports.ErrPipelineStageUnsupported) {
+		switch {
+		case errors.Is(err, ports.ErrPipelineResumeUnsafe):
+			reason = PauseRecoveryDecision
+			return s.pauseHandoff(ctx, run, pending, reason, fmt.Sprintf("Stage %q's own conversation cannot be resumed safely (%v). AO will not start a fresh conversation in its place; a recovery decision is needed", stage.ID, err))
+		case errors.Is(err, ports.ErrPipelineStageUnsupported):
 			reason = PauseStageUnsupported
 		}
 		return s.pauseHandoff(ctx, run, pending, reason, fmt.Sprintf("Stage %q could not be started: %v", stage.ID, err))
@@ -212,13 +239,21 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 		RunID: run.ID, ExpectedRevision: run.Revision, At: now,
 		Run:      &domain.PipelineRunUpdate{State: domain.PipelineRunRunning, CurrentStageID: run.CurrentStageID},
 		Activate: &domain.PipelineAttemptActivation{ID: pending.ID, ExecutorSessionID: started.SessionID, ControllerGeneration: started.ControllerGeneration, At: now},
-		Events:   []domain.PipelineEvent{{AttemptID: pending.ID, Kind: eventHandoffActivated, Detail: eventDetail{Message: fmt.Sprintf("Stage %q is now executing in its own conversation", stage.ID)}.marshal()}},
+		Events:   []domain.PipelineEvent{{AttemptID: pending.ID, Kind: eventHandoffActivated, Detail: eventDetail{Message: fmt.Sprintf("Stage %q is now executing in its own conversation (attempt %d)", stage.ID, pending.AttemptNo)}.marshal()}},
 	})
 	if errors.Is(err, domain.ErrPipelineConflict) {
 		// The run was paused or cancelled while we were starting the executor.
-		// Stop what we started; the workspace is never touched.
-		if stopErr := s.executor.StopStage(context.WithoutCancel(ctx), started.SessionID); stopErr != nil {
-			s.logger.Error("pipeline: stop stale stage executor failed", "run_id", run.ID, "session_id", started.SessionID, "err", stopErr)
+		// A conversation we just created is stopped; one we only resumed is fenced
+		// again. Either way the workspace is never touched.
+		cleanup := context.WithoutCancel(ctx)
+		var cleanErr error
+		if resumed {
+			cleanErr = s.executor.RelinquishExecutor(cleanup, started.SessionID)
+		} else {
+			cleanErr = s.executor.StopStage(cleanup, started.SessionID)
+		}
+		if cleanErr != nil {
+			s.logger.Error("pipeline: clean up stale stage executor failed", "run_id", run.ID, "session_id", started.SessionID, "err", cleanErr)
 		}
 		return nil
 	}
@@ -288,11 +323,33 @@ func specialistPrompt(owner domain.SessionRecord, run domain.PipelineRun, pred, 
 	} else {
 		b.WriteString("(no summary was provided)\n")
 	}
-	b.WriteString("You did not inherit the previous stage's reasoning or conversation; rely on the repository and this brief.\n\n")
+	b.WriteString("You did not inherit the previous stage's reasoning or conversation; rely on the repository and this brief.\n")
+	if attempt.AttemptNo > 1 {
+		fmt.Fprintf(&b, "This is attempt %d of this stage. Build repaired an earlier finding, so any result you reported for an earlier revision does NOT cover %s: run your checks again against this exact revision.\n", attempt.AttemptNo, shortCommit(attempt.InputCommit))
+	}
+	b.WriteString("\n")
 	b.WriteString("When you are done, commit your work so the tree is clean, write your structured report as JSON, then run:\n")
 	b.WriteString("  ao pipeline submit --outcome succeeded --summary \"<what you verified or changed>\" --report-file report.json\n")
 	b.WriteString("Report shape: {\"findings\":[{\"criterion\":\"...\",\"status\":\"met|unmet|not_applicable|unverified\",\"evidence\":\"...\"}],\"commands\":[{\"command\":\"...\",\"exitCode\":0,\"summary\":\"...\"}],\"remainingIssues\":[\"...\"],\"defects\":[]}.\n")
 	b.WriteString("A passing report needs at least one finding and none unmet. If you find a bug in production code, do NOT fix it: commit only your allowed changes and submit --outcome production_defect with each defect described under \"defects\". Use --outcome failed if you cannot complete the stage. `ao report` does not complete a stage.\n")
 	b.WriteString("Keep report.json out of your commits (write it outside the worktree, for example in the system temp directory).\n")
 	return b.String()
+}
+
+// repairPromptFor renders the revision-bound feedback the original Build
+// conversation receives for a counted repair.
+func (s *Service) repairPromptFor(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt) string {
+	fb := parseFeedback(attempt.FeedbackJSON)
+	if fb == nil {
+		fb = &Feedback{Summary: "A later stage sent this task back for repair.", Revision: attempt.InputCommit}
+	}
+	repair := domain.PipelineRepair{Ordinal: run.RepairsUsed, SourceStageID: fb.SourceStageID}
+	if repairs, err := s.store.ListPipelineRepairs(ctx, run.ID); err == nil {
+		for _, r := range repairs {
+			if r.SourceAttemptID == attempt.RepairSourceAttemptID {
+				repair = r
+			}
+		}
+	}
+	return repairPrompt(run, repair, *fb)
 }

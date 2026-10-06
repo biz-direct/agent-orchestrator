@@ -37,6 +37,7 @@ type pipelineRunDTO struct {
 	Attempts         []pipelineAttemptViewDTO `json:"attempts"`
 	Checkpoint       *pipelineCheckpointDTO   `json:"checkpoint,omitempty"`
 	LastRejection    *pipelineRejectionDTO    `json:"lastRejection,omitempty"`
+	Repairs          []pipelineRepairDTO      `json:"repairs"`
 }
 
 type pipelineStageViewDTO struct {
@@ -49,14 +50,23 @@ type pipelineStageViewDTO struct {
 }
 
 type pipelineAttemptViewDTO struct {
-	ID                   string             `json:"id"`
-	StageID              string             `json:"stageId"`
-	AttemptNo            int                `json:"attemptNo"`
-	State                string             `json:"state"`
-	ControllerGeneration string             `json:"controllerGeneration,omitempty"`
-	InputCommit          string             `json:"inputCommit,omitempty"`
-	OutputCommit         string             `json:"outputCommit,omitempty"`
-	Validation           []pipelineCheckDTO `json:"validation"`
+	ID                    string             `json:"id"`
+	StageID               string             `json:"stageId"`
+	AttemptNo             int                `json:"attemptNo"`
+	State                 string             `json:"state"`
+	ControllerGeneration  string             `json:"controllerGeneration,omitempty"`
+	InputCommit           string             `json:"inputCommit,omitempty"`
+	OutputCommit          string             `json:"outputCommit,omitempty"`
+	Validation            []pipelineCheckDTO `json:"validation"`
+	RepairSourceAttemptID string             `json:"repairSourceAttemptId,omitempty"`
+}
+
+type pipelineRepairDTO struct {
+	Ordinal       int    `json:"ordinal"`
+	Kind          string `json:"kind"`
+	SourceStageID string `json:"sourceStageId"`
+	TargetStageID string `json:"targetStageId"`
+	ReturnStageID string `json:"returnStageId"`
 }
 
 type pipelineCheckDTO struct {
@@ -330,6 +340,16 @@ func writePipelineRun(w io.Writer, run *pipelineRunDTO) error {
 		}
 		if _, err := fmt.Fprintf(w, "checkpoint: %s -> %s\n", shortHash(run.Checkpoint.InputCommit), change); err != nil {
 			return err
+		}
+	}
+	if run.RepairBudget > 0 || len(run.Repairs) > 0 {
+		if _, err := fmt.Fprintf(w, "repairs: %d of %d used, %d remaining\n", run.RepairsUsed, run.RepairBudget, run.RepairsRemaining); err != nil {
+			return err
+		}
+		for _, r := range run.Repairs {
+			if _, err := fmt.Fprintf(w, "  #%d %s -> %s (%s), then back to %s\n", r.Ordinal, r.SourceStageID, r.TargetStageID, r.Kind, r.ReturnStageID); err != nil {
+				return err
+			}
 		}
 	}
 	for _, a := range run.Attempts {

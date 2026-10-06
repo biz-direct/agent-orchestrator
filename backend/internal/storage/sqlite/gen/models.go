@@ -562,6 +562,18 @@ type PipelineEvent struct {
 	CreatedAt time.Time
 }
 
+type PipelineRepair struct {
+	ID              string
+	RunID           string
+	Ordinal         int64
+	SourceAttemptID string
+	SourceStageID   string
+	Kind            string
+	TargetStageID   string
+	ReturnStageID   string
+	CreatedAt       time.Time
+}
+
 type PipelineRun struct {
 	ID             string
 	SessionID      string
@@ -584,25 +596,28 @@ type PipelineRun struct {
 }
 
 type PipelineStageAttempt struct {
-	ID                   string
-	RunID                string
-	StageID              string
-	StageKind            string
-	AttemptNo            int64
-	State                string
-	ExecutorSessionID    string
-	ControllerGeneration string
-	InputCommit          string
-	OutputCommit         string
-	NoChange             int64
-	Outcome              string
-	Summary              string
-	ResultKey            string
-	InstructionDelivery  string
-	StartedAt            time.Time
-	FinishedAt           sql.NullTime
-	PredecessorAttemptID string
-	ResultJson           string
+	ID                    string
+	RunID                 string
+	StageID               string
+	StageKind             string
+	AttemptNo             int64
+	State                 string
+	ExecutorSessionID     string
+	ControllerGeneration  string
+	InputCommit           string
+	OutputCommit          string
+	NoChange              int64
+	Outcome               string
+	Summary               string
+	ResultKey             string
+	InstructionDelivery   string
+	StartedAt             time.Time
+	FinishedAt            sql.NullTime
+	PredecessorAttemptID  string
+	ResultJson            string
+	RepairSourceAttemptID string
+	ReturnStageID         string
+	FeedbackJson          string
 }
 
 type Project struct {

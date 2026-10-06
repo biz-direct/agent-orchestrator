@@ -273,3 +273,47 @@ func TestSessionsWithoutAGateBehaveAsBefore(t *testing.T) {
 		t.Fatalf("relayed: %v", launcher.relayed)
 	}
 }
+
+func TestResumeExecutorReopensTheFencedConversationAndDeliversThePrompt(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	// The gate would refuse the worker (another stage owns execution); the
+	// coordinator's own resume must still get through.
+	m.SetPipelineGate(&fixedGate{admit: false, reason: "handoff in progress"})
+	started, err := m.ResumeExecutor(context.Background(), owner.ID, "REPAIR PROMPT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.SessionID != owner.ID || started.ControllerGeneration != owner.Metadata.ControllerGeneration {
+		t.Fatalf("the original conversation resumes under its own generation: %+v", started)
+	}
+	if len(launcher.aborted) != 1 || launcher.aborted[0] != owner.ID {
+		t.Fatalf("the fence must be lifted: %v", launcher.aborted)
+	}
+	if len(launcher.relayed) != 1 || launcher.relayed[0] != "REPAIR PROMPT" {
+		t.Fatalf("the prompt is delivered as a turn: %v", launcher.relayed)
+	}
+	if len(launcher.started) != 0 {
+		t.Fatal("resuming must never launch a new controller")
+	}
+	_ = st
+}
+
+func TestResumeExecutorRefusesWhatWouldNeedAFreshController(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	launcher.live = false
+	if _, err := m.ResumeExecutor(context.Background(), owner.ID, "P"); !errors.Is(err, ports.ErrPipelineResumeUnsafe) {
+		t.Fatalf("a controller that is not running cannot be resumed safely: %v", err)
+	}
+	if len(launcher.started) != 0 || len(launcher.relayed) != 0 {
+		t.Fatal("nothing may start or be sent")
+	}
+	launcher.live = true
+	owner.IsTerminated = true
+	st.sessions[owner.ID] = owner
+	if _, err := m.ResumeExecutor(context.Background(), owner.ID, "P"); !errors.Is(err, ports.ErrPipelineResumeUnsafe) {
+		t.Fatalf("a terminated session: %v", err)
+	}
+	if _, err := m.ResumeExecutor(context.Background(), "ghost", "P"); !errors.Is(err, ports.ErrPipelineResumeUnsafe) {
+		t.Fatalf("a missing session: %v", err)
+	}
+}

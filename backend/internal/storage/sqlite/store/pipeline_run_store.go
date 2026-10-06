@@ -177,7 +177,7 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 			row, err := q.SetPipelineRunState(ctx, gen.SetPipelineRunStateParams{
 				State: string(t.Run.State), PauseReason: string(t.Run.PauseReason), PauseDetail: t.Run.PauseDetail,
 				CurrentStageID: t.Run.CurrentStageID, UpdatedAt: t.At, CompletedAt: completed,
-				ID: t.RunID, ExpectedRevision: t.ExpectedRevision,
+				RepairsDelta: int64(t.Run.RepairsDelta), ID: t.RunID, ExpectedRevision: t.ExpectedRevision,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
 				return domain.ErrPipelineConflict
@@ -206,7 +206,8 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 				ID: na.ID, RunID: na.RunID, StageID: na.StageID, StageKind: na.StageKind, AttemptNo: int64(na.AttemptNo),
 				State: attemptStateOrActive(na.State), ExecutorSessionID: string(na.ExecutorSessionID),
 				ControllerGeneration: na.ControllerGeneration, InputCommit: na.InputCommit, StartedAt: na.StartedAt,
-				PredecessorAttemptID: na.PredecessorAttemptID,
+				PredecessorAttemptID: na.PredecessorAttemptID, RepairSourceAttemptID: na.RepairSourceAttemptID,
+				ReturnStageID: na.ReturnStageID, FeedbackJson: na.FeedbackJSON,
 			}); err != nil {
 				return err
 			}
@@ -220,6 +221,21 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 				return domain.ErrPipelineConflict
 			}
 			if err != nil {
+				return err
+			}
+		}
+		if t.Repair != nil {
+			rp := t.Repair
+			if err := q.CreatePipelineRepair(ctx, gen.CreatePipelineRepairParams{
+				ID: rp.ID, RunID: t.RunID, Ordinal: int64(rp.Ordinal), SourceAttemptID: rp.SourceAttemptID,
+				SourceStageID: rp.SourceStageID, Kind: string(rp.Kind), TargetStageID: rp.TargetStageID,
+				ReturnStageID: rp.ReturnStageID, CreatedAt: t.At,
+			}); err != nil {
+				// A repeated source attempt or ordinal means this return was
+				// already counted: the second writer must lose, not double-spend.
+				if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+					return domain.ErrPipelineConflict
+				}
 				return err
 			}
 		}
@@ -290,6 +306,7 @@ func pipelineAttemptFromGen(a gen.PipelineStageAttempt) domain.PipelineStageAtte
 		NoChange: a.NoChange != 0, Outcome: a.Outcome, Summary: a.Summary, ResultKey: a.ResultKey,
 		InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt,
 		PredecessorAttemptID: a.PredecessorAttemptID, ResultJSON: a.ResultJson,
+		RepairSourceAttemptID: a.RepairSourceAttemptID, ReturnStageID: a.ReturnStageID, FeedbackJSON: a.FeedbackJson,
 	}
 	if a.FinishedAt.Valid {
 		t := a.FinishedAt.Time
@@ -434,4 +451,20 @@ func derefTime(t *time.Time) time.Time {
 		return time.Time{}
 	}
 	return *t
+}
+
+// ListPipelineRepairs returns a run's counted returns to Build in order.
+func (s *Store) ListPipelineRepairs(ctx context.Context, runID string) ([]domain.PipelineRepair, error) {
+	rows, err := s.qr.ListPipelineRepairs(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list pipeline repairs: %w", err)
+	}
+	out := make([]domain.PipelineRepair, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, domain.PipelineRepair{
+			ID: r.ID, RunID: r.RunID, Ordinal: int(r.Ordinal), SourceAttemptID: r.SourceAttemptID, SourceStageID: r.SourceStageID,
+			Kind: domain.PipelineRepairKind(r.Kind), TargetStageID: r.TargetStageID, ReturnStageID: r.ReturnStageID, CreatedAt: r.CreatedAt,
+		})
+	}
+	return out, nil
 }

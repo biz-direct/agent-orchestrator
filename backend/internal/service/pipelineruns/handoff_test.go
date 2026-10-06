@@ -47,6 +47,9 @@ type fakeExecutor struct {
 	onRelinquish  func()
 	onStart       func()
 
+	resumeErr error
+	resumed   []resumeCall
+
 	events      []string
 	relinquish  []domain.SessionID
 	starts      []ports.PipelineStageStart
@@ -101,6 +104,26 @@ func (e *fakeExecutor) StartStage(ctx context.Context, start ports.PipelineStage
 		return ports.PipelineStageStarted{}, err
 	}
 	return ports.PipelineStageStarted{SessionID: rec.ID, ControllerGeneration: fmt.Sprintf("spec-gen-%d", e.startedGens)}, nil
+}
+
+type resumeCall struct {
+	ID     domain.SessionID
+	Prompt string
+}
+
+func (e *fakeExecutor) ResumeExecutor(ctx context.Context, id domain.SessionID, prompt string) (ports.PipelineStageStarted, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, "resume:"+string(id))
+	e.resumed = append(e.resumed, resumeCall{ID: id, Prompt: prompt})
+	if e.resumeErr != nil {
+		return ports.PipelineStageStarted{}, e.resumeErr
+	}
+	rec, ok, err := e.store.GetSession(ctx, id)
+	if err != nil || !ok {
+		return ports.PipelineStageStarted{}, fmt.Errorf("resume: session %s: %w", id, err)
+	}
+	return ports.PipelineStageStarted{SessionID: id, ControllerGeneration: rec.Metadata.ControllerGeneration}, nil
 }
 
 func (e *fakeExecutor) StopStage(_ context.Context, id domain.SessionID) error {

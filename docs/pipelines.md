@@ -13,7 +13,8 @@ Status by delivery slice (parent design: issue #1):
 | Attached Chat specialists run sequentially in the same worktree | shipped |
 | Specialist scope enforcement and structured result contract | shipped |
 | Independent validation commands with revision-bound evidence | shipped |
-| Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
+| Test repair through the original worker (shared three-attempt budget) | shipped |
+| Review, review repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
 
 A valid workflow that this build cannot execute (one with a `review` stage today) can be selected but is shown as **unavailable**. AO never silently
 substitutes a normal worker for a selected workflow that cannot run, and a
@@ -254,3 +255,44 @@ agree.
 - **Restart.** A command still marked running when AO restarts is recorded as
   `unknown`, the run pauses (`validation_interrupted`), and it is neither assumed
   to have passed nor retried.
+
+## Repair: Test failures return to the original worker
+
+When a specialist stage declares `repairTo: build`, two outcomes send the task
+back instead of pausing: a `production_defect` report, and a *genuine*
+validation failure (a required check that exited non-zero). The route is
+**Build → the failing stage again**:
+
+1. One atomic change closes the failing attempt, counts the return, and creates a
+   Build attempt (in `handoff`) holding revision-bound feedback: the defects or
+   failed checks, the revision they are about, and a bounded tail of the log.
+2. The failing stage's executor is fenced and proven stopped, the worktree is
+   verified to be exactly the tested revision, and the **original worker
+   conversation** is resumed with the feedback as a new turn.
+3. When Build submits a clean committed checkpoint the run returns to the stage
+   that failed and **resumes that stage's own conversation** (attempt 2, 3, …),
+   told that earlier results do not cover the new revision.
+
+**Budget.** The run has one shared budget of automatic returns to Build
+(`repairBudget`, default 3; the initial Build is not a repair). Each return is
+counted exactly once: the repair record is unique per failing attempt and is
+written in the same transaction that spends the budget, so duplicate feedback,
+restarts, and concurrent transitions cannot spend it twice or grant extras. When
+the budget is spent the run pauses (`repair_budget_exhausted`) *before* a fourth
+return and stays paused; ordinary resume never grants more attempts. Later
+Review feedback uses the same accounting (`planRepair` with kind
+`review_feedback`).
+
+**Not repairs.** Operational failures (setup, credentials, launch, timeout,
+cancellation, unknown), policy violations (scope, dirty or stale submissions),
+and stages with no `repairTo` pause instead and never consume the budget.
+
+**Revision scope.** Specialist evidence names the commit it covers. Once Build
+produces a newer checkpoint, earlier evidence is retained but marked as no longer
+applying; it never counts as validation of the new head.
+
+**Safe resume.** If a conversation that must be resumed has no running controller
+(for example after a daemon restart), AO does **not** start a fresh conversation
+in its place: the run pauses with `recovery_decision_required`. Recovery tooling
+arrives with the recovery slice. Nothing in this flow resets or rolls back the
+worktree.

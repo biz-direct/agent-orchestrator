@@ -48,12 +48,15 @@ type RunView struct {
 	// Evidence lists specialist results with the exact revision each covers. A
 	// result never speaks for later revisions, so it is never shown as
 	// validation of a newer head.
-	Evidence    []EvidenceView `json:"evidence"`
-	Events      []EventView    `json:"events"`
-	Revision    int64          `json:"revision"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
-	CompletedAt *time.Time     `json:"completedAt,omitempty"`
+	Evidence []EvidenceView `json:"evidence"`
+	// Repairs are the counted automatic returns to Build, in order. They share
+	// one budget across every source of repair.
+	Repairs     []RepairView `json:"repairs"`
+	Events      []EventView  `json:"events"`
+	Revision    int64        `json:"revision"`
+	CreatedAt   time.Time    `json:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
+	CompletedAt *time.Time   `json:"completedAt,omitempty"`
 }
 
 // StageView is one workflow stage with its derived state and resolved settings.
@@ -96,8 +99,12 @@ type AttemptView struct {
 	// Validation is AO's own execution of the stage's checks, bound to the
 	// revision each ran against. It is independent of anything the agent said.
 	Validation []CommandResultView `json:"validation"`
-	StartedAt  time.Time           `json:"startedAt"`
-	FinishedAt *time.Time          `json:"finishedAt,omitempty"`
+	// RepairSourceAttemptID names the failed attempt that sent this Build
+	// attempt back; Feedback is the revision-bound explanation it received.
+	RepairSourceAttemptID string     `json:"repairSourceAttemptId,omitempty"`
+	Feedback              *Feedback  `json:"feedback,omitempty"`
+	StartedAt             time.Time  `json:"startedAt"`
+	FinishedAt            *time.Time `json:"finishedAt,omitempty"`
 }
 
 // CommandResultView is the evidence of one independently executed command.
@@ -147,6 +154,21 @@ type EvidenceView struct {
 	Commands int    `json:"commands"`
 	Defects  int    `json:"defects"`
 	Issues   int    `json:"remainingIssues"`
+	// Current is true while the result still covers the latest checkpoint. Once
+	// Build produces a newer commit it is false: the result is retained, but it
+	// no longer satisfies anything.
+	Current bool `json:"current"`
+}
+
+// RepairView is one counted return to Build.
+type RepairView struct {
+	Ordinal         int       `json:"ordinal"`
+	Kind            string    `json:"kind" enum:"production_defect,validation_failed,review_feedback"`
+	SourceStageID   string    `json:"sourceStageId"`
+	SourceAttemptID string    `json:"sourceAttemptId"`
+	TargetStageID   string    `json:"targetStageId"`
+	ReturnStageID   string    `json:"returnStageId"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 // EventView is one recorded execution fact.
@@ -184,14 +206,14 @@ func parseEventDetail(raw string) eventDetail {
 }
 
 // buildRunView derives the presentation from durable facts.
-func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.PipelineStageAttempt, events []domain.PipelineEvent, commands map[string][]domain.PipelineCommandResult) RunView {
+func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.PipelineStageAttempt, events []domain.PipelineEvent, commands map[string][]domain.PipelineCommandResult, repairs []domain.PipelineRepair) RunView {
 	v := RunView{
 		ID: run.ID, SessionID: string(run.SessionID), ProjectID: string(run.ProjectID), WorkflowID: run.WorkflowID,
 		State: string(run.State), PauseReason: string(run.PauseReason), PauseDetail: run.PauseDetail,
 		CurrentStageID: run.CurrentStageID, RequestedBy: string(run.RequestedBy), ExpectedBranch: run.ExpectedBranch,
 		RepairBudget: run.RepairBudget, RepairsUsed: run.RepairsUsed, RepairsRemaining: max(run.RepairBudget-run.RepairsUsed, 0),
 		SnapshotSHA256: run.SnapshotSHA256, SnapshotCaptured: snap.CapturedAt.Format(time.RFC3339),
-		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Events: []EventView{},
+		Stages: []StageView{}, Attempts: []AttemptView{}, Evidence: []EvidenceView{}, Repairs: []RepairView{}, Events: []EventView{},
 		Revision: run.Revision, CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, CompletedAt: run.CompletedAt,
 	}
 	latestByStage := map[string]domain.PipelineStageAttempt{}
@@ -205,6 +227,7 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 			Summary: a.Summary, InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
 			PredecessorAttemptID: a.PredecessorAttemptID, ConversationSessionID: attachedConversation(run, a),
 			Report: parseReport(a.ResultJSON), Validation: commandViews(commands[a.ID]),
+			RepairSourceAttemptID: a.RepairSourceAttemptID, Feedback: parseFeedback(a.FeedbackJSON),
 		})
 		if rep := parseReport(a.ResultJSON); rep != nil && a.OutputCommit != "" {
 			profile := ""
@@ -222,6 +245,12 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 		if a.State == domain.PipelineAttemptAccepted {
 			v.Checkpoint = &CheckpointView{StageID: a.StageID, InputCommit: a.InputCommit, OutputCommit: a.OutputCommit, NoChange: a.NoChange}
 		}
+	}
+	for i := range v.Evidence {
+		v.Evidence[i].Current = v.Checkpoint != nil && v.Evidence[i].Revision == v.Checkpoint.OutputCommit
+	}
+	for _, r := range repairs {
+		v.Repairs = append(v.Repairs, RepairView{Ordinal: r.Ordinal, Kind: string(r.Kind), SourceStageID: r.SourceStageID, SourceAttemptID: r.SourceAttemptID, TargetStageID: r.TargetStageID, ReturnStageID: r.ReturnStageID, CreatedAt: r.CreatedAt})
 	}
 	for _, st := range snap.Stages {
 		sv := StageView{ID: st.ID, Kind: string(st.Kind), Profile: st.Profile, RepairTo: st.RepairTo, Harness: st.Harness, Model: st.Model, SettingsSource: st.SettingsSource, State: StageStatePending}

@@ -234,3 +234,49 @@ func TestProjectPipelineCommandTrustPreservesOtherSettings(t *testing.T) {
 		t.Fatal("unknown project")
 	}
 }
+
+func TestPipelineRepairIsCountedExactlyOncePerSourceAttempt(t *testing.T) {
+	ctx := context.Background()
+	s, sid := seedPipelineSession(t, "pr6")
+	at := time.Now().UTC().Truncate(time.Second)
+	run, attempt := newRun("run-1", sid, "pr6", at)
+	created, _, err := s.CreatePipelineRun(ctx, run, attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repair := func(id string, ordinal int, source string, rev int64) domain.PipelineTransition {
+		return domain.PipelineTransition{
+			RunID: run.ID, ExpectedRevision: rev, At: at,
+			Run:    &domain.PipelineRunUpdate{State: domain.PipelineRunRunning, CurrentStageID: "build", RepairsDelta: 1},
+			Repair: &domain.PipelineRepair{ID: id, Ordinal: ordinal, SourceAttemptID: source, SourceStageID: "test", Kind: domain.PipelineRepairProductionDefect, TargetStageID: "build", ReturnStageID: "test"},
+			NewAttempt: &domain.PipelineStageAttempt{
+				ID: id + "-build", RunID: run.ID, StageID: "build", StageKind: "build", AttemptNo: ordinal + 1, State: domain.PipelineAttemptHandoff,
+				InputCommit: "abc", StartedAt: at, RepairSourceAttemptID: source, ReturnStageID: "test", FeedbackJSON: `{"summary":"x"}`,
+			},
+		}
+	}
+	updated, err := s.CommitPipelineTransition(ctx, repair("rep-1", 1, "src-attempt", created.Revision))
+	if err != nil || updated.RepairsUsed != 1 {
+		t.Fatalf("first repair: %+v err=%v", updated, err)
+	}
+	// The same failing attempt cannot be counted again, even with a fresh revision.
+	if _, err := s.CommitPipelineTransition(ctx, repair("rep-dup", 2, "src-attempt", updated.Revision)); !errors.Is(err, domain.ErrPipelineConflict) {
+		t.Fatalf("a duplicate source attempt must lose, got %v", err)
+	}
+	got, _, _ := s.GetPipelineRun(ctx, run.ID)
+	if got.RepairsUsed != 1 {
+		t.Fatalf("a rejected duplicate must roll back its budget spend: %d", got.RepairsUsed)
+	}
+	if _, ok, _ := s.GetPipelineStageAttempt(ctx, "rep-dup-build"); ok {
+		t.Fatal("a rejected duplicate must not leave a Build attempt behind")
+	}
+	repairs, _ := s.ListPipelineRepairs(ctx, run.ID)
+	if len(repairs) != 1 || repairs[0].Ordinal != 1 || repairs[0].SourceAttemptID != "src-attempt" || repairs[0].ReturnStageID != "test" {
+		t.Fatalf("repairs: %+v", repairs)
+	}
+	atts, _ := s.ListPipelineStageAttempts(ctx, run.ID)
+	last := atts[len(atts)-1]
+	if last.RepairSourceAttemptID != "src-attempt" || last.ReturnStageID != "test" || last.FeedbackJSON == "" {
+		t.Fatalf("the repair attempt keeps its source, return stage and feedback: %+v", last)
+	}
+}

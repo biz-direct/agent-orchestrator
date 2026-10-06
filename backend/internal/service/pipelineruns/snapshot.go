@@ -201,3 +201,17 @@ func (s Snapshot) stage(id string) (SnapshotStage, int, bool) {
 	}
 	return SnapshotStage{}, -1, false
 }
+
+// nextStage is where the run goes once attempt is accepted: the stage a repair
+// sends it back to, or else the next stage in order.
+func (s Snapshot) nextStage(attempt domain.PipelineStageAttempt) (SnapshotStage, bool) {
+	if attempt.ReturnStageID != "" {
+		st, _, ok := s.stage(attempt.ReturnStageID)
+		return st, ok
+	}
+	_, idx, found := s.stage(attempt.StageID)
+	if found && idx+1 < len(s.Stages) {
+		return s.Stages[idx+1], true
+	}
+	return SnapshotStage{}, false
+}

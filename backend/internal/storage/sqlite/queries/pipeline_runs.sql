@@ -31,6 +31,7 @@ SET state = sqlc.arg(state),
     current_stage_id = sqlc.arg(current_stage_id),
     updated_at = sqlc.arg(updated_at),
     completed_at = sqlc.arg(completed_at),
+    repairs_used = repairs_used + sqlc.arg(repairs_delta),
     revision = revision + 1
 WHERE id = sqlc.arg(id) AND revision = sqlc.arg(expected_revision)
 RETURNING *;
@@ -38,9 +39,10 @@ RETURNING *;
 -- name: CreatePipelineStageAttempt :one
 INSERT INTO pipeline_stage_attempts (
     id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id,
-    controller_generation, input_commit, instruction_delivery, started_at, predecessor_attempt_id
+    controller_generation, input_commit, instruction_delivery, started_at, predecessor_attempt_id,
+    repair_source_attempt_id, return_stage_id, feedback_json
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: ActivatePipelineStageAttempt :one
@@ -127,3 +129,12 @@ WHERE c.status = 'running' AND a.run_id = ?;
 UPDATE pipeline_command_results
 SET status = 'unknown', finished_at = ?, detail = ?
 WHERE id = ? AND status = 'running';
+
+-- name: CreatePipelineRepair :exec
+INSERT INTO pipeline_repairs (
+    id, run_id, ordinal, source_attempt_id, source_stage_id, kind, target_stage_id, return_stage_id, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListPipelineRepairs :many
+SELECT * FROM pipeline_repairs WHERE run_id = ? ORDER BY ordinal;

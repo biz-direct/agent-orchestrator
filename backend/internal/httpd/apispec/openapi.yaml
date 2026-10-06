@@ -13428,6 +13428,8 @@ components:
           type: string
         executorSessionId:
           type: string
+        feedback:
+          $ref: '#/components/schemas/PipelineFeedback'
         finishedAt:
           format: date-time
           type:
@@ -13450,6 +13452,8 @@ components:
         outputCommit:
           type: string
         predecessorAttemptId:
+          type: string
+        repairSourceAttemptId:
           type: string
         report:
           $ref: '#/components/schemas/PipelineStageReport'
@@ -13592,6 +13596,8 @@ components:
           type: string
         commands:
           type: integer
+        current:
+          type: boolean
         defects:
           type: integer
         findings:
@@ -13615,6 +13621,63 @@ components:
       - commands
       - defects
       - remainingIssues
+      - current
+      type: object
+    PipelineFeedback:
+      properties:
+        defects:
+          items:
+            $ref: '#/components/schemas/PipelineReportDefect'
+          type: array
+        failedChecks:
+          items:
+            $ref: '#/components/schemas/PipelineFeedbackCheck'
+          type: array
+        kind:
+          enum:
+          - production_defect
+          - validation_failed
+          - review_feedback
+          type: string
+        remainingIssues:
+          items:
+            type: string
+          type: array
+        revision:
+          type: string
+        sourceAttemptId:
+          type: string
+        sourceStageId:
+          type: string
+        summary:
+          type: string
+      required:
+      - kind
+      - sourceStageId
+      - sourceAttemptId
+      - revision
+      - summary
+      - defects
+      - failedChecks
+      - remainingIssues
+      type: object
+    PipelineFeedbackCheck:
+      properties:
+        command:
+          type: string
+        commandId:
+          type: string
+        exitCode:
+          type: integer
+        output:
+          type: string
+        revision:
+          type: string
+      required:
+      - commandId
+      - command
+      - exitCode
+      - revision
       type: object
     PipelineProfile:
       properties:
@@ -13686,6 +13749,36 @@ components:
       - code
       - message
       - at
+      type: object
+    PipelineRepairView:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        kind:
+          enum:
+          - production_defect
+          - validation_failed
+          - review_feedback
+          type: string
+        ordinal:
+          type: integer
+        returnStageId:
+          type: string
+        sourceAttemptId:
+          type: string
+        sourceStageId:
+          type: string
+        targetStageId:
+          type: string
+      required:
+      - ordinal
+      - kind
+      - sourceStageId
+      - sourceAttemptId
+      - targetStageId
+      - returnStageId
+      - createdAt
       type: object
     PipelineReportCommand:
       properties:
@@ -13777,6 +13870,10 @@ components:
           type: string
         repairBudget:
           type: integer
+        repairs:
+          items:
+            $ref: '#/components/schemas/PipelineRepairView'
+          type: array
         repairsRemaining:
           type: integer
         repairsUsed:
@@ -13826,6 +13923,7 @@ components:
       - stages
       - attempts
       - evidence
+      - repairs
       - events
       - revision
       - createdAt

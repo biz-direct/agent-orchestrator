@@ -210,14 +210,19 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 	case len(requiredFailed) > 0:
 		now := s.clock()
 		detail := "Mandatory validation failed against " + shortCommit(attempt.OutputCommit) + ": " + strings.Join(requiredFailed, ", ")
-		_, err := s.store.CommitPipelineTransition(pauseCtx, domain.PipelineTransition{
+		t := domain.PipelineTransition{
 			RunID: run.ID, ExpectedRevision: run.Revision, At: now,
 			Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, OutputCommit: attempt.OutputCommit, NoChange: attempt.NoChange, Outcome: "validation_failed", Summary: attempt.Summary, ResultKey: attempt.ResultKey, ResultJSON: attempt.ResultJSON, FinishedAt: now},
-			Run:     &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: PauseValidationFailed, PauseDetail: detail, CurrentStageID: run.CurrentStageID},
 			Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventValidationFinished, Detail: eventDetail{Code: "validation_failed", Message: detail}.marshal()}},
-		})
+		}
+		plan, exhausted := s.planRepair(pauseCtx, run, snap, attempt, domain.PipelineRepairValidationFailed, validationFeedback(attempt, attempt.OutputCommit, results), attempt.OutputCommit)
+		s.applyRepairOrPause(&t, run, plan, exhausted, PauseValidationFailed, detail)
+		_, err := s.store.CommitPipelineTransition(pauseCtx, t)
 		if errors.Is(err, domain.ErrPipelineConflict) {
 			return nil
+		}
+		if err == nil && plan != nil {
+			s.wake()
 		}
 		return err
 	}

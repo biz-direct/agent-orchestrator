@@ -2508,5 +2508,11 @@
 	"inspector.pipeline.check.timeout": "timed out",
 	"inspector.pipeline.check.cancelled": "cancelled",
 	"inspector.pipeline.check.skipped": "skipped",
-	"inspector.pipeline.check.unknown": "unknown"
+	"inspector.pipeline.check.unknown": "unknown",
+	"inspector.pipeline.repairs": "Repairs: {{used}} of {{budget}} used, {{remaining}} remaining",
+	"inspector.pipeline.repairItem": "Return {{ordinal}}: {{source}} → {{target}} ({{kind}})",
+	"inspector.pipeline.repairKind.production_defect": "production defect",
+	"inspector.pipeline.repairKind.validation_failed": "failed check",
+	"inspector.pipeline.repairKind.review_feedback": "review feedback",
+	"inspector.pipeline.evidenceSuperseded": "{{stage}}: {{outcome}} at {{revision}} (a newer commit exists; this no longer applies)"
 }

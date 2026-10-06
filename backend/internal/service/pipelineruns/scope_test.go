@@ -290,11 +290,11 @@ func TestProductionDefectIsReportedForBuildNotFixedByTheSpecialist(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Accepted || res.Run.State != "paused" || res.Run.PauseReason != "production_defect" || res.Run.RepairsUsed != 0 {
-		t.Fatalf("a production defect leaves an actionable paused result: %+v", res.Run)
+	if res.Accepted || res.Run.State != "running" || res.Run.CurrentStageID != "build" || res.Run.RepairsUsed != 1 {
+		t.Fatalf("a production defect is routed to Build with its repair counted once: %s", brief(res.Run))
 	}
-	if !strings.Contains(res.Run.PauseDetail, "main.Add overflows") {
-		t.Fatalf("pause detail must carry the defect: %q", res.Run.PauseDetail)
+	if res.Run.Attempts[2].Feedback == nil || !strings.Contains(res.Run.Attempts[2].Feedback.Defects[0].Description, "main.Add overflows") {
+		t.Fatalf("the defect travels to Build as feedback: %+v", res.Run.Attempts[2].Feedback)
 	}
 	att := res.Run.Attempts[1]
 	if att.State != "failed" || att.Outcome != "production_defect" || att.Report == nil || len(att.Report.Defects) != 1 || att.OutputCommit != head {

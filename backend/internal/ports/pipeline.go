@@ -59,6 +59,12 @@ type PipelineExecutor interface {
 	// StartStage starts (or, for a retried stage, resumes) the stage's
 	// attached conversation and delivers the stage prompt.
 	StartStage(ctx context.Context, start PipelineStageStart) (PipelineStageStarted, error)
+	// ResumeExecutor reopens an executor that was relinquished earlier and
+	// delivers prompt as a new turn in its own existing conversation. A
+	// controller that is no longer running cannot be resumed safely here: it
+	// returns ErrPipelineResumeUnsafe and the run asks for a recovery decision
+	// instead of silently starting a fresh conversation.
+	ResumeExecutor(ctx context.Context, id domain.SessionID, prompt string) (PipelineStageStarted, error)
 	// StopStage stops an attached stage's controller. It never touches the
 	// shared workspace.
 	StopStage(ctx context.Context, id domain.SessionID) error
@@ -90,6 +96,9 @@ type PipelineStageStarted struct {
 var (
 	// ErrPipelineExecutionUncertain means quiescence could not be proven.
 	ErrPipelineExecutionUncertain = errors.New("pipeline executor quiescence could not be proven")
+	// ErrPipelineResumeUnsafe means a stage's native conversation cannot be
+	// resumed without a human recovery decision.
+	ErrPipelineResumeUnsafe = errors.New("the stage conversation cannot be resumed safely")
 	// ErrPipelineStageUnsupported means the stage cannot run as a Chat specialist.
 	ErrPipelineStageUnsupported = errors.New("pipeline stage is not supported by this harness or mode")
 	// ErrPipelineExecutionOwned is returned to callers refused by the gate.

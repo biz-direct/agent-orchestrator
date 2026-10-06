@@ -265,3 +265,37 @@ func (m *Manager) StopStage(ctx context.Context, id domain.SessionID) error {
 	}
 	return m.chat.StopChat(ctx, id)
 }
+
+// ResumeExecutor implements ports.PipelineExecutor. It only ever resumes a
+// conversation whose controller is still running here and was fenced by an
+// earlier relinquish: reopening it is just lifting the fence and delivering the
+// next turn. Anything that would mean launching a fresh controller (and so
+// risking an unrelated conversation presented as continuous) is refused as
+// unsafe so the run can ask a human.
+func (m *Manager) ResumeExecutor(ctx context.Context, id domain.SessionID, prompt string) (ports.PipelineStageStarted, error) {
+	unsafe := func(format string, args ...any) (ports.PipelineStageStarted, error) {
+		return ports.PipelineStageStarted{}, fmt.Errorf("%w: %s", ports.ErrPipelineResumeUnsafe, fmt.Sprintf(format, args...))
+	}
+	if m.chat == nil {
+		return unsafe("Chat is not available in this build")
+	}
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil || !ok || rec.IsTerminated {
+		return unsafe("session %s is gone or terminated", id)
+	}
+	probe, hasProbe := m.chat.(liveChatProbe)
+	if !hasProbe || !probe.HasLiveChatController(id) {
+		return unsafe("its controller is not running, so its native conversation would have to be restored")
+	}
+	if handoff, supported := m.chat.(chatHandoffLauncher); supported {
+		handoff.AbortChatHandoff(id)
+	}
+	if _, err := m.chat.RelayChatTurn(ports.WithPipelineBypass(ctx), id, prompt); err != nil {
+		return ports.PipelineStageStarted{}, fmt.Errorf("deliver the stage prompt: %w", err)
+	}
+	after, err := m.getRecord(ctx, id)
+	if err != nil {
+		return ports.PipelineStageStarted{}, err
+	}
+	return ports.PipelineStageStarted{SessionID: id, ControllerGeneration: after.Metadata.ControllerGeneration, ProviderConversationID: after.Metadata.ProviderConversationID}, nil
+}

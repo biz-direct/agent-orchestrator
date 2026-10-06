@@ -4582,6 +4582,7 @@ export interface components {
             controllerGeneration?: string;
             conversationSessionId?: string;
             executorSessionId: string;
+            feedback?: components["schemas"]["PipelineFeedback"];
             /** Format: date-time */
             finishedAt?: null | string;
             id: string;
@@ -4592,6 +4593,7 @@ export interface components {
             outcome?: string;
             outputCommit?: string;
             predecessorAttemptId?: string;
+            repairSourceAttemptId?: string;
             report?: components["schemas"]["PipelineStageReport"];
             stageId: string;
             /** Format: date-time */
@@ -4644,6 +4646,7 @@ export interface components {
         PipelineEvidenceView: {
             attemptId: string;
             commands: number;
+            current: boolean;
             defects: number;
             findings: number;
             outcome: string;
@@ -4651,6 +4654,24 @@ export interface components {
             remainingIssues: number;
             revision: string;
             stageId: string;
+        };
+        PipelineFeedback: {
+            defects: components["schemas"]["PipelineReportDefect"][];
+            failedChecks: components["schemas"]["PipelineFeedbackCheck"][];
+            /** @enum {string} */
+            kind: "production_defect" | "validation_failed" | "review_feedback";
+            remainingIssues: string[];
+            revision: string;
+            sourceAttemptId: string;
+            sourceStageId: string;
+            summary: string;
+        };
+        PipelineFeedbackCheck: {
+            command: string;
+            commandId: string;
+            exitCode: number;
+            output?: string;
+            revision: string;
         };
         PipelineProfile: {
             allowedPaths: string[];
@@ -4676,6 +4697,17 @@ export interface components {
             code: string;
             message: string;
             paths?: string[];
+        };
+        PipelineRepairView: {
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            kind: "production_defect" | "validation_failed" | "review_feedback";
+            ordinal: number;
+            returnStageId: string;
+            sourceAttemptId: string;
+            sourceStageId: string;
+            targetStageId: string;
         };
         PipelineReportCommand: {
             command: string;
@@ -4712,6 +4744,7 @@ export interface components {
             pauseReason?: string;
             projectId: string;
             repairBudget: number;
+            repairs: components["schemas"]["PipelineRepairView"][];
             repairsRemaining: number;
             repairsUsed: number;
             /** @enum {string} */

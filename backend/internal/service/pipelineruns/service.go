@@ -75,6 +75,7 @@ type Store interface {
 	CreatePipelineCommandResult(ctx context.Context, r domain.PipelineCommandResult) (int64, error)
 	FinishPipelineCommandResult(ctx context.Context, id int64, r domain.PipelineCommandResult) error
 	ListPipelineCommandResults(ctx context.Context, attemptID string) ([]domain.PipelineCommandResult, error)
+	ListPipelineRepairs(ctx context.Context, runID string) ([]domain.PipelineRepair, error)
 	MarkRunningPipelineCommandsUnknown(ctx context.Context, runID string, at time.Time, detail string) (int, error)
 }
 
@@ -442,7 +443,11 @@ func (s *Service) view(ctx context.Context, runID string) (RunView, error) {
 			commands[a.ID] = results
 		}
 	}
-	return buildRunView(run, snap, attempts, events, commands), nil
+	repairs, err := s.store.ListPipelineRepairs(ctx, runID)
+	if err != nil {
+		return RunView{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load pipeline repairs")
+	}
+	return buildRunView(run, snap, attempts, events, commands, repairs), nil
 }
 
 // Submit implements Manager.
@@ -649,7 +654,7 @@ func (s *Service) acceptCommitted(ctx context.Context, run domain.PipelineRun, a
 		}
 	}
 	if in.Outcome == OutcomeProductionDefect {
-		return s.recordProductionDefect(ctx, run, attempt, in, state.Head, noChange)
+		return s.recordProductionDefect(ctx, run, snap, attempt, in, state.Head, noChange)
 	}
 	if needsValidation(snap, attempt, in) {
 		return s.beginValidation(ctx, run, attempt, in, state.Head, noChange)
@@ -676,8 +681,9 @@ func (s *Service) commitAcceptance(ctx context.Context, run domain.PipelineRun, 
 	events := []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventStageAccepted, Detail: eventDetail{Message: message}.marshal()}}
 	update := &domain.PipelineRunUpdate{State: domain.PipelineRunRunning, CurrentStageID: run.CurrentStageID}
 	var successor *domain.PipelineStageAttempt
-	if _, idx, found := snap.stage(attempt.StageID); found && idx+1 < len(snap.Stages) {
-		next := snap.Stages[idx+1]
+	nextStage, hasNext := snap.nextStage(attempt)
+	if hasNext {
+		next := nextStage
 		update.CurrentStageID = next.ID
 		// The successor starts in `handoff`: its input revision and predecessor
 		// are durable, but nothing executes until the predecessor is proven
@@ -939,22 +945,44 @@ func (s *Service) checkScope(ctx context.Context, workspace string, snap Snapsho
 }
 
 // recordProductionDefect closes a specialist attempt that found a defect in
-// production code. The defect is reported for return to Build; nothing here
-// fixes it. Until repair routing exists the run pauses with an actionable,
-// retained result, and the repair budget is untouched.
-func (s *Service) recordProductionDefect(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, in SubmitInput, head string, noChange bool) (SubmitResult, error) {
+// production code. The defect is reported for return to Build and nothing here
+// fixes it. When the stage declares a repair route and the shared budget has
+// room, the same atomic change that records the defect counts the return and
+// creates the Build attempt; otherwise the run pauses with the retained result.
+func (s *Service) recordProductionDefect(ctx context.Context, run domain.PipelineRun, snap Snapshot, attempt domain.PipelineStageAttempt, in SubmitInput, head string, noChange bool) (SubmitResult, error) {
 	now := s.clock()
 	detail := fmt.Sprintf("Stage %q found %d production defect(s) for Build to fix", attempt.StageID, len(in.Report.Defects))
 	if len(in.Report.Defects) > 0 {
 		detail += ": " + in.Report.Defects[0].Description
 	}
-	_, err := s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
+	t := domain.PipelineTransition{
 		RunID: run.ID, ExpectedRevision: run.Revision, At: now,
 		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptFailed, OutputCommit: head, NoChange: noChange, Outcome: OutcomeProductionDefect, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now},
-		Run:     &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: PauseProductionDefect, PauseDetail: detail, CurrentStageID: run.CurrentStageID},
 		Events:  []domain.PipelineEvent{{AttemptID: attempt.ID, Kind: eventProductionDefect, Detail: eventDetail{Code: OutcomeProductionDefect, Message: detail}.marshal()}},
-	})
+	}
+	plan, exhausted := s.planRepair(ctx, run, snap, attempt, domain.PipelineRepairProductionDefect, defectFeedback(attempt, head, in.Report), head)
+	s.applyRepairOrPause(&t, run, plan, exhausted, PauseProductionDefect, detail)
+	_, err := s.store.CommitPipelineTransition(ctx, t)
+	if err == nil && plan != nil {
+		s.wake()
+	}
 	return s.finishSubmit(ctx, run, attempt, in, err, false)
+}
+
+// applyRepairOrPause finishes a failing-stage transition one of three ways: a
+// counted return to Build, a pause because the shared budget is spent, or the
+// stage's ordinary pause when it declares no repair route.
+func (s *Service) applyRepairOrPause(t *domain.PipelineTransition, run domain.PipelineRun, plan *repairPlan, exhausted string, defaultReason domain.PipelinePauseReason, defaultDetail string) {
+	switch {
+	case plan != nil:
+		t.Run, t.NewAttempt, t.Repair = &plan.update, &plan.build, &plan.repair
+		t.Events = append(t.Events, plan.event)
+	case exhausted != "":
+		t.Run = &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: PauseRepairBudgetExhausted, PauseDetail: exhausted + ". " + defaultDetail, CurrentStageID: run.CurrentStageID}
+		t.Events = append(t.Events, domain.PipelineEvent{Kind: eventRunPaused, Detail: eventDetail{Code: string(PauseRepairBudgetExhausted), Message: exhausted}.marshal()})
+	default:
+		t.Run = &domain.PipelineRunUpdate{State: domain.PipelineRunPaused, PauseReason: defaultReason, PauseDetail: defaultDetail, CurrentStageID: run.CurrentStageID}
+	}
 }
 
 // reconcileValidation runs once at startup, before the driver does. A command
