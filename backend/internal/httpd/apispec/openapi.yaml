@@ -13638,6 +13638,10 @@ components:
           type: integer
         reason:
           type: string
+        recovery:
+          enum:
+          - restore_conversation
+          type: string
         requestKey:
           type: string
         requestedBy:
@@ -13672,10 +13676,16 @@ components:
           type: boolean
         canResume:
           type: boolean
+        lastRecovery:
+          $ref: '#/components/schemas/PipelinerunsRecoveryView'
         lastStop:
           $ref: '#/components/schemas/PipelineStopView'
         needsRepairAuthorization:
           type: boolean
+        recoveryOptions:
+          items:
+            type: string
+          type: array
         resumeNeedsUser:
           type: boolean
       required:
@@ -13684,6 +13694,7 @@ components:
       - canCancel
       - resumeNeedsUser
       - needsRepairAuthorization
+      - recoveryOptions
       type: object
     PipelineDiagnostic:
       properties:
@@ -14310,6 +14321,24 @@ components:
       - definitionSha256
       - repairBudget
       - stages
+      type: object
+    PipelinerunsRecoveryView:
+      properties:
+        at:
+          format: date-time
+          type: string
+        message:
+          type: string
+        outcome:
+          enum:
+          - continued
+          - retrying
+          - paused
+          type: string
+      required:
+      - outcome
+      - message
+      - at
       type: object
     PipelinesCatalogResponse:
       properties:

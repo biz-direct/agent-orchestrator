@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,7 @@ const (
 	eventProductionDefect     = "production_defect"
 	eventRunCompleted         = "run_completed"
 	eventRunPaused            = "run_paused"
+	eventRecovery             = "recovery"
 	maxSummaryLen             = 2000
 	maxIdempotencyKeyLen      = 128
 	recentEventLimit          = 25
@@ -60,6 +62,7 @@ type Store interface {
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
 	GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (domain.SessionID, error)
+	FindAttachedSessionForAttempt(ctx context.Context, attemptID string) (domain.SessionID, bool, error)
 	CreatePipelineRun(ctx context.Context, run domain.PipelineRun, first domain.PipelineStageAttempt) (domain.PipelineRun, domain.PipelineStageAttempt, error)
 	GetPipelineRun(ctx context.Context, id string) (domain.PipelineRun, bool, error)
 	GetActivePipelineRunBySession(ctx context.Context, id domain.SessionID) (domain.PipelineRun, bool, error)
@@ -825,24 +828,36 @@ func (s *Service) reconcileSession(ctx context.Context, id domain.SessionID) err
 	if err != nil || !ok || run.State != domain.PipelineRunRunning {
 		return err
 	}
-	return s.reconcileRun(ctx, run)
+	return s.reconcileRun(ctx, run, false, "")
 }
 
-func (s *Service) reconcileRun(ctx context.Context, run domain.PipelineRun) error {
+func (s *Service) reconcileRun(ctx context.Context, run domain.PipelineRun, announce bool, note string) error {
 	attempts, err := s.store.ListPipelineStageAttempts(ctx, run.ID)
 	if err != nil {
 		return err
 	}
-	var active *domain.PipelineStageAttempt
+	var active, handoff, validating *domain.PipelineStageAttempt
 	for i := range attempts {
-		if attempts[i].State == domain.PipelineAttemptActive {
+		switch attempts[i].State {
+		case domain.PipelineAttemptActive:
 			active = &attempts[i]
+		case domain.PipelineAttemptHandoff:
+			handoff = &attempts[i]
+		case domain.PipelineAttemptValidating:
+			validating = &attempts[i]
 		}
 	}
-	if active == nil {
-		return nil // a handoff in flight has no executor yet; the driver owns it
+	switch {
+	case active == nil && handoff != nil:
+		s.recordRecovery(ctx, run, announce, handoff.ID, "retrying", fmt.Sprintf("After a restart, the handoff to stage %q was still pending; AO will retry it and adopt the stage session already created for it instead of starting a second one%s", handoff.StageID, note))
+		return nil // the driver owns a handoff in flight
+	case active == nil && validating != nil:
+		return nil // reconcileValidation reports it
+	case active == nil:
+		return nil
 	}
 	if active.StageKind == string(pipeline.StageReview) {
+		s.recordRecovery(ctx, run, announce, active.ID, "continued", fmt.Sprintf("After a restart, the review of revision %s continues from durable pull request and review facts; nothing was replayed%s", shortCommit(active.InputCommit), note))
 		return nil // Review has no executor; the review driver evaluates it from durable facts
 	}
 	session, ok, err := s.store.GetSession(ctx, active.ExecutorSessionID)
@@ -855,7 +870,74 @@ func (s *Service) reconcileRun(ctx context.Context, run domain.PipelineRun) erro
 	case session.Metadata.ControllerGeneration != active.ControllerGeneration:
 		return s.pause(ctx, run, active, domain.PipelinePauseControllerChanged, "The stage executor's controller restarted while the stage was active")
 	}
+	s.recordRecovery(ctx, run, announce, active.ID, "continued", fmt.Sprintf("After a restart, stage %q (attempt %d) is still attached to the same controller generation; AO did not start or replay anything%s", active.StageID, active.AttemptNo, note))
 	return nil
+}
+
+// reconnectSurvivors lets the executors a run needs reattach to provider hosts
+// that outlived the previous daemon. It only adopts what is still running: it
+// never launches anything, and a host that is not running is reported, not read
+// as proof the executor is dead (resume asks a person if it matters).
+func (s *Service) reconnectSurvivors(ctx context.Context, run domain.PipelineRun) string {
+	if s.executor == nil {
+		return ""
+	}
+	attempts, err := s.store.ListPipelineStageAttempts(ctx, run.ID)
+	if err != nil {
+		return ""
+	}
+	var ids []domain.SessionID
+	add := func(id domain.SessionID) {
+		if id == "" || slices.Contains(ids, id) {
+			return
+		}
+		ids = append(ids, id)
+	}
+	for _, a := range attempts {
+		switch {
+		case a.StageKind == string(pipeline.StageReview):
+		case a.State == domain.PipelineAttemptActive:
+			add(a.ExecutorSessionID)
+		case a.State == domain.PipelineAttemptHandoff && a.StageKind == string(pipeline.StageBuild):
+			add(run.SessionID)
+		case a.State == domain.PipelineAttemptHandoff:
+			if id := s.retainedStageSession(attempts, a.StageID); id != "" {
+				add(id)
+			} else if id, found, ferr := s.store.FindAttachedSessionForAttempt(ctx, a.ID); ferr == nil && found {
+				add(id)
+			}
+		}
+	}
+	var reconnected, missing []string
+	for _, id := range ids {
+		ok, rerr := s.executor.ReconnectExecutor(ports.WithPipelineBypass(ctx), id)
+		switch {
+		case rerr != nil:
+			missing = append(missing, fmt.Sprintf("%s (%v)", id, rerr))
+		case ok:
+			reconnected = append(reconnected, string(id))
+		default:
+			missing = append(missing, string(id))
+		}
+	}
+	var note string
+	if len(reconnected) > 0 {
+		note += "; reconnected to the surviving controller of " + strings.Join(reconnected, ", ")
+	}
+	if len(missing) > 0 {
+		note += "; no surviving controller could be adopted for " + strings.Join(missing, ", ") + " (that is not proof it is gone, and nothing was started in its place)"
+	}
+	return note
+}
+
+// recordRecovery appends a reconciliation outcome to the run's own history.
+func (s *Service) recordRecovery(ctx context.Context, run domain.PipelineRun, announce bool, attemptID, outcome, message string) {
+	if !announce {
+		return // ordinary reads re-check ownership but only a restart reports an outcome
+	}
+	if err := s.store.AddPipelineEvent(ctx, domain.PipelineEvent{RunID: run.ID, AttemptID: attemptID, Kind: eventRecovery, CreatedAt: s.clock(), Detail: eventDetail{Code: outcome, Message: message}.marshal()}); err != nil {
+		s.logger.Error("pipeline: record recovery outcome failed", "run_id", run.ID, "err", err)
+	}
 }
 
 // ReconcileAll applies reconcileRun to every running run. The daemon calls it at
@@ -871,10 +953,11 @@ func (s *Service) ReconcileAll(ctx context.Context) error {
 			continue
 		}
 		unlock := s.lock(run.SessionID)
+		note := s.reconnectSurvivors(ctx, run)
 		err := s.reconcileValidation(ctx, run)
 		if err == nil {
 			if current, ok, gerr := s.store.GetPipelineRun(ctx, run.ID); gerr == nil && ok && current.State == domain.PipelineRunRunning {
-				err = s.reconcileRun(ctx, current)
+				err = s.reconcileRun(ctx, current, true, note)
 			}
 		}
 		unlock()

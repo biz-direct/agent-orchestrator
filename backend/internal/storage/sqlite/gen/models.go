@@ -787,6 +787,7 @@ type Session struct {
 	CodexActivityFacts               string
 	ClaudeActivityFacts              string
 	AttachedToSessionID              string
+	AttachedForAttemptID             string
 }
 
 type SessionCleanupFact struct {

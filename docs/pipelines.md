@@ -17,7 +17,7 @@ Status by delivery slice (parent design: issue #1):
 | Built-in Review stage with current-revision approval and CI gates | shipped |
 | Review repair through Build back to Review (shared budget) | shipped |
 | Pause, resume, cancel, human-authorized extra repairs | shipped |
-| Recovery after daemon/desktop replacement | in flight, tracked by the subissues of #1 |
+| Recovery after daemon/desktop replacement | shipped |
 
 A valid workflow that this build cannot execute can be selected but is shown as
 **unavailable**. AO never silently substitutes a normal worker for a selected workflow that cannot run, and a
@@ -460,3 +460,34 @@ run stays paused (`repair_budget_exhausted`) and resume refuses
 view), which persists one grant (`pipeline_repair_grants`, idempotent per request
 key) and raises the run's budget in the same transaction; `resume` then applies
 exactly one authorized repair from the failing attempt's retained feedback.
+
+## Recovery after a restart
+
+AO reconciles every unfinished run when the daemon starts, from durable facts only
+(the frozen snapshot, attempt identity and controller generation, input/output
+commits, command results, review links, pause and repair records) and reports what
+it concluded in the run's own history (`control.lastRecovery`, `ao pipeline status`,
+the task view). It never infers anything from the absence of a signal.
+
+| Situation at restart | Outcome |
+| --- | --- |
+| Run paused or cancelled | left exactly as it is; nothing restarts on its own |
+| Stage active, same controller generation | continues; nothing is started or replayed (`continued`) |
+| Stage active, controller generation changed or executor ended | paused (`controller_changed` / `session_terminated`); resume continues it as a new attempt |
+| Handoff accepted but not yet running | the driver retries it (`retrying`); the frozen definition is used, not today's repository files |
+| Executor whose provider host outlived the daemon | reconnected through the same reconnect-only path the startup health check uses (never launches); a host that is not running is reported as "could not be adopted", not as dead |
+| Specialist session created but the attempt never confirmed | the surviving session is **adopted** (found by attempt id), not duplicated |
+| Prompt may or may not have been delivered | redelivered under a key stable for the attempt, so the provider never sees a second turn |
+| Validation commands were running | recorded as `unknown`, never inferred passed, never re-run automatically (`validation_interrupted`) |
+| Review waiting or running | continues from durable PR/review facts (`continued`) |
+| A shutdown while handing off | not recorded as a pause; the next process finishes the handoff |
+
+**Recovery decisions are explicit and human-only.** When a conversation that must
+continue has no running controller, AO pauses with `recovery_decision_required`
+instead of starting a fresh conversation. The only option is
+`ao pipeline resume --restore-conversation` (task view: Restore conversation),
+which restores the **same** native conversation and continues; if that fails the run
+stays paused and nothing is started in its place. Otherwise cancel the run.
+Worktree, conversations, evidence, and the original worker's ownership are retained
+throughout. Stale events from a source controller after a handoff are rejected
+(`PIPELINE_ATTEMPT_STALE`, `PIPELINE_NOT_ATTEMPT_EXECUTOR`).

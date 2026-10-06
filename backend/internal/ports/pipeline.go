@@ -51,6 +51,22 @@ func PipelineBypass(ctx context.Context) bool {
 	return v
 }
 
+type pipelineDeliveryKey struct{}
+
+// WithPipelineDeliveryKey names the durable, deterministic key under which the
+// pipeline delivers one stage prompt. Delivering the same prompt twice (after a
+// crash between delivery and confirmation) with the same key cannot start a
+// second provider turn.
+func WithPipelineDeliveryKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, pipelineDeliveryKey{}, key)
+}
+
+// PipelineDeliveryKey returns the key set by WithPipelineDeliveryKey, or "".
+func PipelineDeliveryKey(ctx context.Context) string {
+	v, _ := ctx.Value(pipelineDeliveryKey{}).(string)
+	return v
+}
+
 // PipelineExecutor starts, quiesces, and stops the Chat executors of pipeline
 // stages. The worker executes Build; every other stage is an attached
 // specialist: a separate provider conversation that runs in the worker's own
@@ -86,6 +102,16 @@ type PipelineExecutor interface {
 	// returns ErrPipelineResumeUnsafe and the run asks for a recovery decision
 	// instead of silently starting a fresh conversation.
 	ResumeExecutor(ctx context.Context, id domain.SessionID, prompt string) (PipelineStageStarted, error)
+	// ReconnectExecutor reattaches to a provider host that survived a daemon
+	// restart, without launching anything. It returns reconnected=false (and no
+	// error) when no surviving host is running: that says nothing about whether
+	// the executor is dead, only that AO could not adopt it.
+	ReconnectExecutor(ctx context.Context, id domain.SessionID) (reconnected bool, err error)
+	// RestoreExecutor restores the controller of a conversation that lost it (for
+	// example after a daemon restart) so that the same native conversation can
+	// continue. It is only called after a person explicitly chose to recover; it
+	// never starts a fresh conversation.
+	RestoreExecutor(ctx context.Context, id domain.SessionID) error
 	// StopStage stops an attached stage's controller. It never touches the
 	// shared workspace.
 	StopStage(ctx context.Context, id domain.SessionID) error

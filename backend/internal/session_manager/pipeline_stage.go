@@ -25,8 +25,21 @@ import (
 // controller to drain before the handoff pauses as uncertain.
 const pipelineRelinquishTimeout = 2 * time.Minute
 
-type attachedSessionStore interface {
-	CreateAttachedSession(ctx context.Context, rec domain.SessionRecord, owner domain.SessionID) (domain.SessionRecord, error)
+type attachedAttemptStore interface {
+	CreateAttachedSessionForAttempt(ctx context.Context, rec domain.SessionRecord, owner domain.SessionID, attemptID string) (domain.SessionRecord, error)
+	FindAttachedSessionForAttempt(ctx context.Context, attemptID string) (domain.SessionID, bool, error)
+}
+
+// deliverStagePrompt delivers a stage prompt under the pipeline's deterministic
+// key when one is set, so redelivery after a crash cannot create a second turn.
+func (m *Manager) deliverStagePrompt(ctx context.Context, id domain.SessionID, prompt string) error {
+	bypass := ports.WithPipelineBypass(ctx)
+	if key := ports.PipelineDeliveryKey(ctx); key != "" {
+		_, err := m.chat.RelayChatTurnWithID(bypass, id, prompt, key)
+		return err
+	}
+	_, err := m.chat.RelayChatTurn(bypass, id, prompt)
+	return err
 }
 
 type liveChatProbe interface {
@@ -184,6 +197,17 @@ func (m *Manager) StartStage(ctx context.Context, start ports.PipelineStageStart
 		agentConfig.Permissions = owner.Metadata.Permissions
 	}
 
+	// A session already created for this very attempt (the daemon stopped before
+	// the attempt was confirmed) is adopted, never duplicated: when its
+	// controller survived the stage prompt is redelivered under its idempotent
+	// key; when it did not, AO will not start a fresh conversation in its place.
+	if adopter, ok := m.store.(attachedAttemptStore); ok && start.ExistingSessionID == "" && start.AttemptID != "" {
+		if id, found, ferr := adopter.FindAttachedSessionForAttempt(ctx, start.AttemptID); ferr != nil {
+			return ports.PipelineStageStarted{}, fmt.Errorf("look up the stage's existing session: %w", ferr)
+		} else if found {
+			return m.adoptStage(ctx, id, start)
+		}
+	}
 	var rec domain.SessionRecord
 	created := false
 	if start.ExistingSessionID != "" {
@@ -192,12 +216,12 @@ func (m *Manager) StartStage(ctx context.Context, start ports.PipelineStageStart
 			return ports.PipelineStageStarted{}, fmt.Errorf("load the stage's retained conversation: %w", err)
 		}
 	} else {
-		maker, ok := m.store.(attachedSessionStore)
+		maker, ok := m.store.(attachedAttemptStore)
 		if !ok {
 			return ports.PipelineStageStarted{}, errors.New("this store cannot create attached stage sessions")
 		}
 		now := m.clock()
-		rec, err = maker.CreateAttachedSession(ctx, domain.SessionRecord{
+		rec, err = maker.CreateAttachedSessionForAttempt(ctx, domain.SessionRecord{
 			ProjectID: owner.ProjectID, Kind: domain.KindWorker, Harness: start.Harness, Mode: domain.SessionModeChat,
 			DisplayName: fmt.Sprintf("%s stage", start.StageID),
 			Activity:    domain.Activity{State: domain.ActivityActive, LastActivityAt: now},
@@ -208,7 +232,7 @@ func (m *Manager) StartStage(ctx context.Context, start ports.PipelineStageStart
 				Prompt: start.Prompt, Model: agentConfig.Model, Effort: agentConfig.Effort,
 			},
 			ProvisionState: domain.SessionProvisionReady, CreatedAt: now, UpdatedAt: now,
-		}, owner.ID)
+		}, owner.ID, start.AttemptID)
 		if err != nil {
 			return ports.PipelineStageStarted{}, fmt.Errorf("create attached stage session: %w", err)
 		}
@@ -266,7 +290,7 @@ func (m *Manager) StartStage(ctx context.Context, start ports.PipelineStageStart
 	}
 	// The stage prompt is a normal turn through the controller. The pipeline's
 	// own delivery is the one thing the execution gate must let through.
-	if _, err := m.chat.StartChatTurn(ports.WithPipelineBypass(ctx), rec.ID, start.Prompt); err != nil {
+	if err := m.deliverStagePrompt(m.stagePromptContext(ctx, start), rec.ID, start.Prompt); err != nil {
 		return fail(fmt.Errorf("deliver stage prompt: %w", err))
 	}
 	final, err := m.getRecord(ctx, rec.ID)
@@ -277,6 +301,104 @@ func (m *Manager) StartStage(ctx context.Context, start ports.PipelineStageStart
 		SessionID: final.ID, ControllerGeneration: final.Metadata.ControllerGeneration,
 		ProviderConversationID: final.Metadata.ProviderConversationID,
 	}, nil
+}
+
+// stagePromptContext keys a stage's first prompt by its attempt so that a
+// redelivery after a crash is the same delivery.
+func (m *Manager) stagePromptContext(ctx context.Context, start ports.PipelineStageStart) context.Context {
+	if ports.PipelineDeliveryKey(ctx) != "" || start.AttemptID == "" {
+		return ctx
+	}
+	return ports.WithPipelineDeliveryKey(ctx, "pipeline-stage:"+start.AttemptID)
+}
+
+// adoptStage reconnects to the surviving session created for an attempt.
+func (m *Manager) adoptStage(ctx context.Context, id domain.SessionID, start ports.PipelineStageStart) (ports.PipelineStageStarted, error) {
+	unsafe := func(format string, args ...any) (ports.PipelineStageStarted, error) {
+		return ports.PipelineStageStarted{}, fmt.Errorf("%w: %s", ports.ErrPipelineResumeUnsafe, fmt.Sprintf(format, args...))
+	}
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return ports.PipelineStageStarted{}, fmt.Errorf("load the stage's existing session: %w", err)
+	}
+	if !ok || rec.IsTerminated {
+		return unsafe("the stage session %s created for this attempt is gone or terminated", id)
+	}
+	probe, hasProbe := m.chat.(liveChatProbe)
+	if m.chat == nil || !hasProbe || !probe.HasLiveChatController(id) {
+		return unsafe("the stage session %s was created for this attempt but its controller is not running", id)
+	}
+	if err := m.deliverStagePrompt(m.stagePromptContext(ctx, start), id, start.Prompt); err != nil {
+		return ports.PipelineStageStarted{}, fmt.Errorf("deliver the stage prompt to the adopted session: %w", err)
+	}
+	after, err := m.getRecord(ctx, id)
+	if err != nil {
+		return ports.PipelineStageStarted{}, err
+	}
+	return ports.PipelineStageStarted{SessionID: id, ControllerGeneration: after.Metadata.ControllerGeneration, ProviderConversationID: after.Metadata.ProviderConversationID}, nil
+}
+
+// ReconnectExecutor implements ports.PipelineExecutor. It is the same
+// reconnect-only path the daemon's startup health check uses: it adopts a
+// provider host that is still running and never creates one.
+func (m *Manager) ReconnectExecutor(ctx context.Context, id domain.SessionID) (bool, error) {
+	if m.chat == nil {
+		return false, nil
+	}
+	if m.chat.HasLiveChatController(id) {
+		return true, nil
+	}
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("load session %s: %w", id, err)
+	}
+	if !ok || rec.IsTerminated || rec.Metadata.ProviderConversationID == "" {
+		return false, nil
+	}
+	project, err := m.loadProject(ctx, rec.ProjectID)
+	if err != nil {
+		return false, err
+	}
+	_, err = m.resumeChatController(ports.WithPipelineBypass(ctx), "reconnect pipeline stage", rec, project,
+		workspaceInfo(rec), false, true, "", domain.SessionInterfaceTransitionHistoryStrict)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ports.ErrChatHostNotRunning):
+		return false, nil
+	}
+	return false, err
+}
+
+// RestoreExecutor implements ports.PipelineExecutor. It is only called after a
+// person chose to recover: it resumes the SAME native conversation (the session's
+// recorded provider conversation) and refuses anything that would start a new one.
+func (m *Manager) RestoreExecutor(ctx context.Context, id domain.SessionID) error {
+	if m.chat == nil {
+		return fmt.Errorf("%w: Chat is not available in this build", ports.ErrPipelineStageUnsupported)
+	}
+	if m.chat.HasLiveChatController(id) {
+		return nil
+	}
+	rec, ok, err := m.store.GetSession(ctx, id)
+	if err != nil {
+		return fmt.Errorf("load session %s: %w", id, err)
+	}
+	if !ok || rec.IsTerminated {
+		return fmt.Errorf("session %s is gone or terminated", id)
+	}
+	if rec.Metadata.ProviderConversationID == "" {
+		return fmt.Errorf("session %s has no recorded conversation to resume; AO will not start a fresh one", id)
+	}
+	project, err := m.loadProject(ctx, rec.ProjectID)
+	if err != nil {
+		return err
+	}
+	if _, err := m.resumeChatController(ports.WithPipelineBypass(ctx), "restore pipeline stage", rec, project,
+		workspaceInfo(rec), false, false, "", domain.SessionInterfaceTransitionHistoryStrict); err != nil {
+		return fmt.Errorf("resume the stage's conversation: %w", err)
+	}
+	return nil
 }
 
 // StopStage implements ports.PipelineExecutor. It releases the stage's
@@ -313,7 +435,7 @@ func (m *Manager) ResumeExecutor(ctx context.Context, id domain.SessionID, promp
 	if handoff, supported := m.chat.(chatHandoffLauncher); supported {
 		handoff.AbortChatHandoff(id)
 	}
-	if _, err := m.chat.RelayChatTurn(ports.WithPipelineBypass(ctx), id, prompt); err != nil {
+	if err := m.deliverStagePrompt(ctx, id, prompt); err != nil {
 		return ports.PipelineStageStarted{}, fmt.Errorf("deliver the stage prompt: %w", err)
 	}
 	after, err := m.getRecord(ctx, id)

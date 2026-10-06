@@ -348,3 +348,40 @@ func TestPipelineRepairGrantsAreIdempotentAndGrowTheBudgetAtomically(t *testing.
 		t.Fatalf("budget=%d grants=%+v err=%v", got.RepairBudget, grants, lerr)
 	}
 }
+
+func TestAttachedSessionIsFoundByTheAttemptItWasCreatedFor(t *testing.T) {
+	ctx := context.Background()
+	s, owner := seedPipelineSession(t, "pra")
+	at := time.Now().UTC().Truncate(time.Second)
+	rec := func() domain.SessionRecord {
+		r := sampleRecord("pra")
+		r.CreatedAt, r.UpdatedAt = at, at
+		return r
+	}
+	first, err := s.CreateAttachedSessionForAttempt(ctx, rec(), owner, "attempt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, ok, err := s.FindAttachedSessionForAttempt(ctx, "attempt-1")
+	if err != nil || !ok || id != first.ID {
+		t.Fatalf("lookup by attempt: %v %v %v", id, ok, err)
+	}
+	if _, ok, _ := s.FindAttachedSessionForAttempt(ctx, "attempt-2"); ok {
+		t.Fatal("another attempt has no session yet")
+	}
+	if _, ok, _ := s.FindAttachedSessionForAttempt(ctx, ""); ok {
+		t.Fatal("an empty attempt id never matches")
+	}
+	// One session per attempt: a second creation for the same attempt must fail
+	// rather than create a duplicate.
+	if _, err := s.CreateAttachedSessionForAttempt(ctx, rec(), owner, "attempt-1"); err == nil {
+		t.Fatal("the unique index must refuse a second session for the same attempt")
+	}
+	// The plain creator (no attempt) is unchanged and unindexed.
+	if _, err := s.CreateAttachedSession(ctx, rec(), owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateAttachedSession(ctx, rec(), owner); err != nil {
+		t.Fatalf("sessions without an attempt never collide: %v", err)
+	}
+}

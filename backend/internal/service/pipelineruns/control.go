@@ -58,7 +58,15 @@ type ControlInput struct {
 	// makes a repeated request a no-op instead of a second grant.
 	AdditionalRepairs int    `json:"additionalRepairs,omitempty"`
 	RequestKey        string `json:"requestKey,omitempty"`
+	// Recovery is the explicit choice a person makes to resume a run paused for a
+	// recovery decision. "restore_conversation" restores the same native
+	// conversation (it never starts a fresh one in its place) and then resumes.
+	Recovery string `json:"recovery,omitempty" enum:"restore_conversation"`
 }
+
+// RecoveryRestoreConversation is the only recovery choice: bring the stage's
+// existing conversation back, then continue.
+const RecoveryRestoreConversation = "restore_conversation"
 
 // StopView says what AO knows about the executor it asked to stop. A requested
 // interrupt is not proof: Confirmed is true only when quiescence was shown.
@@ -448,6 +456,15 @@ func (s *Service) resumeByControl(ctx context.Context, run domain.PipelineRun, r
 	if humanOnlyPause(run.PauseReason) && requester != domain.PipelineRequestedByUser {
 		return ControlResult{}, apierr.Forbidden("PIPELINE_HUMAN_DECISION_REQUIRED", fmt.Sprintf("This pause (%s) is a decision for a person; an orchestrator cannot resume it", run.PauseReason))
 	}
+	if in.Recovery != "" && in.Recovery != RecoveryRestoreConversation {
+		return ControlResult{}, apierr.Invalid("INVALID_PIPELINE_CONTROL", `recovery must be "restore_conversation"`, nil)
+	}
+	if in.Recovery != "" && run.PauseReason != PauseRecoveryDecision {
+		return ControlResult{}, apierr.Invalid("INVALID_PIPELINE_CONTROL", "a recovery choice only applies to a run paused for a recovery decision", nil)
+	}
+	if run.PauseReason == PauseRecoveryDecision && in.Recovery == "" {
+		return ControlResult{}, apierr.Conflict("PIPELINE_RECOVERY_CHOICE_REQUIRED", `This pause needs a recovery decision. AO will not start a fresh conversation in place of the lost one; choose recovery "restore_conversation" to bring the same conversation back, or cancel the run`, nil)
+	}
 	if run.PauseReason == domain.PipelinePauseSessionTerminated {
 		return ControlResult{}, apierr.Conflict("PIPELINE_SESSION_ENDED", "The task ended, so its pipeline cannot continue; cancel the run", nil)
 	}
@@ -474,6 +491,12 @@ func (s *Service) resumeByControl(ctx context.Context, run domain.PipelineRun, r
 	}
 	if state.Branch != run.ExpectedBranch {
 		return ControlResult{}, apierr.Conflict("PIPELINE_RESUME_BLOCKED", fmt.Sprintf("The workspace is on %q but the run expects branch %q; check out the task branch first", branchLabel(state.Branch), run.ExpectedBranch), nil)
+	}
+
+	if in.Recovery == RecoveryRestoreConversation {
+		if err := s.restoreStageConversation(ctx, run, attempts); err != nil {
+			return ControlResult{}, err
+		}
 	}
 
 	now := s.clock()
@@ -587,4 +610,35 @@ func (s *Service) retryAttempt(ctx context.Context, run domain.PipelineRun, snap
 	}
 	next.InputCommit, next.PredecessorAttemptID = cur.InputCommit, cur.PredecessorAttemptID
 	return next, nil
+}
+
+// restoreStageConversation brings back the controller of the conversation the
+// paused stage must continue in. It never starts a fresh conversation: a stage
+// that never had one simply starts normally when the handoff is retried.
+func (s *Service) restoreStageConversation(ctx context.Context, run domain.PipelineRun, attempts []domain.PipelineStageAttempt) error {
+	cur := currentAttempt(run, attempts)
+	if cur == nil || s.executor == nil {
+		return apierr.Conflict("PIPELINE_RECOVERY_FAILED", "AO has no executor that can restore the stage's conversation in this build", nil)
+	}
+	var target domain.SessionID
+	switch {
+	case cur.StageKind == string(pipeline.StageBuild):
+		target = run.SessionID
+	case cur.ExecutorSessionID != "":
+		target = cur.ExecutorSessionID
+	default:
+		target = s.retainedStageSession(attempts, cur.StageID)
+		if target == "" {
+			if id, found, err := s.store.FindAttachedSessionForAttempt(ctx, cur.ID); err == nil && found {
+				target = id
+			}
+		}
+	}
+	if target == "" || cur.StageKind == string(pipeline.StageReview) {
+		return nil // there is no conversation to restore
+	}
+	if err := s.executor.RestoreExecutor(ports.WithPipelineBypass(ctx), target); err != nil {
+		return apierr.Conflict("PIPELINE_RECOVERY_FAILED", fmt.Sprintf("The stage's conversation could not be restored: %v. The run stays paused; nothing was started in its place", err), nil)
+	}
+	return nil
 }

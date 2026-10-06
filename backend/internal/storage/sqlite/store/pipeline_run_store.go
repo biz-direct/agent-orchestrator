@@ -331,6 +331,13 @@ func pipelineAttemptFromGen(a gen.PipelineStageAttempt) domain.PipelineStageAtte
 // pipeline stage for ownerID. Because the attached marker is written in the
 // same transaction, no listing can ever observe the row as an ordinary session.
 func (s *Store) CreateAttachedSession(ctx context.Context, rec domain.SessionRecord, ownerID domain.SessionID) (domain.SessionRecord, error) {
+	return s.CreateAttachedSessionForAttempt(ctx, rec, ownerID, "")
+}
+
+// CreateAttachedSessionForAttempt is CreateAttachedSession that also records the
+// pipeline attempt the session was created for, in the same transaction, so a
+// restart can find (and adopt) the session instead of launching a duplicate.
+func (s *Store) CreateAttachedSessionForAttempt(ctx context.Context, rec domain.SessionRecord, ownerID domain.SessionID, attemptID string) (domain.SessionRecord, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	err := s.inTx(ctx, "create attached session", func(q *gen.Queries) error {
@@ -352,7 +359,13 @@ func (s *Store) CreateAttachedSession(ctx context.Context, rec domain.SessionRec
 		if err := q.InsertSession(ctx, recordToInsert(rec, num)); err != nil {
 			return fmt.Errorf("insert attached session %s: %w", rec.ID, err)
 		}
-		return q.SetSessionAttachedTo(ctx, gen.SetSessionAttachedToParams{AttachedToSessionID: string(ownerID), ID: rec.ID})
+		if err := q.SetSessionAttachedTo(ctx, gen.SetSessionAttachedToParams{AttachedToSessionID: string(ownerID), ID: rec.ID}); err != nil {
+			return err
+		}
+		if attemptID == "" {
+			return nil
+		}
+		return q.SetSessionAttachedAttempt(ctx, gen.SetSessionAttachedAttemptParams{AttachedForAttemptID: attemptID, ID: rec.ID})
 	})
 	if err != nil {
 		return domain.SessionRecord{}, err
@@ -552,4 +565,20 @@ func (s *Store) ListPipelineRepairGrants(ctx context.Context, runID string) ([]d
 		})
 	}
 	return out, nil
+}
+
+// FindAttachedSessionForAttempt returns the attached stage session created for
+// a pipeline attempt, if one survives.
+func (s *Store) FindAttachedSessionForAttempt(ctx context.Context, attemptID string) (domain.SessionID, bool, error) {
+	if attemptID == "" {
+		return "", false, nil
+	}
+	id, err := s.qr.GetAttachedSessionIDForAttempt(ctx, attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("find attached session for attempt: %w", err)
+	}
+	return id, true, nil
 }

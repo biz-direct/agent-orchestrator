@@ -270,9 +270,9 @@ function RunControls({ run, session, hostId }: { run: RunView; session: Workspac
 	const { t } = useTranslation();
 	const queryClient = useQueryClient();
 	const client = clientForSessionHost(hostId);
-	const [confirm, setConfirm] = useState<"cancel" | "authorize" | null>(null);
+	const [confirm, setConfirm] = useState<"cancel" | "authorize" | "restore" | null>(null);
 	const control = useMutation({
-		mutationFn: async (input: Pick<ControlRequest, "action" | "additionalRepairs" | "requestKey">) => {
+		mutationFn: async (input: Pick<ControlRequest, "action" | "additionalRepairs" | "requestKey" | "recovery">) => {
 			const { data, error } = await client.POST("/api/v1/sessions/{sessionId}/pipeline/control", {
 				params: { path: { sessionId: session.id } },
 				body: { runId: run.id, requestedBy: "user", expectedRevision: run.revision, ...input },
@@ -287,7 +287,8 @@ function RunControls({ run, session, hostId }: { run: RunView; session: Workspac
 	});
 	const { control: state } = run;
 	const lastStop = state.lastStop;
-	if (!state.canPause && !state.canResume && !state.canCancel && !state.needsRepairAuthorization && run.repairGrants.length === 0) return null;
+	const canRestore = run.state === "paused" && state.recoveryOptions.includes("restore_conversation");
+	if (!state.canPause && !state.canResume && !state.canCancel && !state.needsRepairAuthorization && !canRestore && run.repairGrants.length === 0) return null;
 	return (
 		<div className="flex flex-col gap-1.5" data-testid="pipeline-controls">
 			<div className="flex flex-wrap items-center gap-1.5">
@@ -299,6 +300,11 @@ function RunControls({ run, session, hostId }: { run: RunView; session: Workspac
 				{state.canResume ? (
 					<Button size="sm" variant="secondary" disabled={control.isPending} onClick={() => control.mutate({ action: "resume" })}>
 						{t("inspector.pipeline.control.resume")}
+					</Button>
+				) : null}
+				{canRestore ? (
+					<Button size="sm" variant="secondary" disabled={control.isPending} onClick={() => setConfirm("restore")}>
+						{t("inspector.pipeline.control.restore")}
 					</Button>
 				) : null}
 				{state.needsRepairAuthorization ? (
@@ -320,6 +326,11 @@ function RunControls({ run, session, hostId }: { run: RunView; session: Workspac
 					{lastStop.confirmed ? t("inspector.pipeline.control.stopConfirmed") : t("inspector.pipeline.control.stopUnconfirmed", { detail: lastStop.detail ?? "" })}
 				</p>
 			) : null}
+			{state.lastRecovery ? (
+				<p className="text-pretty text-2xs leading-normal text-settings-muted" data-recovery-outcome={state.lastRecovery.outcome}>
+					{t("inspector.pipeline.control.recovery", { message: state.lastRecovery.message })}
+				</p>
+			) : null}
 			{run.repairGrants.length > 0 ? (
 				<p className="text-2xs text-settings-muted">{t("inspector.pipeline.control.grants", { count: run.repairGrants.reduce((sum, g) => sum + g.amount, 0) })}</p>
 			) : null}
@@ -338,6 +349,16 @@ function RunControls({ run, session, hostId }: { run: RunView; session: Workspac
 				busy={control.isPending}
 				error={control.isError ? (control.error instanceof Error ? control.error.message : t("inspector.pipeline.control.failed")) : null}
 				onConfirm={() => control.mutate({ action: "cancel" })}
+				onOpenChange={(open) => !open && setConfirm(null)}
+			/>
+			<ConfirmDialog
+				open={confirm === "restore"}
+				title={t("inspector.pipeline.control.restoreTitle")}
+				description={t("inspector.pipeline.control.restoreDescription")}
+				confirmLabel={t("inspector.pipeline.control.restoreConfirm")}
+				busy={control.isPending}
+				error={control.isError ? (control.error instanceof Error ? control.error.message : t("inspector.pipeline.control.failed")) : null}
+				onConfirm={() => control.mutate({ action: "resume", recovery: "restore_conversation" })}
 				onOpenChange={(open) => !open && setConfirm(null)}
 			/>
 			<ConfirmDialog

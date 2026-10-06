@@ -47,6 +47,17 @@ type fakeExecutor struct {
 	onRelinquish  func()
 	onStart       func()
 
+	reconnected  []domain.SessionID
+	reconnectErr error
+	hostGone     map[domain.SessionID]bool
+	restoreErr   error
+	restored     []domain.SessionID
+	afterStart   func() // runs after the stage session exists, before StartStage returns
+	afterResume  func()
+	byAttempt    map[string]domain.SessionID
+	adopted      int
+	deliveries   map[string]int // idempotency key -> times the prompt was delivered
+	turns        int            // distinct provider turns the deliveries produced
 	resumeErr    error
 	resumed      []resumeCall
 	interruptErr error
@@ -97,6 +108,37 @@ func (e *fakeExecutor) ReleaseExecutor(_ context.Context, id domain.SessionID) e
 	return nil
 }
 
+// deliver models the idempotent provider turn: a key delivered twice is one turn.
+func (e *fakeExecutor) deliver(ctx context.Context) {
+	key := ports.PipelineDeliveryKey(ctx)
+	if e.deliveries == nil {
+		e.deliveries = map[string]int{}
+	}
+	e.deliveries[key]++
+	if key == "" || e.deliveries[key] == 1 {
+		e.turns++
+	}
+}
+
+func (e *fakeExecutor) ReconnectExecutor(_ context.Context, id domain.SessionID) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, "reconnect:"+string(id))
+	e.reconnected = append(e.reconnected, id)
+	if e.reconnectErr != nil {
+		return false, e.reconnectErr
+	}
+	return !e.hostGone[id], nil
+}
+
+func (e *fakeExecutor) RestoreExecutor(_ context.Context, id domain.SessionID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, "restore:"+string(id))
+	e.restored = append(e.restored, id)
+	return e.restoreErr
+}
+
 func (e *fakeExecutor) StartStage(ctx context.Context, start ports.PipelineStageStart) (ports.PipelineStageStarted, error) {
 	e.mu.Lock()
 	hook := e.onStart
@@ -111,6 +153,16 @@ func (e *fakeExecutor) StartStage(ctx context.Context, start ports.PipelineStage
 	if e.startErr != nil {
 		return ports.PipelineStageStarted{}, e.startErr
 	}
+	// A session already created for this attempt survives a restart and is adopted.
+	if id, ok := e.byAttempt[start.AttemptID]; ok && start.AttemptID != "" {
+		rec, found, err := e.store.GetSession(ctx, id)
+		if err != nil || !found {
+			return ports.PipelineStageStarted{}, fmt.Errorf("%w: the session created for this attempt is gone", ports.ErrPipelineResumeUnsafe)
+		}
+		e.adopted++
+		e.deliver(ctx)
+		return ports.PipelineStageStarted{SessionID: id, ControllerGeneration: rec.Metadata.ControllerGeneration}, nil
+	}
 	e.startedGens++
 	now := time.Now().UTC().Truncate(time.Second)
 	rec, err := e.store.CreateAttachedSession(ctx, domain.SessionRecord{
@@ -121,6 +173,17 @@ func (e *fakeExecutor) StartStage(ctx context.Context, start ports.PipelineStage
 	}, start.Owner)
 	if err != nil {
 		return ports.PipelineStageStarted{}, err
+	}
+	if e.byAttempt == nil {
+		e.byAttempt = map[string]domain.SessionID{}
+	}
+	e.byAttempt[start.AttemptID] = rec.ID
+	e.deliver(ctx)
+	if e.afterStart != nil {
+		hook := e.afterStart
+		e.mu.Unlock()
+		hook()
+		e.mu.Lock()
 	}
 	return ports.PipelineStageStarted{SessionID: rec.ID, ControllerGeneration: fmt.Sprintf("spec-gen-%d", e.startedGens)}, nil
 }
@@ -137,6 +200,13 @@ func (e *fakeExecutor) ResumeExecutor(ctx context.Context, id domain.SessionID, 
 	e.resumed = append(e.resumed, resumeCall{ID: id, Prompt: prompt})
 	if e.resumeErr != nil {
 		return ports.PipelineStageStarted{}, e.resumeErr
+	}
+	e.deliver(ctx)
+	if e.afterResume != nil {
+		hook := e.afterResume
+		e.mu.Unlock()
+		hook()
+		e.mu.Lock()
 	}
 	rec, ok, err := e.store.GetSession(ctx, id)
 	if err != nil || !ok {

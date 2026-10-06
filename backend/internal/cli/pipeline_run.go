@@ -52,6 +52,11 @@ type pipelineControlDTO struct {
 	ResumeNeedsUser          bool             `json:"resumeNeedsUser"`
 	NeedsRepairAuthorization bool             `json:"needsRepairAuthorization"`
 	LastStop                 *pipelineStopDTO `json:"lastStop,omitempty"`
+	RecoveryOptions          []string         `json:"recoveryOptions"`
+	LastRecovery             *struct {
+		Outcome string `json:"outcome"`
+		Message string `json:"message"`
+	} `json:"lastRecovery,omitempty"`
 }
 
 type pipelineStopDTO struct {
@@ -74,6 +79,7 @@ type pipelineControlRequestDTO struct {
 	Reason            string `json:"reason,omitempty"`
 	AdditionalRepairs int    `json:"additionalRepairs,omitempty"`
 	RequestKey        string `json:"requestKey,omitempty"`
+	Recovery          string `json:"recovery,omitempty"`
 }
 
 type pipelineControlResultDTO struct {
@@ -338,7 +344,7 @@ func writeControlResult(cmd *cobra.Command, res pipelineControlResultDTO, verb s
 
 func newPipelineControlCommand(ctx *commandContext, action, short string) *cobra.Command {
 	var session, reason string
-	var jsonOutput bool
+	var restore, jsonOutput bool
 	verbs := map[string]string{"pause": "paused", "resume": "resumed", "cancel": "cancelled"}
 	long := short + ". Requests are idempotent and refused when stale. "
 	switch action {
@@ -355,8 +361,15 @@ func newPipelineControlCommand(ctx *commandContext, action, short string) *cobra
 		Long:  long,
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if restore && action != "resume" {
+				return usageError{errors.New("--restore-conversation only applies to resume")}
+			}
 			res, err := runControl(cmd, ctx, session, func(run *pipelineRunDTO) pipelineControlRequestDTO {
-				return pipelineControlRequestDTO{Action: action, Reason: reason, ExpectedRevision: run.Revision}
+				req := pipelineControlRequestDTO{Action: action, Reason: reason, ExpectedRevision: run.Revision}
+				if restore {
+					req.Recovery = "restore_conversation"
+				}
+				return req
 			})
 			if err != nil {
 				return err
@@ -367,6 +380,9 @@ func newPipelineControlCommand(ctx *commandContext, action, short string) *cobra
 	f := cmd.Flags()
 	f.StringVar(&session, "session", "", "Worker session id (default: AO_SESSION_ID)")
 	f.StringVar(&reason, "reason", "", "Why (recorded with the run)")
+	if action == "resume" {
+		f.BoolVar(&restore, "restore-conversation", false, "Recovery decision (user only): restore the stage's lost conversation, then continue; AO never starts a fresh one in its place")
+	}
 	f.BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
 }
@@ -563,6 +579,16 @@ func writePipelineRun(w io.Writer, run *pipelineRunDTO) error {
 	}
 	if err := writePipelineReview(w, run); err != nil {
 		return err
+	}
+	if rec := run.Control.LastRecovery; rec != nil {
+		if _, err := fmt.Fprintf(w, "recovery (%s): %s\n", rec.Outcome, rec.Message); err != nil {
+			return err
+		}
+	}
+	if len(run.Control.RecoveryOptions) > 0 {
+		if _, err := fmt.Fprintf(w, "decision needed: `ao pipeline resume --restore-conversation` restores the same conversation (there is no fresh-conversation option), or `ao pipeline cancel`\n"); err != nil {
+			return err
+		}
 	}
 	if r := run.LastRejection; r != nil {
 		if _, err := fmt.Fprintf(w, "last submission rejected [%s]: %s\n", r.Code, r.Message); err != nil {

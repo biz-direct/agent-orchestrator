@@ -249,6 +249,9 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 	// conversation resumes exactly that one (the original Builder after a repair,
 	// the same Tester on a re-run); if it cannot be resumed safely the run asks a
 	// person rather than silently starting a fresh conversation in its place.
+	// Every prompt this handoff delivers carries a key that is stable for the
+	// attempt, so redelivery after a crash cannot create a second provider turn.
+	ctx = ports.WithPipelineDeliveryKey(ctx, "pipeline-attempt:"+pending.ID)
 	var started ports.PipelineStageStarted
 	resumed := false
 	switch existing := s.retainedStageSession(attempts, stage.ID); {
@@ -330,6 +333,12 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 
 // pauseHandoff pauses a run whose successor never became active.
 func (s *Service) pauseHandoff(ctx context.Context, run domain.PipelineRun, pending *domain.PipelineStageAttempt, reason domain.PipelinePauseReason, detail string) error {
+	// A daemon that is shutting down is not evidence about the run: leave the
+	// handoff pending for the next process instead of recording a pause that
+	// only reflects the cancelled context.
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
 	if err := s.pause(ctx, run, pending, reason, detail); err != nil {
 		return err
 	}

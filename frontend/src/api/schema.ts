@@ -4655,6 +4655,8 @@ export interface components {
             /** Format: int64 */
             expectedRevision?: number;
             reason?: string;
+            /** @enum {string} */
+            recovery?: "restore_conversation";
             requestKey?: string;
             /** @enum {string} */
             requestedBy: "user" | "orchestrator";
@@ -4669,8 +4671,10 @@ export interface components {
             canCancel: boolean;
             canPause: boolean;
             canResume: boolean;
+            lastRecovery?: components["schemas"]["PipelinerunsRecoveryView"];
             lastStop?: components["schemas"]["PipelineStopView"];
             needsRepairAuthorization: boolean;
+            recoveryOptions: string[];
             resumeNeedsUser: boolean;
         };
         PipelineDiagnostic: {
@@ -4899,6 +4903,13 @@ export interface components {
             instructionsSource?: string;
             repairBudget: number;
             stages: components["schemas"]["PipelineStage"][];
+        };
+        PipelinerunsRecoveryView: {
+            /** Format: date-time */
+            at: string;
+            message: string;
+            /** @enum {string} */
+            outcome: "continued" | "retrying" | "paused";
         };
         PipelinesCatalogResponse: {
             commandsTrusted: boolean;

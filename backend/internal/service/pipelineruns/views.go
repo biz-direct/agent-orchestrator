@@ -223,6 +223,18 @@ type ControlView struct {
 	NeedsRepairAuthorization bool `json:"needsRepairAuthorization"`
 	// LastStop is what AO knows about the last executor it asked to stop.
 	LastStop *StopView `json:"lastStop,omitempty"`
+	// RecoveryOptions lists the choices a person has for a recovery decision.
+	RecoveryOptions []string `json:"recoveryOptions"`
+	// LastRecovery is what AO concluded the last time it reconciled this run
+	// after a restart, so recovery shows up in the task's own stage view.
+	LastRecovery *RecoveryView `json:"lastRecovery,omitempty"`
+}
+
+// RecoveryView is one reconciliation outcome.
+type RecoveryView struct {
+	Outcome string    `json:"outcome" enum:"continued,retrying,paused"`
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
 }
 
 // RepairGrantView is one persisted human authorization of extra repairs.
@@ -390,20 +402,26 @@ func commandViews(results []domain.PipelineCommandResult) []CommandResultView {
 // buildControlView derives which controls apply from the run and its events.
 func buildControlView(run domain.PipelineRun, events []domain.PipelineEvent) ControlView {
 	c := ControlView{
-		CanPause:  run.State == domain.PipelineRunRunning,
-		CanCancel: run.State.Unfinished(),
+		CanPause:        run.State == domain.PipelineRunRunning,
+		CanCancel:       run.State.Unfinished(),
+		RecoveryOptions: []string{},
 	}
 	if run.State == domain.PipelineRunPaused {
 		exhausted := run.PauseReason == PauseRepairBudgetExhausted && run.RepairsUsed >= run.RepairBudget
 		c.NeedsRepairAuthorization = exhausted
 		c.CanResume = !exhausted && run.PauseReason != domain.PipelinePauseSessionTerminated
 		c.ResumeNeedsUser = humanOnlyPause(run.PauseReason)
+		if run.PauseReason == PauseRecoveryDecision {
+			c.RecoveryOptions = append(c.RecoveryOptions, RecoveryRestoreConversation)
+		}
 	}
 	for _, e := range events { // newest first
-		if e.Kind == eventExecutionStop {
-			d := parseEventDetail(e.Detail)
+		d := parseEventDetail(e.Detail)
+		switch {
+		case e.Kind == eventExecutionStop && c.LastStop == nil:
 			c.LastStop = &StopView{Requested: true, Confirmed: d.Code == "confirmed", Detail: d.Message}
-			break
+		case e.Kind == eventRecovery && c.LastRecovery == nil:
+			c.LastRecovery = &RecoveryView{Outcome: d.Code, Message: d.Message, At: e.CreatedAt}
 		}
 	}
 	return c

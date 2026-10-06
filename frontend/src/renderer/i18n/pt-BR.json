@@ -2617,5 +2617,10 @@
 	"inspector.pipeline.control.stopConfirmed": "The active stage was stopped.",
 	"inspector.pipeline.control.failed": "The pipeline could not be updated.",
 	"inspector.pipeline.control.humanOnly": "This pause needs your decision; only you can resume it.",
-	"inspector.pipeline.control.grants": "Extra repairs authorized by you: {{count}}"
+	"inspector.pipeline.control.grants": "Extra repairs authorized by you: {{count}}",
+	"inspector.pipeline.control.restore": "Restore conversation",
+	"inspector.pipeline.control.restoreTitle": "Restore the stage's conversation?",
+	"inspector.pipeline.control.restoreDescription": "The stage's conversation lost its controller, for example after a restart. AO can bring the same conversation back and continue it. It will not start a fresh conversation in its place.",
+	"inspector.pipeline.control.restoreConfirm": "Restore and continue",
+	"inspector.pipeline.control.recovery": "After restart: {{message}}"
 }

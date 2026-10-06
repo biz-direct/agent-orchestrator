@@ -15,7 +15,24 @@ import (
 // attachedStore adds the one store capability attached stages need to the fake.
 type attachedStore struct {
 	*fakeStore
-	attached map[domain.SessionID]domain.SessionID
+	attached   map[domain.SessionID]domain.SessionID
+	forAttempt map[string]domain.SessionID
+}
+
+func (s *attachedStore) FindAttachedSessionForAttempt(_ context.Context, attemptID string) (domain.SessionID, bool, error) {
+	id, ok := s.forAttempt[attemptID]
+	return id, ok, nil
+}
+
+func (s *attachedStore) CreateAttachedSessionForAttempt(ctx context.Context, rec domain.SessionRecord, owner domain.SessionID, attemptID string) (domain.SessionRecord, error) {
+	out, err := s.CreateAttachedSession(ctx, rec, owner)
+	if err == nil && attemptID != "" {
+		if s.forAttempt == nil {
+			s.forAttempt = map[string]domain.SessionID{}
+		}
+		s.forAttempt[attemptID] = out.ID
+	}
+	return out, err
 }
 
 func (s *attachedStore) CreateAttachedSession(_ context.Context, rec domain.SessionRecord, owner domain.SessionID) (domain.SessionRecord, error) {
@@ -84,8 +101,8 @@ func TestStartStageRunsTheSpecialistInTheOwnersWorktreeWithItsOwnConversation(t 
 	if cfg.Permissions != domain.PermissionModeAcceptEdits {
 		t.Fatalf("the specialist inherits the worker's pinned permissions, got %q", cfg.Permissions)
 	}
-	if len(launcher.turns) != 1 || launcher.turns[0] != "PROMPT" {
-		t.Fatalf("stage prompt: %v", launcher.turns)
+	if len(launcher.relayed) != 1 || launcher.relayed[0] != "PROMPT" || launcher.relayIDs[0] != "pipeline-stage:a1" {
+		t.Fatalf("the stage prompt is one turn under a key that is stable for the attempt: %v %v", launcher.relayed, launcher.relayIDs)
 	}
 	if st.attached[started.SessionID] != owner.ID {
 		t.Fatalf("the row must be attached to its owner, not an unrelated task: %v", st.attached)
@@ -96,6 +113,111 @@ func TestStartStageRunsTheSpecialistInTheOwnersWorktreeWithItsOwnConversation(t 
 	got := st.sessions[started.SessionID]
 	if got.Metadata.WorkspacePath != owner.Metadata.WorkspacePath || got.Metadata.Branch != owner.Metadata.Branch {
 		t.Fatalf("attached metadata: %+v", got.Metadata)
+	}
+}
+
+// A crash after the session was created but before the attempt was confirmed
+// must not launch a second specialist: the surviving one is adopted and the
+// prompt is redelivered under the same idempotent key.
+func TestStartStageAdoptsTheSessionCreatedForTheSameAttemptInsteadOfDuplicatingIt(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	start := ports.PipelineStageStart{RunID: "r1", StageID: "test", AttemptID: "a1", Owner: owner.ID, Harness: domain.HarnessClaudeCode, SystemPrompt: "S", Prompt: "PROMPT"}
+	first, err := m.StartStage(context.Background(), start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "Restart": the same attempt is started again.
+	second, err := m.StartStage(context.Background(), start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.SessionID != first.SessionID {
+		t.Fatalf("the surviving session is adopted: %s vs %s", second.SessionID, first.SessionID)
+	}
+	if len(launcher.started) != 1 || len(st.attached) != 1 {
+		t.Fatalf("no duplicate controller or session: controllers=%d sessions=%d", len(launcher.started), len(st.attached))
+	}
+	if len(launcher.relayed) != 2 || launcher.relayIDs[0] != launcher.relayIDs[1] || launcher.relayIDs[0] == "" {
+		t.Fatalf("redelivery must reuse the idempotent key so no second turn can start: %v", launcher.relayIDs)
+	}
+	// A different attempt gets its own session.
+	other := start
+	other.AttemptID = "a2"
+	third, err := m.StartStage(context.Background(), other)
+	if err != nil || third.SessionID == first.SessionID || len(launcher.started) != 2 {
+		t.Fatalf("another attempt starts its own conversation: %+v err=%v", third, err)
+	}
+}
+
+func TestStartStageNeverReplacesALostControllerWithAFreshConversation(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	start := ports.PipelineStageStart{RunID: "r1", StageID: "test", AttemptID: "a1", Owner: owner.ID, Harness: domain.HarnessClaudeCode, Prompt: "PROMPT"}
+	if _, err := m.StartStage(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	launcher.live = false // the daemon restarted and the controller did not come back
+	_, err := m.StartStage(context.Background(), start)
+	if !errors.Is(err, ports.ErrPipelineResumeUnsafe) {
+		t.Fatalf("a lost controller asks for a recovery decision: %v", err)
+	}
+	if len(launcher.started) != 1 || len(st.attached) != 1 {
+		t.Fatalf("no fresh conversation: controllers=%d sessions=%d", len(launcher.started), len(st.attached))
+	}
+}
+
+func TestInterruptExecutorInterruptsThenProvesQuiescenceAndReleaseReopensIntake(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	if err := m.InterruptExecutor(context.Background(), owner.ID); err != nil {
+		t.Fatalf("an idle executor is quiescent after the interrupt: %v", err)
+	}
+	if len(launcher.armPolicy) != 1 || launcher.armPolicy[0] != domain.SessionInterfaceTransitionInterrupt || launcher.preparePolicy[0] != domain.SessionInterfaceTransitionInterrupt {
+		t.Fatalf("pause uses the interrupt policy: arm=%v prepare=%v", launcher.armPolicy, launcher.preparePolicy)
+	}
+	// A pending permission request is never answered: the interrupt cannot be
+	// reported as a confirmed stop.
+	waiting := st.sessions[owner.ID]
+	waiting.Activity.State = domain.ActivityWaitingInput
+	st.sessions[owner.ID] = waiting
+	err := m.InterruptExecutor(context.Background(), owner.ID)
+	if !errors.Is(err, ports.ErrPipelineExecutionUncertain) || !strings.Contains(err.Error(), "permission or input request") {
+		t.Fatalf("an unanswered prompt must be reported as unconfirmed: %v", err)
+	}
+	if len(launcher.relayed) != 0 {
+		t.Fatalf("AO must not deliver anything on the user's behalf: %v", launcher.relayed)
+	}
+	if err := m.ReleaseExecutor(context.Background(), owner.ID); err != nil || len(launcher.aborted) != 1 || launcher.aborted[0] != owner.ID {
+		t.Fatalf("release reopens the fenced intake without delivering a turn: %v %v", err, launcher.aborted)
+	}
+}
+
+func TestReconnectExecutorOnlyAdoptsWhatIsAlreadyRunning(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	launcher.live = true
+	if ok, err := m.ReconnectExecutor(context.Background(), owner.ID); err != nil || !ok {
+		t.Fatalf("a live controller is adopted as is: %v %v", ok, err)
+	}
+	// No controller and no recorded conversation: nothing to reconnect to, and
+	// nothing is launched to find out.
+	launcher.live = false
+	if ok, err := m.ReconnectExecutor(context.Background(), owner.ID); err != nil || ok {
+		t.Fatalf("an unknown host is reported as not reconnected, not as an error: %v %v", ok, err)
+	}
+	gone := st.sessions[owner.ID]
+	gone.IsTerminated = true
+	st.sessions[owner.ID] = gone
+	if ok, err := m.ReconnectExecutor(context.Background(), owner.ID); err != nil || ok {
+		t.Fatalf("a terminated session is never reconnected: %v %v", ok, err)
+	}
+	if len(launcher.started) != 0 {
+		t.Fatalf("reconnecting must never start a controller: %d", len(launcher.started))
+	}
+}
+
+func TestRestoreExecutorOnlyActsOnAControllerThatIsGone(t *testing.T) {
+	m, _, launcher, _, owner := newPipelineStageManager(t)
+	launcher.live = true
+	if err := m.RestoreExecutor(context.Background(), owner.ID); err != nil {
+		t.Fatalf("a live controller needs nothing: %v", err)
 	}
 }
 

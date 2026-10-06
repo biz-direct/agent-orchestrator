@@ -187,6 +187,7 @@ var shippedMigrations = map[int64]string{
 	181: "0181_pipeline_repairs.sql",
 	182: "0182_pipeline_review_links.sql",
 	183: "0183_pipeline_controls.sql",
+	184: "0184_pipeline_stage_adoption.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

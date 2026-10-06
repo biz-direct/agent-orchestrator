@@ -144,6 +144,17 @@ func (q *Queries) CommitSessionControllerEpoch(ctx context.Context, arg CommitSe
 	return result.RowsAffected()
 }
 
+const getAttachedSessionIDForAttempt = `-- name: GetAttachedSessionIDForAttempt :one
+SELECT id FROM sessions WHERE attached_for_attempt_id = ?
+`
+
+func (q *Queries) GetAttachedSessionIDForAttempt(ctx context.Context, attachedForAttemptID string) (domain.SessionID, error) {
+	row := q.db.QueryRowContext(ctx, getAttachedSessionIDForAttempt, attachedForAttemptID)
+	var id domain.SessionID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getClientRequestSession = `-- name: GetClientRequestSession :one
 SELECT id, client_request_hash, client_request_committed FROM sessions WHERE client_request_id = ?
 `
@@ -1272,6 +1283,20 @@ func (q *Queries) SessionIsSeed(ctx context.Context, id domain.SessionID) (bool,
 	var is_seed bool
 	err := row.Scan(&is_seed)
 	return is_seed, err
+}
+
+const setSessionAttachedAttempt = `-- name: SetSessionAttachedAttempt :exec
+UPDATE sessions SET attached_for_attempt_id = ? WHERE id = ?
+`
+
+type SetSessionAttachedAttemptParams struct {
+	AttachedForAttemptID string
+	ID                   domain.SessionID
+}
+
+func (q *Queries) SetSessionAttachedAttempt(ctx context.Context, arg SetSessionAttachedAttemptParams) error {
+	_, err := q.db.ExecContext(ctx, setSessionAttachedAttempt, arg.AttachedForAttemptID, arg.ID)
+	return err
 }
 
 const setSessionAttachedTo = `-- name: SetSessionAttachedTo :exec

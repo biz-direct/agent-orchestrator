@@ -370,6 +370,12 @@ UPDATE sessions SET attached_to_session_id = ? WHERE id = ?;
 -- name: GetSessionAttachedTo :one
 SELECT attached_to_session_id FROM sessions WHERE id = ?;
 
+-- name: SetSessionAttachedAttempt :exec
+UPDATE sessions SET attached_for_attempt_id = ? WHERE id = ?;
+
+-- name: GetAttachedSessionIDForAttempt :one
+SELECT id FROM sessions WHERE attached_for_attempt_id = ?;
+
 -- name: ListAttachedSessionIDs :many
 SELECT id FROM sessions WHERE attached_to_session_id = ? ORDER BY created_at, id;
 

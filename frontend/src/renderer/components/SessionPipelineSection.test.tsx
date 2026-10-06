@@ -28,7 +28,7 @@ const multi = { id: "build-test", file: "f", valid: true, executable: false, una
 const run = (overrides: Record<string, unknown> = {}) => ({
 	id: "prun_1", sessionId: "w-1", projectId: "proj", workflowId: "build-only", state: "running", currentStageId: "build", requestedBy: "user",
 	repairBudget: 3, repairsUsed: 0, repairsRemaining: 3, snapshotSha256: "x", snapshotCapturedAt: "now", events: [], evidence: [], repairs: [], reviews: [], repairGrants: [], revision: 1,
-	control: { canPause: true, canResume: false, canCancel: true, resumeNeedsUser: false, needsRepairAuthorization: false },
+	control: { canPause: true, canResume: false, canCancel: true, resumeNeedsUser: false, needsRepairAuthorization: false, recoveryOptions: [] },
 	createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 	stages: [{ id: "build", kind: "build", state: "active", model: "opus", settingsSource: "worker" }],
 	attempts: [{ id: "a1", stageId: "build", attemptNo: 1, state: "active", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now", validation: [] }],
@@ -298,7 +298,7 @@ describe("SessionPipelineSection", () => {
 				stop: { requested: true, confirmed: false, detail: "waiting on a permission request" },
 				run: run({
 					state: "paused", pauseReason: "paused_by_user", pauseDetail: "Paused by the user", revision: 2,
-					control: { canPause: false, canResume: true, canCancel: true, resumeNeedsUser: false, needsRepairAuthorization: false, lastStop: { requested: true, confirmed: false, detail: "waiting on a permission request" } },
+					control: { canPause: false, canResume: true, canCancel: true, resumeNeedsUser: false, needsRepairAuthorization: false, recoveryOptions: [], lastStop: { requested: true, confirmed: false, detail: "waiting on a permission request" } },
 				}),
 			},
 		});
@@ -317,7 +317,7 @@ describe("SessionPipelineSection", () => {
 
 	it("asks before cancelling and explains that nothing is deleted", async () => {
 		mockGets(run());
-		postMock.mockResolvedValue({ data: { changed: true, run: run({ state: "cancelled", control: { canPause: false, canResume: false, canCancel: false, resumeNeedsUser: false, needsRepairAuthorization: false } }) } });
+		postMock.mockResolvedValue({ data: { changed: true, run: run({ state: "cancelled", control: { canPause: false, canResume: false, canCancel: false, resumeNeedsUser: false, needsRepairAuthorization: false, recoveryOptions: [] } }) } });
 		renderSection();
 		await userEvent.click(await screen.findByRole("button", { name: "Cancel pipeline" }));
 		expect(await screen.findByText(/Nothing is reset or deleted/)).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("SessionPipelineSection", () => {
 		mockGets(
 			run({
 				state: "paused", pauseReason: "repair_budget_exhausted", pauseDetail: "All 3 repairs used", repairsUsed: 3, repairsRemaining: 0,
-				control: { canPause: false, canResume: false, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: true },
+				control: { canPause: false, canResume: false, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: true, recoveryOptions: [] },
 			}),
 		);
 		postMock.mockResolvedValue({
@@ -339,7 +339,7 @@ describe("SessionPipelineSection", () => {
 				run: run({
 					state: "paused", pauseReason: "repair_budget_exhausted", repairBudget: 4, repairsUsed: 3, repairsRemaining: 1, revision: 2,
 					repairGrants: [{ amount: 1, authorizedBy: "user", createdAt: "2026-01-01T00:00:00Z" }],
-					control: { canPause: false, canResume: true, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: false },
+					control: { canPause: false, canResume: true, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: false, recoveryOptions: [] },
 				}),
 			},
 		});
@@ -357,5 +357,29 @@ describe("SessionPipelineSection", () => {
 		);
 		expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
 		expect(screen.getByText("Extra repairs authorized by you: 1")).toBeInTheDocument();
+	});
+	it("offers an explicit conversation restore for a recovery decision and shows what restart recovery did", async () => {
+		mockGets(
+			run({
+				state: "paused", pauseReason: "recovery_decision_required", pauseDetail: "The stage's own conversation cannot be resumed safely",
+				control: {
+					canPause: false, canResume: true, canCancel: true, resumeNeedsUser: true, needsRepairAuthorization: false, recoveryOptions: ["restore_conversation"],
+					lastRecovery: { outcome: "paused", message: "The stage executor's controller restarted while the stage was active", at: "2026-01-01T00:00:00Z" },
+				},
+			}),
+		);
+		postMock.mockResolvedValue({ data: { changed: true, run: run() } });
+		renderSection();
+		expect(await screen.findByText(/After restart: The stage executor's controller restarted/)).toBeInTheDocument();
+		await userEvent.click(await screen.findByRole("button", { name: "Restore conversation" }));
+		expect(await screen.findByText(/It will not start a fresh conversation in its place/)).toBeInTheDocument();
+		expect(postMock).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Restore and continue" }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/pipeline/control",
+				expect.objectContaining({ body: expect.objectContaining({ action: "resume", recovery: "restore_conversation", requestedBy: "user" }) }),
+			),
+		);
 	});
 });
