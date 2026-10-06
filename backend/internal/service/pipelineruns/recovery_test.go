@@ -17,7 +17,7 @@ import (
 // memory (driver slots, waits, cancel functions) survives, only what was written.
 func (s *staged) restart() *pipelineruns.Service {
 	s.t.Helper()
-	svc := pipelineruns.New(pipelineruns.Deps{Store: s.store, Messenger: s.messenger, Executor: s.exec})
+	svc := pipelineruns.New(pipelineruns.Deps{Store: s.store, Messenger: s.messenger, Executor: s.exec, Reviews: s.gateway})
 	if err := svc.ReconcileAll(context.Background()); err != nil {
 		s.t.Fatal(err)
 	}

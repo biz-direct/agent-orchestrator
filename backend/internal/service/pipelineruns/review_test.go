@@ -111,7 +111,7 @@ func newReviewing(t *testing.T, auto bool) *reviewing {
 			t.Fatal(err)
 		}
 	}
-	return &reviewing{staged: &staged{fixture: f, exec: exec, gate: pipelineruns.NewStoreGate(f.store, nil)}, reviews: rev}
+	return &reviewing{staged: &staged{fixture: f, exec: exec, gate: pipelineruns.NewStoreGate(f.store, nil), gateway: rev}, reviews: rev}
 }
 
 // toReview runs build-review through Build and the handoff, leaving the Review

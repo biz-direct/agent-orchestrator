@@ -1,0 +1,20 @@
+version: 1
+id: build-test-review
+description: Build with the regular worker, test it independently, then review it
+# Shared by Test and Review failures: at most this many automatic returns to
+# Build. When it is spent the run pauses until a person authorizes more.
+repairBudget: 3
+# Optional workflow-wide rules every specialist must follow.
+instructions: |
+  Keep changes small and focused on the task. Do not push, open pull requests,
+  or change branches in a specialist stage.
+stages:
+  - id: build
+    kind: build              # the task's own worker: owns the worktree, branch, and PR
+  - id: test
+    kind: specialist         # an attached Chat conversation in the same worktree
+    profile: tester
+    repairTo: build          # production defects and failed checks go back to Build
+  - id: review
+    kind: review             # AO's built-in reviewer; completes only on an approved
+    repairTo: build          # review and passing required CI for the current head

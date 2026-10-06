@@ -561,3 +561,37 @@ ao pipeline pause --session demo-1 --reason "waiting on API keys"
 ao pipeline resume --session demo-1
 AO_SESSION_ID=orch-1 ao pipeline authorize-repairs --session demo-1   # refused: user-only
 ```
+
+## Examples and adoption
+
+`examples/pipelines/` ships a copy-ready **Build → Test → Review** workflow, a
+test-only Tester profile (with its instruction file and independent checks), and a
+shorter Build → Review workflow; a test keeps them valid and executable. See its
+README for the five commands that adopt them. Definitions are repository files only
+in v1: there is no visual editor and no global profile inheritance.
+
+## Safety model and limits
+
+- **Trusted commands.** Validation commands come from repository files, so AO runs
+  them only after a user authorizes the project (`ao pipeline trust`, or the
+  project's Pipeline settings). Revoking takes effect immediately, before the next
+  command. Commands run in their own process group with a timeout, a scrubbed AO
+  environment, and bounded, redacted output; they never run on a moving worktree.
+- **Shared worktree, not isolation.** Stages share one checkout and run strictly one
+  at a time under an execution gate; `allowedPaths` is checked on the commits a
+  specialist hands off. Neither is a filesystem or process sandbox and neither stops
+  a hostile specialist.
+- **Publishing and merging are separate decisions.** A pipeline never merges, never
+  pushes for you, and its completion does not imply that host approvals, branch
+  protection, or explicit merge authorization were satisfied. The original worker
+  keeps ownership of the task, branch, and pull request.
+- **Pull requests.** The Review stage needs the task's pull request; with none (or a
+  lagging head) it waits with an explicit reason, and a merged, closed, or ambiguous
+  pull request pauses it. It never passes by default.
+- **Recovery and budget decisions belong to people.** `recovery_decision_required`
+  and `repair_budget_exhausted` can only be resolved by a person; resume never
+  starts a fresh conversation and never grants repair attempts.
+- **Existing behavior is unchanged** for tasks without a pipeline: Terminal
+  sessions, existing reviewer flows and controls, notifications, ownership, and
+  cleanup behave as before; only a task with an unfinished run has its automatic
+  review, completion/cleanup shortcuts, and CI/feedback nudges held.

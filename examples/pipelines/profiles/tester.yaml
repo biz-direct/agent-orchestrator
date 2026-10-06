@@ -1,0 +1,30 @@
+version: 1
+id: tester
+description: Adds and improves tests for the Build stage's change, without touching production code
+# Role instructions live in a repository file so they are reviewed like code.
+# Copy instructions/tester.md to docs/ai/tester.md (or change this path).
+instructionsFile: docs/ai/tester.md
+# Defaults only: an explicit user choice in the task view or `ao pipeline start`
+# overrides them; orchestrators always use these.
+harness: claude-code
+# The Tester may change test files only. This is a handoff constraint AO checks
+# on the Tester's commits, not a filesystem or process sandbox.
+allowedPaths:
+  - "**/*_test.go"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/__tests__/**"
+  - "test/**"
+  - "tests/**"
+# AO runs these itself at the Tester's committed checkpoint. The agent's own
+# "tests pass" claim is never enough. Repository commands only run after a user
+# authorizes them (`ao pipeline trust`, or the project's Pipeline settings).
+validation:
+  - id: unit
+    command: make test
+    timeoutSeconds: 900
+    required: true
+  - id: lint
+    command: make lint
+    timeoutSeconds: 600
+    required: false   # a failure is reported but does not block the stage

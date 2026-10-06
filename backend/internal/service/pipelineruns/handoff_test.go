@@ -227,6 +227,9 @@ type staged struct {
 	*fixture
 	exec *fakeExecutor
 	gate *pipelineruns.StoreGate
+	// gateway is the review gateway a restarted daemon is given, when the
+	// fixture has one.
+	gateway pipelineruns.ReviewGateway
 }
 
 func newStaged(t *testing.T) *staged {
