@@ -16,6 +16,7 @@ const (
 	StageStateFailed      = "failed"
 	StageStateInterrupted = "interrupted"
 	StageStatePaused      = "paused"
+	StageStateHandoff     = "handoff"
 )
 
 // RunView is the API read model of one run.
@@ -58,25 +59,30 @@ type StageView struct {
 	Harness        string `json:"harness,omitempty"`
 	Model          string `json:"model,omitempty"`
 	SettingsSource string `json:"settingsSource"`
-	State          string `json:"state" enum:"pending,active,accepted,failed,interrupted,paused"`
+	State          string `json:"state" enum:"pending,handoff,active,accepted,failed,interrupted,paused"`
 }
 
 // AttemptView is one stage attempt.
 type AttemptView struct {
-	ID                   string     `json:"id"`
-	StageID              string     `json:"stageId"`
-	AttemptNo            int        `json:"attemptNo"`
-	State                string     `json:"state" enum:"active,accepted,failed,interrupted,cancelled"`
-	ExecutorSessionID    string     `json:"executorSessionId"`
-	ControllerGeneration string     `json:"controllerGeneration,omitempty"`
-	InputCommit          string     `json:"inputCommit,omitempty"`
-	OutputCommit         string     `json:"outputCommit,omitempty"`
-	NoChange             bool       `json:"noChange"`
-	Outcome              string     `json:"outcome,omitempty"`
-	Summary              string     `json:"summary,omitempty"`
-	InstructionDelivery  string     `json:"instructionDelivery" enum:"pending,delivered,failed"`
-	StartedAt            time.Time  `json:"startedAt"`
-	FinishedAt           *time.Time `json:"finishedAt,omitempty"`
+	ID                   string `json:"id"`
+	StageID              string `json:"stageId"`
+	AttemptNo            int    `json:"attemptNo"`
+	State                string `json:"state" enum:"active,accepted,failed,interrupted,cancelled"`
+	ExecutorSessionID    string `json:"executorSessionId"`
+	ControllerGeneration string `json:"controllerGeneration,omitempty"`
+	InputCommit          string `json:"inputCommit,omitempty"`
+	OutputCommit         string `json:"outputCommit,omitempty"`
+	NoChange             bool   `json:"noChange"`
+	Outcome              string `json:"outcome,omitempty"`
+	Summary              string `json:"summary,omitempty"`
+	InstructionDelivery  string `json:"instructionDelivery" enum:"pending,delivered,failed"`
+	// PredecessorAttemptID names the attempt whose output is this attempt's input.
+	PredecessorAttemptID string `json:"predecessorAttemptId,omitempty"`
+	// ConversationSessionID is the attached specialist conversation that
+	// executes (or executed) this attempt; empty for the worker's own stage.
+	ConversationSessionID string     `json:"conversationSessionId,omitempty"`
+	StartedAt             time.Time  `json:"startedAt"`
+	FinishedAt            *time.Time `json:"finishedAt,omitempty"`
 }
 
 // CheckpointView names a committed revision recorded for the run.
@@ -149,8 +155,9 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 			ExecutorSessionID: string(a.ExecutorSessionID), ControllerGeneration: a.ControllerGeneration,
 			InputCommit: a.InputCommit, OutputCommit: a.OutputCommit, NoChange: a.NoChange, Outcome: a.Outcome,
 			Summary: a.Summary, InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
+			PredecessorAttemptID: a.PredecessorAttemptID, ConversationSessionID: attachedConversation(run, a),
 		})
-		if a.State == domain.PipelineAttemptActive {
+		if a.State == domain.PipelineAttemptActive || a.State == domain.PipelineAttemptHandoff {
 			activeAttempt = &attempts[i]
 		}
 		if a.State == domain.PipelineAttemptAccepted {
@@ -167,6 +174,8 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 				sv.State = StageStateFailed
 			case domain.PipelineAttemptInterrupted, domain.PipelineAttemptCancelled:
 				sv.State = StageStateInterrupted
+			case domain.PipelineAttemptHandoff:
+				sv.State = StageStateHandoff
 			case domain.PipelineAttemptActive:
 				sv.State = StageStateActive
 				if run.State == domain.PipelineRunPaused {
@@ -184,4 +193,11 @@ func buildRunView(run domain.PipelineRun, snap Snapshot, attempts []domain.Pipel
 		}
 	}
 	return v
+}
+
+func attachedConversation(run domain.PipelineRun, a domain.PipelineStageAttempt) string {
+	if a.ExecutorSessionID != "" && a.ExecutorSessionID != run.SessionID {
+		return string(a.ExecutorSessionID)
+	}
+	return ""
 }

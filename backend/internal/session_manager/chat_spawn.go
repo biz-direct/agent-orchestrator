@@ -358,6 +358,11 @@ func (m *Manager) sendChat(ctx context.Context, id domain.SessionID, message, cl
 	if rec.IsTerminated {
 		return true, fmt.Errorf("send %s: %w", id, ErrTerminated)
 	}
+	// Only the active pipeline stage may receive input: a message, nudge, or
+	// side channel must not wake an inactive stage or overlap its successor.
+	if gateErr := m.admitPipelineExecution(ctx, id); gateErr != nil {
+		return true, fmt.Errorf("send %s: %w", id, gateErr)
+	}
 	var relayErr error
 	if authoredByUser {
 		relay, ok := m.chat.(userAuthoredChatLauncher)
@@ -421,6 +426,12 @@ func (m *Manager) resumeChatController(
 	if m.chat == nil {
 		return RestoreResult{}, fmt.Errorf("%s %s: %w: chat mode is not available in this build",
 			operation, rec.ID, ports.ErrChatUnsupported)
+	}
+	// A pipeline run that is executing a different stage owns this worktree:
+	// restoring or resuming this session's controller would start a second
+	// writer, so the gate refuses it until this session is the active executor.
+	if gateErr := m.admitPipelineExecution(ctx, rec.ID); gateErr != nil {
+		return RestoreResult{}, fmt.Errorf("%s %s: %w", operation, rec.ID, gateErr)
 	}
 	releaseCodexAdmission, err := m.acquireCodexControllerAdmission(ctx, rec.Harness)
 	if err != nil {

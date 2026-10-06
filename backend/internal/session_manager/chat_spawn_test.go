@@ -83,6 +83,7 @@ type recordingLauncher struct {
 	backgroundHarnesses []domain.AgentHarness
 	background          []ports.ChatStartConfig
 	backgroundPrompts   []string
+	prepareErr          error
 	armed               []domain.SessionID
 	armPolicy           []domain.SessionInterfaceTransitionPolicy
 	prepared            []domain.SessionID
@@ -240,7 +241,7 @@ func (l *recordingLauncher) ArmChatHandoff(_ context.Context, id domain.SessionI
 func (l *recordingLauncher) PrepareChatHandoff(_ context.Context, id domain.SessionID, policy domain.SessionInterfaceTransitionPolicy) error {
 	l.prepared = append(l.prepared, id)
 	l.preparePolicy = append(l.preparePolicy, policy)
-	return nil
+	return l.prepareErr
 }
 
 func (l *recordingLauncher) AbortChatHandoff(id domain.SessionID) {

@@ -8,6 +8,7 @@ import { clientForSessionHost } from "../lib/host-clients";
 import { cn } from "../lib/utils";
 import type { WorkspaceSession } from "../types/workspace";
 import { SettingsOptionMenu } from "./settings/SettingsOptionMenu";
+import { StageConversationDialog } from "./StageConversationDialog";
 import { Button } from "./ui/button";
 
 type RunView = components["schemas"]["PipelineRunView"];
@@ -116,14 +117,19 @@ export function SessionPipelineSection({ session, hostId }: { session: Workspace
 	}
 	return (
 		<Section title={t("inspector.pipeline.title")}>
-			<RunSummary run={run} />
+			<RunSummary hostId={hostId} run={run} session={session} />
 		</Section>
 	);
 }
 
-function RunSummary({ run }: { run: RunView }) {
+function RunSummary({ run, session, hostId }: { run: RunView; session: WorkspaceSession; hostId?: string }) {
 	const { t } = useTranslation();
+	const [openStage, setOpenStage] = useState<{ stageId: string; sessionId: string; provider?: string } | null>(null);
 	const paused = run.state === "paused";
+	const conversationFor = (stageId: string) => {
+		const attempts = run.attempts.filter((a) => a.stageId === stageId && a.conversationSessionId);
+		return attempts[attempts.length - 1]?.conversationSessionId;
+	};
 	return (
 		<div className="flex flex-col gap-2">
 			<div className="flex items-baseline justify-between gap-2 text-sm">
@@ -136,9 +142,16 @@ function RunSummary({ run }: { run: RunView }) {
 				</p>
 			) : null}
 			<ul className="divide-y divide-(--color-border-settings-input)">
-				{run.stages.map((stage) => (
-					<StageRow key={stage.id} stage={stage} />
-				))}
+				{run.stages.map((stage) => {
+					const conversation = conversationFor(stage.id);
+					return (
+						<StageRow
+							key={stage.id}
+							stage={stage}
+							onOpenConversation={conversation ? () => setOpenStage({ stageId: stage.id, sessionId: conversation, provider: stage.harness }) : undefined}
+						/>
+					);
+				})}
 			</ul>
 			{run.checkpoint ? (
 				<p className="text-xs text-settings-muted">
@@ -146,6 +159,16 @@ function RunSummary({ run }: { run: RunView }) {
 						? t("inspector.pipeline.checkpointNoChange", { commit: shortCommit(run.checkpoint.outputCommit) })
 						: t("inspector.pipeline.checkpoint", { from: shortCommit(run.checkpoint.inputCommit), to: shortCommit(run.checkpoint.outputCommit) })}
 				</p>
+			) : null}
+			{openStage ? (
+				<StageConversationDialog
+					conversationSessionId={openStage.sessionId}
+					stageId={openStage.stageId}
+					owner={session}
+					hostId={hostId}
+					provider={openStage.provider}
+					onClose={() => setOpenStage(null)}
+				/>
 			) : null}
 			{run.lastRejection ? (
 				<div className="text-xs leading-normal" role="alert">
@@ -165,12 +188,23 @@ function RunSummary({ run }: { run: RunView }) {
 	);
 }
 
-function StageRow({ stage }: { stage: StageView }) {
+function StageRow({ stage, onOpenConversation }: { stage: StageView; onOpenConversation?: () => void }) {
 	const { t } = useTranslation();
 	return (
 		<li className="flex items-baseline justify-between gap-2 py-1.5 text-sm" data-stage-state={stage.state}>
 			<span className="min-w-0 truncate">
-				{stage.id}
+				{onOpenConversation ? (
+					<button
+						type="button"
+						className="text-left underline-offset-2 hover:underline focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+						aria-label={t("inspector.pipeline.openConversation", { stage: stage.id })}
+						onClick={onOpenConversation}
+					>
+						{stage.id}
+					</button>
+				) : (
+					stage.id
+				)}
 				{stage.model ? <span className="ml-1.5 text-xs text-settings-muted">{stage.model}</span> : null}
 			</span>
 			<span className={cn("shrink-0 text-xs", stage.state === "failed" ? "text-error" : stage.state === "accepted" ? "text-success" : "text-settings-muted")}>

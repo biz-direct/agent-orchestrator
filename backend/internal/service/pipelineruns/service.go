@@ -37,6 +37,8 @@ const (
 	eventSubmissionRejected   = "submission_rejected"
 	eventStageAccepted        = "stage_accepted"
 	eventStageReportedFailure = "stage_reported_failure"
+	eventHandoffStarted       = "handoff_started"
+	eventHandoffActivated     = "handoff_activated"
 	eventRunCompleted         = "run_completed"
 	eventRunPaused            = "run_paused"
 	maxSummaryLen             = 2000
@@ -56,6 +58,7 @@ var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 type Store interface {
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
+	GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (domain.SessionID, error)
 	CreatePipelineRun(ctx context.Context, run domain.PipelineRun, first domain.PipelineStageAttempt) (domain.PipelineRun, domain.PipelineStageAttempt, error)
 	GetPipelineRun(ctx context.Context, id string) (domain.PipelineRun, bool, error)
 	GetActivePipelineRunBySession(ctx context.Context, id domain.SessionID) (domain.PipelineRun, bool, error)
@@ -119,9 +122,12 @@ type Deps struct {
 	Store     Store
 	Git       Git
 	Messenger Messenger
-	Clock     func() time.Time
-	NewID     func(prefix string) string
-	Logger    *slog.Logger
+	// Executor starts, quiesces, and stops stage executors. Without it only
+	// single-stage Build workflows can run.
+	Executor ports.PipelineExecutor
+	Clock    func() time.Time
+	NewID    func(prefix string) string
+	Logger   *slog.Logger
 }
 
 // Service implements Manager and the lifecycle guard.
@@ -129,6 +135,9 @@ type Service struct {
 	store     Store
 	git       Git
 	messenger Messenger
+	executor  ports.PipelineExecutor
+	wakeCh    chan struct{}
+	driving   sync.Map // run id -> struct{}: at most one handoff driver per run
 	clock     func() time.Time
 	newID     func(prefix string) string
 	logger    *slog.Logger
@@ -139,7 +148,7 @@ var _ Manager = (*Service)(nil)
 
 // New returns a pipeline run service.
 func New(d Deps) *Service {
-	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, clock: d.Clock, newID: d.NewID, logger: d.Logger}
+	s := &Service{store: d.Store, git: d.Git, messenger: d.Messenger, executor: d.Executor, wakeCh: make(chan struct{}, 1), clock: d.Clock, newID: d.NewID, logger: d.Logger}
 	if s.git == nil {
 		s.git = ExecGit{}
 	}
@@ -246,6 +255,26 @@ func (s *Service) Start(ctx context.Context, in StartInput) (RunView, error) {
 	if reason := pipeline.UnsupportedExecutionReason(*entry.Workflow); reason != "" {
 		return RunView{}, apierr.Conflict("PIPELINE_WORKFLOW_UNAVAILABLE", reason, nil)
 	}
+	if attachedTo, aerr := s.store.GetSessionAttachedTo(ctx, in.SessionID); aerr != nil {
+		return RunView{}, apierr.Internal("SESSION_LOAD_FAILED", "Failed to load session")
+	} else if attachedTo != "" {
+		return RunView{}, apierr.Conflict("PIPELINE_SESSION_UNSUPPORTED", "A pipeline stage session cannot start its own pipeline", nil)
+	}
+	// Specialist stages run as attached Chat conversations. Refuse up front,
+	// visibly, when this build or a stage's harness cannot do that; there is no
+	// Terminal fallback.
+	for _, st := range entry.Workflow.Stages {
+		if st.Kind != pipeline.StageSpecialist {
+			continue
+		}
+		if s.executor == nil {
+			return RunView{}, apierr.Conflict("PIPELINE_WORKFLOW_UNAVAILABLE", fmt.Sprintf("Stage %q needs an attached Chat specialist, which this build cannot run.", st.ID), nil)
+		}
+		harness := stageHarness(catalog, st, in.Overrides)
+		if perr := s.executor.PreflightStage(ctx, harness); perr != nil {
+			return RunView{}, apierr.Conflict("PIPELINE_STAGE_UNSUPPORTED", fmt.Sprintf("Stage %q cannot run as a Chat specialist (%s): %v", st.ID, harness, perr), nil)
+		}
+	}
 
 	gitState, err := s.git.Inspect(ctx, session.Metadata.WorkspacePath)
 	if err != nil {
@@ -318,7 +347,7 @@ func (s *Service) deliverInstructions(ctx context.Context, run domain.PipelineRu
 	state, kind, detail := "delivered", eventInstructionDelivered, eventDetail{Message: "Stage instructions delivered to the worker"}
 	if s.messenger == nil {
 		state, kind, detail = "failed", eventInstructionFailed, eventDetail{Message: "No message channel is available to deliver stage instructions"}
-	} else if err := s.messenger.Send(ctx, run.SessionID, stageInstruction(run, attempt, snap, stage), nil); err != nil {
+	} else if err := s.messenger.Send(ports.WithPipelineBypass(ctx), run.SessionID, stageInstruction(run, attempt, snap, stage), nil); err != nil {
 		state, kind, detail = "failed", eventInstructionFailed, eventDetail{Message: fmt.Sprintf("Stage instructions could not be delivered: %v", err)}
 	}
 	if err := s.store.SetPipelineAttemptInstructionDelivery(ctx, attempt.ID, state); err != nil {
@@ -343,11 +372,18 @@ func stageInstruction(run domain.PipelineRun, attempt domain.PipelineStageAttemp
 	b.WriteString("  ao pipeline submit --outcome succeeded --summary \"<what you did>\"\n")
 	b.WriteString("Use --outcome failed if you cannot complete the stage. ")
 	b.WriteString("`ao report` is informational and does not complete a stage; only a verified submission does.\n")
+	if _, idx, ok := snap.stage(stage.ID); ok && idx+1 < len(snap.Stages) {
+		fmt.Fprintf(&b, "After you submit, stage %q takes over in its own conversation on this same worktree. Stop working once you have submitted: do not edit files or run further commands, and do not wait for it.\n", snap.Stages[idx+1].ID)
+	}
 	return b.String()
 }
 
 // Get implements Manager.
 func (s *Service) Get(ctx context.Context, id domain.SessionID) (RunEnvelope, error) {
+	id, err := s.ownerOf(ctx, id)
+	if err != nil {
+		return RunEnvelope{}, err
+	}
 	if err := s.reconcileSession(ctx, id); err != nil {
 		s.logger.Error("pipeline: reconcile failed", "session_id", id, "err", err)
 	}
@@ -390,14 +426,21 @@ func (s *Service) Submit(ctx context.Context, in SubmitInput) (SubmitResult, err
 	if err := validateSubmitShape(in); err != nil {
 		return SubmitResult{}, err
 	}
-	unlock := s.lock(in.SessionID)
+	// An attached specialist submits under its own session id; the run belongs
+	// to the worker that owns the task.
+	executorID := in.SessionID
+	owner, err := s.ownerOf(ctx, executorID)
+	if err != nil {
+		return SubmitResult{}, err
+	}
+	unlock := s.lock(owner)
 	defer unlock()
 
 	run, ok, err := s.store.GetPipelineRun(ctx, in.RunID)
 	if err != nil {
 		return SubmitResult{}, apierr.Internal("PIPELINE_LOAD_FAILED", "Failed to load pipeline run")
 	}
-	if !ok || run.SessionID != in.SessionID {
+	if !ok || run.SessionID != owner {
 		return SubmitResult{}, apierr.NotFound("PIPELINE_RUN_NOT_FOUND", "Unknown pipeline run for this task")
 	}
 	attempt, ok, err := s.store.GetPipelineStageAttempt(ctx, in.AttemptID)
@@ -406,6 +449,12 @@ func (s *Service) Submit(ctx context.Context, in SubmitInput) (SubmitResult, err
 	}
 	if !ok || attempt.RunID != run.ID {
 		return SubmitResult{}, apierr.NotFound("PIPELINE_ATTEMPT_NOT_FOUND", "Unknown stage attempt for this run")
+	}
+	// Only the attempt's own executor may report its result. A worker cannot
+	// answer for the specialist (or the reverse): that would be a stale or
+	// foreign event, however well-formed.
+	if attempt.ExecutorSessionID != "" && attempt.ExecutorSessionID != executorID {
+		return SubmitResult{}, apierr.Forbidden("PIPELINE_NOT_ATTEMPT_EXECUTOR", "This session is not the executor of that stage attempt")
 	}
 
 	// A finished attempt only answers an exact replay; anything else is stale.
@@ -551,8 +600,19 @@ func (s *Service) acceptSuccess(ctx context.Context, run domain.PipelineRun, att
 	if perr != nil {
 		return SubmitResult{}, apierr.Internal("PIPELINE_SNAPSHOT_CORRUPT", "The pipeline snapshot could not be read")
 	}
+	var successor *domain.PipelineStageAttempt
 	if _, idx, found := snap.stage(attempt.StageID); found && idx+1 < len(snap.Stages) {
-		update.CurrentStageID = snap.Stages[idx+1].ID
+		next := snap.Stages[idx+1]
+		update.CurrentStageID = next.ID
+		// The successor starts in `handoff`: its input revision and predecessor
+		// are durable, but nothing executes until the predecessor is proven
+		// quiescent and the successor's executor is confirmed started.
+		successor = &domain.PipelineStageAttempt{
+			ID: s.newID("pstg"), RunID: run.ID, StageID: next.ID, StageKind: string(next.Kind),
+			AttemptNo: s.nextAttemptNo(ctx, run.ID, next.ID), State: domain.PipelineAttemptHandoff,
+			InputCommit: state.Head, PredecessorAttemptID: attempt.ID, StartedAt: now,
+		}
+		events = append(events, domain.PipelineEvent{AttemptID: successor.ID, Kind: eventHandoffStarted, Detail: eventDetail{Message: fmt.Sprintf("Handing off to stage %q at %s", next.ID, shortCommit(state.Head))}.marshal()})
 	} else {
 		// No further stage: the run is complete. Ordinary lifecycle shortcuts
 		// resume because the pipeline has reached its end.
@@ -560,10 +620,30 @@ func (s *Service) acceptSuccess(ctx context.Context, run domain.PipelineRun, att
 		events = append(events, domain.PipelineEvent{AttemptID: attempt.ID, Kind: eventRunCompleted, Detail: eventDetail{Message: "All stages accepted; the pipeline run is complete"}.marshal()})
 	}
 	_, err = s.store.CommitPipelineTransition(ctx, domain.PipelineTransition{
-		RunID: run.ID, ExpectedRevision: run.Revision, At: now, Run: update, Events: events,
+		RunID: run.ID, ExpectedRevision: run.Revision, At: now, Run: update, Events: events, NewAttempt: successor,
 		Attempt: &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: state.Head, NoChange: noChange, Outcome: OutcomeSucceeded, Summary: in.Summary, ResultKey: in.IdempotencyKey, FinishedAt: now},
 	})
+	if err == nil && successor != nil {
+		// The submitting executor is still mid-turn (it is blocked inside this very
+		// request), so the handoff must run after we answer, never inside it.
+		s.wake()
+	}
 	return s.finishSubmit(ctx, run, attempt, in, err, true)
+}
+
+// nextAttemptNo numbers the next attempt of a stage within a run.
+func (s *Service) nextAttemptNo(ctx context.Context, runID, stageID string) int {
+	attempts, err := s.store.ListPipelineStageAttempts(ctx, runID)
+	if err != nil {
+		return 1
+	}
+	n := 0
+	for _, a := range attempts {
+		if a.StageID == stageID && a.AttemptNo > n {
+			n = a.AttemptNo
+		}
+	}
+	return n + 1
 }
 
 // finishSubmit turns the outcome of the compare-and-set into the response. A
@@ -601,8 +681,12 @@ func (s *Service) pause(ctx context.Context, run domain.PipelineRun, attempt *do
 		Events: []domain.PipelineEvent{{Kind: eventRunPaused, Detail: eventDetail{Code: string(reason), Message: detail}.marshal()}},
 	}
 	if attempt != nil {
-		t.Attempt = &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptInterrupted, Outcome: "interrupted", FinishedAt: now}
 		t.Events[0].AttemptID = attempt.ID
+		// A handoff attempt stays as it is so a later resume can retry the
+		// handoff; only an executing attempt is closed as interrupted.
+		if attempt.State == domain.PipelineAttemptActive {
+			t.Attempt = &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptInterrupted, Outcome: "interrupted", FinishedAt: now}
+		}
 	}
 	if _, err := s.store.CommitPipelineTransition(ctx, t); err != nil && !errors.Is(err, domain.ErrPipelineConflict) {
 		s.logger.Error("pipeline: pause failed", "run_id", run.ID, "err", err)
@@ -636,17 +720,17 @@ func (s *Service) reconcileRun(ctx context.Context, run domain.PipelineRun) erro
 		}
 	}
 	if active == nil {
-		return nil
+		return nil // a handoff in flight has no executor yet; the driver owns it
 	}
-	session, ok, err := s.store.GetSession(ctx, run.SessionID)
+	session, ok, err := s.store.GetSession(ctx, active.ExecutorSessionID)
 	if err != nil {
 		return err
 	}
 	switch {
 	case !ok || session.IsTerminated:
-		return s.pause(ctx, run, active, domain.PipelinePauseSessionTerminated, "The task ended while the stage was active")
+		return s.pause(ctx, run, active, domain.PipelinePauseSessionTerminated, "The stage's executor ended while the stage was active")
 	case session.Metadata.ControllerGeneration != active.ControllerGeneration:
-		return s.pause(ctx, run, active, domain.PipelinePauseControllerChanged, "The worker's controller restarted while the stage was active")
+		return s.pause(ctx, run, active, domain.PipelinePauseControllerChanged, "The stage executor's controller restarted while the stage was active")
 	}
 	return nil
 }
@@ -721,4 +805,16 @@ func (g *StoreGuard) SuppressesLifecycleShortcuts(ctx context.Context, id domain
 		return true
 	}
 	return has
+}
+
+// stageHarness resolves the harness a specialist stage will use at start: an
+// explicit user override, else the profile default.
+func stageHarness(cat pipeline.Catalog, st pipeline.Stage, overrides map[string]StageOverride) domain.AgentHarness {
+	if ov, ok := overrides[st.ID]; ok && ov.Harness != "" {
+		return domain.AgentHarness(ov.Harness)
+	}
+	if pe, ok := cat.FindProfile(st.Profile); ok && pe.Profile != nil {
+		return domain.AgentHarness(pe.Profile.Harness)
+	}
+	return ""
 }

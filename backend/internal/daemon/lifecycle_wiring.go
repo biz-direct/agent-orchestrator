@@ -53,6 +53,7 @@ type lifecycleStack struct {
 	reaperDone     <-chan struct{}
 	activityDone   <-chan struct{}
 	autoReviewDone <-chan struct{}
+	pipelineDone   <-chan struct{}
 	scmDone        <-chan struct{}
 	trackerDone    <-chan struct{}
 	herdr          *herdr.Server
@@ -166,6 +167,9 @@ func (l *lifecycleStack) Stop() {
 	}
 	if l.autoReviewDone != nil {
 		<-l.autoReviewDone
+	}
+	if l.pipelineDone != nil {
+		<-l.pipelineDone
 	}
 	if l.scmDone != nil {
 		<-l.scmDone

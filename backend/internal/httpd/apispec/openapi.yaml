@@ -13378,6 +13378,8 @@ components:
           type: integer
         controllerGeneration:
           type: string
+        conversationSessionId:
+          type: string
         executorSessionId:
           type: string
         finishedAt:
@@ -13400,6 +13402,8 @@ components:
         outcome:
           type: string
         outputCommit:
+          type: string
+        predecessorAttemptId:
           type: string
         stageId:
           type: string
@@ -13692,6 +13696,7 @@ components:
         state:
           enum:
           - pending
+          - handoff
           - active
           - accepted
           - failed

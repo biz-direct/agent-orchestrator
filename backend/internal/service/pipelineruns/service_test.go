@@ -27,12 +27,12 @@ stages:
   - {id: build, kind: build}
 `
 
-const multiStageWorkflow = `version: 1
-id: build-test
-description: Build then test
+const reviewWorkflow = `version: 1
+id: build-review
+description: Build then review
 stages:
   - {id: build, kind: build}
-  - {id: test, kind: specialist, profile: tester, repairTo: build}
+  - {id: review, kind: review, repairTo: build}
 `
 
 const testerProfile = `version: 1
@@ -178,16 +178,16 @@ func TestStartSnapshotsDefinitionAndInstructions(t *testing.T) {
 
 func TestStartRejectsUnsupportedAndUnsafeRequests(t *testing.T) {
 	f := newFixture(t, map[string]string{
-		".ao/pipelines/workflows/build-only.yaml": buildOnlyWorkflow,
-		".ao/pipelines/workflows/build-test.yaml": multiStageWorkflow,
-		".ao/pipelines/profiles/tester.yaml":      testerProfile,
+		".ao/pipelines/workflows/build-only.yaml":   buildOnlyWorkflow,
+		".ao/pipelines/workflows/build-review.yaml": reviewWorkflow,
+		".ao/pipelines/profiles/tester.yaml":        testerProfile,
 	})
 	ctx := context.Background()
 	if _, err := f.svc.Start(ctx, pipelineruns.StartInput{SessionID: f.sessionID, RequestedBy: "user"}); code(t, err) != "PIPELINE_WORKFLOW_REQUIRED" {
 		t.Fatalf("missing workflow must not fall back to a normal worker: %v", err)
 	}
-	if _, err := f.svc.Start(ctx, pipelineruns.StartInput{SessionID: f.sessionID, WorkflowID: "build-test", RequestedBy: "user"}); code(t, err) != "PIPELINE_WORKFLOW_UNAVAILABLE" {
-		t.Fatalf("multi-stage must be rejected: %v", err)
+	if _, err := f.svc.Start(ctx, pipelineruns.StartInput{SessionID: f.sessionID, WorkflowID: "build-review", RequestedBy: "user"}); code(t, err) != "PIPELINE_WORKFLOW_UNAVAILABLE" {
+		t.Fatalf("a workflow with a review stage must be rejected until it can run: %v", err)
 	}
 	if _, err := f.svc.Start(ctx, pipelineruns.StartInput{SessionID: f.sessionID, WorkflowID: "ghost", RequestedBy: "user"}); code(t, err) != "PIPELINE_WORKFLOW_NOT_FOUND" {
 		t.Fatalf("unknown workflow: %v", err)

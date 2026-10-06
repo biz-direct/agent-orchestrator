@@ -13,6 +13,10 @@ vi.mock("../lib/api-client", () => ({
 		typeof error === "object" && error !== null && "message" in error ? String((error as { message: unknown }).message) : "Request failed",
 }));
 
+vi.mock("./chat/SessionChatSurface", () => ({
+	SessionChatSurface: ({ session }: { session: { id: string } }) => <div data-testid="stage-chat">{session.id}</div>,
+}));
+
 import { SessionPipelineSection } from "./SessionPipelineSection";
 
 const session = { id: "w-1", workspaceId: "proj", workspaceName: "proj", title: "t", provider: "claude-code", status: "working" } as unknown as WorkspaceSession;
@@ -128,5 +132,43 @@ describe("SessionPipelineSection", () => {
 		renderSection();
 		expect(await screen.findByRole("status")).toHaveTextContent("controller restarted");
 		expect(screen.getAllByText("Paused")).toHaveLength(2);
+	});
+
+	it("shows a handoff in flight and opens a finished or running stage's own conversation", async () => {
+		mockGets(
+			run({
+				currentStageId: "test",
+				stages: [
+					{ id: "build", kind: "build", state: "accepted", settingsSource: "worker" },
+					{ id: "test", kind: "specialist", state: "active", harness: "claude-code", settingsSource: "profile" },
+				],
+				attempts: [
+					{ id: "a1", stageId: "build", attemptNo: 1, state: "accepted", executorSessionId: "w-1", noChange: false, instructionDelivery: "delivered", startedAt: "now" },
+					{ id: "a2", stageId: "test", attemptNo: 1, state: "active", executorSessionId: "w-1-att-2", conversationSessionId: "w-1-att-2", noChange: false, instructionDelivery: "delivered", startedAt: "now" },
+				],
+			}),
+			[],
+		);
+		renderSection();
+		expect(await screen.findByText("Accepted")).toBeInTheDocument();
+		// Build ran in the task's own conversation; only the specialist has a dialog.
+		expect(screen.queryByRole("button", { name: "Open build conversation" })).not.toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Open test conversation" }));
+		expect(await screen.findByTestId("stage-chat")).toHaveTextContent("w-1-att-2");
+	});
+
+	it("labels a stage that is waiting for its handoff", async () => {
+		mockGets(
+			run({
+				currentStageId: "test",
+				stages: [
+					{ id: "build", kind: "build", state: "accepted", settingsSource: "worker" },
+					{ id: "test", kind: "specialist", state: "handoff", settingsSource: "profile" },
+				],
+			}),
+			[],
+		);
+		renderSection();
+		expect(await screen.findByText("Handing off")).toBeInTheDocument();
 	});
 });

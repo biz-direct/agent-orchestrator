@@ -583,6 +583,8 @@ type PipelineStageAttempt struct {
 	InstructionDelivery  string
 	StartedAt            time.Time
 	FinishedAt           sql.NullTime
+	PredecessorAttemptID string
+	ResultJson           string
 }
 
 type Project struct {
@@ -730,6 +732,7 @@ type Session struct {
 	ClientRequestCommitted           bool
 	CodexActivityFacts               string
 	ClaudeActivityFacts              string
+	AttachedToSessionID              string
 }
 
 type SessionCleanupFact struct {

@@ -406,6 +406,7 @@ type Manager struct {
 	// without it behaves exactly as before.
 	defaults     SessionModeDefaults
 	chat         ChatLauncher
+	pipelineGate ports.PipelineExecutionGate
 	modelCatalog interface {
 		Models(context.Context, string, string, bool) (ports.AgentModelCatalog, error)
 	}

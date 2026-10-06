@@ -794,10 +794,22 @@ func Run() error {
 	}
 	// Interrupted pipeline execution pauses before anything can touch it: a run
 	// whose controller restarted or whose task ended is never replayed blindly.
-	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Logger: log})
+	pipelineGate := pipelineruns.NewStoreGate(store, log)
+	chatSvc.SetExecutionGate(pipelineGate)
+	if gated, ok := sessMgr.(interface {
+		SetPipelineGate(ports.PipelineExecutionGate)
+	}); ok {
+		gated.SetPipelineGate(pipelineGate)
+	}
+	executor, _ := sessMgr.(ports.PipelineExecutor)
+	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Executor: executor, Logger: log})
 	if reconcileErr := pipelineRunSvc.ReconcileAll(ctx); reconcileErr != nil {
 		log.Warn("pipeline run reconcile deferred", "err", reconcileErr)
 	}
+	// Handoffs between stages run after the submitting executor's request has
+	// been answered; this loop (and a wake on every accepted stage) drives them,
+	// and picks up any handoff a restart interrupted.
+	lcStack.pipelineDone = pipelineRunSvc.Run(ctx)
 	agentSvc.WarmCodexAccounts()
 	automationSvc, automationDone := startAutomations(ctx, store, sessionSvc, log)
 	lcStack.automationDone = automationDone

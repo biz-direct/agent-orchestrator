@@ -45,7 +45,7 @@ id: bt
 description: Build then test
 stages:
   - {id: build, kind: build}
-  - {id: test, kind: specialist, profile: tester, repairTo: build}
+  - {id: review, kind: review, repairTo: build}
 `
 
 func newFixture(t *testing.T, files map[string]string) (*pipelines.Service, *fakeStore) {

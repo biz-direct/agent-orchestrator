@@ -312,6 +312,17 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (GetSessi
 	return i, err
 }
 
+const getSessionAttachedTo = `-- name: GetSessionAttachedTo :one
+SELECT attached_to_session_id FROM sessions WHERE id = ?
+`
+
+func (q *Queries) GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (string, error) {
+	row := q.db.QueryRowContext(ctx, getSessionAttachedTo, id)
+	var attached_to_session_id string
+	err := row.Scan(&attached_to_session_id)
+	return attached_to_session_id, err
+}
+
 const getSessionByAutomationRunID = `-- name: GetSessionByAutomationRunID :one
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
@@ -627,7 +638,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, effort, session_permissions,
     provision_state, provision_error, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts
-FROM sessions ORDER BY project_id, num
+FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num
 `
 
 type ListAllSessionsRow struct {
@@ -779,6 +790,33 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]ListAllSessionsRow, er
 	return items, nil
 }
 
+const listAttachedSessionIDs = `-- name: ListAttachedSessionIDs :many
+SELECT id FROM sessions WHERE attached_to_session_id = ? ORDER BY created_at, id
+`
+
+func (q *Queries) ListAttachedSessionIDs(ctx context.Context, attachedToSessionID string) ([]domain.SessionID, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachedSessionIDs, attachedToSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.SessionID{}
+	for rows.Next() {
+		var id domain.SessionID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,
@@ -794,7 +832,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, effort, session_permissions,
     provision_state, provision_error, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts
-FROM sessions WHERE project_id IS ? ORDER BY num
+FROM sessions WHERE project_id IS ? AND attached_to_session_id = '' ORDER BY num
 `
 
 type ListSessionsByProjectRow struct {
@@ -1234,6 +1272,20 @@ func (q *Queries) SessionIsSeed(ctx context.Context, id domain.SessionID) (bool,
 	var is_seed bool
 	err := row.Scan(&is_seed)
 	return is_seed, err
+}
+
+const setSessionAttachedTo = `-- name: SetSessionAttachedTo :exec
+UPDATE sessions SET attached_to_session_id = ? WHERE id = ?
+`
+
+type SetSessionAttachedToParams struct {
+	AttachedToSessionID string
+	ID                  domain.SessionID
+}
+
+func (q *Queries) SetSessionAttachedTo(ctx context.Context, arg SetSessionAttachedToParams) error {
+	_, err := q.db.ExecContext(ctx, setSessionAttachedTo, arg.AttachedToSessionID, arg.ID)
+	return err
 }
 
 const setSessionAutoInjectCI = `-- name: SetSessionAutoInjectCI :execrows

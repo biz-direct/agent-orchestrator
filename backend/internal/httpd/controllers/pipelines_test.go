@@ -59,7 +59,7 @@ id: build-test
 description: Build then test
 stages:
   - {id: build, kind: build}
-  - {id: test, kind: specialist, profile: tester, repairTo: build}
+  - {id: review, kind: review, repairTo: build}
 `
 
 func TestPipelinesRoutes_DefaultToStubsWithoutManager(t *testing.T) {

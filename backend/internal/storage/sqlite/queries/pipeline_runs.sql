@@ -38,9 +38,18 @@ RETURNING *;
 -- name: CreatePipelineStageAttempt :one
 INSERT INTO pipeline_stage_attempts (
     id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id,
-    controller_generation, input_commit, instruction_delivery, started_at
+    controller_generation, input_commit, instruction_delivery, started_at, predecessor_attempt_id
 )
-VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending', ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+RETURNING *;
+
+-- name: ActivatePipelineStageAttempt :one
+UPDATE pipeline_stage_attempts
+SET state = 'active',
+    executor_session_id = sqlc.arg(executor_session_id),
+    controller_generation = sqlc.arg(controller_generation),
+    started_at = sqlc.arg(started_at)
+WHERE id = sqlc.arg(id) AND state = 'handoff'
 RETURNING *;
 
 -- name: GetPipelineStageAttempt :one
@@ -57,8 +66,9 @@ SET state = sqlc.arg(state),
     outcome = sqlc.arg(outcome),
     summary = sqlc.arg(summary),
     result_key = sqlc.arg(result_key),
+    result_json = sqlc.arg(result_json),
     finished_at = sqlc.arg(finished_at)
-WHERE id = sqlc.arg(id) AND state = 'active'
+WHERE id = sqlc.arg(id) AND state IN ('active', 'handoff')
 RETURNING *;
 
 -- name: SetPipelineAttemptInstructionDelivery :exec

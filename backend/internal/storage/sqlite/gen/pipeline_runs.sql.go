@@ -11,6 +11,55 @@ import (
 	"time"
 )
 
+const activatePipelineStageAttempt = `-- name: ActivatePipelineStageAttempt :one
+UPDATE pipeline_stage_attempts
+SET state = 'active',
+    executor_session_id = ?1,
+    controller_generation = ?2,
+    started_at = ?3
+WHERE id = ?4 AND state = 'handoff'
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json
+`
+
+type ActivatePipelineStageAttemptParams struct {
+	ExecutorSessionID    string
+	ControllerGeneration string
+	StartedAt            time.Time
+	ID                   string
+}
+
+func (q *Queries) ActivatePipelineStageAttempt(ctx context.Context, arg ActivatePipelineStageAttemptParams) (PipelineStageAttempt, error) {
+	row := q.db.QueryRowContext(ctx, activatePipelineStageAttempt,
+		arg.ExecutorSessionID,
+		arg.ControllerGeneration,
+		arg.StartedAt,
+		arg.ID,
+	)
+	var i PipelineStageAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.StageID,
+		&i.StageKind,
+		&i.AttemptNo,
+		&i.State,
+		&i.ExecutorSessionID,
+		&i.ControllerGeneration,
+		&i.InputCommit,
+		&i.OutputCommit,
+		&i.NoChange,
+		&i.Outcome,
+		&i.Summary,
+		&i.ResultKey,
+		&i.InstructionDelivery,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.PredecessorAttemptID,
+		&i.ResultJson,
+	)
+	return i, err
+}
+
 const createPipelineEvent = `-- name: CreatePipelineEvent :exec
 INSERT INTO pipeline_events (run_id, attempt_id, kind, detail, created_at)
 VALUES (?, ?, ?, ?, ?)
@@ -104,10 +153,10 @@ func (q *Queries) CreatePipelineRun(ctx context.Context, arg CreatePipelineRunPa
 const createPipelineStageAttempt = `-- name: CreatePipelineStageAttempt :one
 INSERT INTO pipeline_stage_attempts (
     id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id,
-    controller_generation, input_commit, instruction_delivery, started_at
+    controller_generation, input_commit, instruction_delivery, started_at, predecessor_attempt_id
 )
-VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 'pending', ?)
-RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json
 `
 
 type CreatePipelineStageAttemptParams struct {
@@ -116,10 +165,12 @@ type CreatePipelineStageAttemptParams struct {
 	StageID              string
 	StageKind            string
 	AttemptNo            int64
+	State                string
 	ExecutorSessionID    string
 	ControllerGeneration string
 	InputCommit          string
 	StartedAt            time.Time
+	PredecessorAttemptID string
 }
 
 func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipelineStageAttemptParams) (PipelineStageAttempt, error) {
@@ -129,10 +180,12 @@ func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipe
 		arg.StageID,
 		arg.StageKind,
 		arg.AttemptNo,
+		arg.State,
 		arg.ExecutorSessionID,
 		arg.ControllerGeneration,
 		arg.InputCommit,
 		arg.StartedAt,
+		arg.PredecessorAttemptID,
 	)
 	var i PipelineStageAttempt
 	err := row.Scan(
@@ -153,6 +206,8 @@ func (q *Queries) CreatePipelineStageAttempt(ctx context.Context, arg CreatePipe
 		&i.InstructionDelivery,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.PredecessorAttemptID,
+		&i.ResultJson,
 	)
 	return i, err
 }
@@ -165,9 +220,10 @@ SET state = ?1,
     outcome = ?4,
     summary = ?5,
     result_key = ?6,
-    finished_at = ?7
-WHERE id = ?8 AND state = 'active'
-RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at
+    result_json = ?7,
+    finished_at = ?8
+WHERE id = ?9 AND state IN ('active', 'handoff')
+RETURNING id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json
 `
 
 type FinishPipelineStageAttemptParams struct {
@@ -177,6 +233,7 @@ type FinishPipelineStageAttemptParams struct {
 	Outcome      string
 	Summary      string
 	ResultKey    string
+	ResultJson   string
 	FinishedAt   sql.NullTime
 	ID           string
 }
@@ -189,6 +246,7 @@ func (q *Queries) FinishPipelineStageAttempt(ctx context.Context, arg FinishPipe
 		arg.Outcome,
 		arg.Summary,
 		arg.ResultKey,
+		arg.ResultJson,
 		arg.FinishedAt,
 		arg.ID,
 	)
@@ -211,6 +269,8 @@ func (q *Queries) FinishPipelineStageAttempt(ctx context.Context, arg FinishPipe
 		&i.InstructionDelivery,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.PredecessorAttemptID,
+		&i.ResultJson,
 	)
 	return i, err
 }
@@ -310,7 +370,7 @@ func (q *Queries) GetPipelineRun(ctx context.Context, id string) (PipelineRun, e
 }
 
 const getPipelineStageAttempt = `-- name: GetPipelineStageAttempt :one
-SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at FROM pipeline_stage_attempts WHERE id = ?
+SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json FROM pipeline_stage_attempts WHERE id = ?
 `
 
 func (q *Queries) GetPipelineStageAttempt(ctx context.Context, id string) (PipelineStageAttempt, error) {
@@ -334,6 +394,8 @@ func (q *Queries) GetPipelineStageAttempt(ctx context.Context, id string) (Pipel
 		&i.InstructionDelivery,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.PredecessorAttemptID,
+		&i.ResultJson,
 	)
 	return i, err
 }
@@ -391,7 +453,7 @@ func (q *Queries) ListPipelineEvents(ctx context.Context, arg ListPipelineEvents
 }
 
 const listPipelineStageAttempts = `-- name: ListPipelineStageAttempts :many
-SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at FROM pipeline_stage_attempts WHERE run_id = ? ORDER BY started_at, attempt_no, id
+SELECT id, run_id, stage_id, stage_kind, attempt_no, state, executor_session_id, controller_generation, input_commit, output_commit, no_change, outcome, summary, result_key, instruction_delivery, started_at, finished_at, predecessor_attempt_id, result_json FROM pipeline_stage_attempts WHERE run_id = ? ORDER BY started_at, attempt_no, id
 `
 
 func (q *Queries) ListPipelineStageAttempts(ctx context.Context, runID string) ([]PipelineStageAttempt, error) {
@@ -421,6 +483,8 @@ func (q *Queries) ListPipelineStageAttempts(ctx context.Context, runID string) (
 			&i.InstructionDelivery,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.PredecessorAttemptID,
+			&i.ResultJson,
 		); err != nil {
 			return nil, err
 		}

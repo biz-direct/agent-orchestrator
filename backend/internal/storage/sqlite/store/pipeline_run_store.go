@@ -32,9 +32,9 @@ func (s *Store) CreatePipelineRun(ctx context.Context, run domain.PipelineRun, f
 		}
 		outAttempt, err = q.CreatePipelineStageAttempt(ctx, gen.CreatePipelineStageAttemptParams{
 			ID: first.ID, RunID: first.RunID, StageID: first.StageID, StageKind: first.StageKind,
-			AttemptNo: int64(first.AttemptNo), ExecutorSessionID: string(first.ExecutorSessionID),
+			AttemptNo: int64(first.AttemptNo), State: attemptStateOrActive(first.State), ExecutorSessionID: string(first.ExecutorSessionID),
 			ControllerGeneration: first.ControllerGeneration, InputCommit: first.InputCommit,
-			StartedAt: first.StartedAt,
+			StartedAt: first.StartedAt, PredecessorAttemptID: first.PredecessorAttemptID,
 		})
 		return err
 	})
@@ -158,7 +158,7 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 		if t.Attempt != nil {
 			_, err := q.FinishPipelineStageAttempt(ctx, gen.FinishPipelineStageAttemptParams{
 				State: string(t.Attempt.State), OutputCommit: t.Attempt.OutputCommit, NoChange: boolInt(t.Attempt.NoChange),
-				Outcome: t.Attempt.Outcome, Summary: t.Attempt.Summary, ResultKey: t.Attempt.ResultKey,
+				Outcome: t.Attempt.Outcome, Summary: t.Attempt.Summary, ResultKey: t.Attempt.ResultKey, ResultJson: t.Attempt.ResultJSON,
 				FinishedAt: nullTime(t.Attempt.FinishedAt), ID: t.Attempt.ID,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
@@ -186,6 +186,29 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 			}
 			out = row
 		}
+		if t.NewAttempt != nil {
+			na := t.NewAttempt
+			if _, err := q.CreatePipelineStageAttempt(ctx, gen.CreatePipelineStageAttemptParams{
+				ID: na.ID, RunID: na.RunID, StageID: na.StageID, StageKind: na.StageKind, AttemptNo: int64(na.AttemptNo),
+				State: attemptStateOrActive(na.State), ExecutorSessionID: string(na.ExecutorSessionID),
+				ControllerGeneration: na.ControllerGeneration, InputCommit: na.InputCommit, StartedAt: na.StartedAt,
+				PredecessorAttemptID: na.PredecessorAttemptID,
+			}); err != nil {
+				return err
+			}
+		}
+		if t.Activate != nil {
+			_, err := q.ActivatePipelineStageAttempt(ctx, gen.ActivatePipelineStageAttemptParams{
+				ExecutorSessionID: string(t.Activate.ExecutorSessionID), ControllerGeneration: t.Activate.ControllerGeneration,
+				StartedAt: t.Activate.At, ID: t.Activate.ID,
+			})
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.ErrPipelineConflict
+			}
+			if err != nil {
+				return err
+			}
+		}
 		for _, ev := range t.Events {
 			if err := q.CreatePipelineEvent(ctx, gen.CreatePipelineEventParams{
 				RunID: t.RunID, AttemptID: ev.AttemptID, Kind: ev.Kind, Detail: detailOrEmpty(ev.Detail), CreatedAt: t.At,
@@ -202,6 +225,13 @@ func (s *Store) CommitPipelineTransition(ctx context.Context, t domain.PipelineT
 		return domain.PipelineRun{}, fmt.Errorf("commit pipeline transition: %w", err)
 	}
 	return pipelineRunFromGen(out), nil
+}
+
+func attemptStateOrActive(s domain.PipelineAttemptState) string {
+	if s == "" {
+		return string(domain.PipelineAttemptActive)
+	}
+	return string(s)
 }
 
 func detailOrEmpty(s string) string {
@@ -245,10 +275,66 @@ func pipelineAttemptFromGen(a gen.PipelineStageAttempt) domain.PipelineStageAtte
 		ControllerGeneration: a.ControllerGeneration, InputCommit: a.InputCommit, OutputCommit: a.OutputCommit,
 		NoChange: a.NoChange != 0, Outcome: a.Outcome, Summary: a.Summary, ResultKey: a.ResultKey,
 		InstructionDelivery: a.InstructionDelivery, StartedAt: a.StartedAt,
+		PredecessorAttemptID: a.PredecessorAttemptID, ResultJSON: a.ResultJson,
 	}
 	if a.FinishedAt.Valid {
 		t := a.FinishedAt.Time
 		out.FinishedAt = &t
 	}
 	return out
+}
+
+// CreateAttachedSession atomically inserts a hidden session row that executes a
+// pipeline stage for ownerID. Because the attached marker is written in the
+// same transaction, no listing can ever observe the row as an ordinary session.
+func (s *Store) CreateAttachedSession(ctx context.Context, rec domain.SessionRecord, ownerID domain.SessionID) (domain.SessionRecord, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	err := s.inTx(ctx, "create attached session", func(q *gen.Queries) error {
+		num, err := q.NextSessionNum(ctx, optionalProjectID(rec.ProjectID))
+		if err != nil {
+			return fmt.Errorf("next session num for %s: %w", rec.ProjectID, err)
+		}
+		for {
+			rec.ID = domain.SessionID(fmt.Sprintf("%s-%d", rec.ProjectID, num))
+			exists, err := q.SessionIDExists(ctx, rec.ID)
+			if err != nil {
+				return fmt.Errorf("check session id %s: %w", rec.ID, err)
+			}
+			if !exists {
+				break
+			}
+			num++
+		}
+		if err := q.InsertSession(ctx, recordToInsert(rec, num)); err != nil {
+			return fmt.Errorf("insert attached session %s: %w", rec.ID, err)
+		}
+		return q.SetSessionAttachedTo(ctx, gen.SetSessionAttachedToParams{AttachedToSessionID: string(ownerID), ID: rec.ID})
+	})
+	if err != nil {
+		return domain.SessionRecord{}, err
+	}
+	return rec, nil
+}
+
+// GetSessionAttachedTo returns the owner worker of an attached specialist
+// session, or "" for an ordinary session.
+func (s *Store) GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (domain.SessionID, error) {
+	owner, err := s.qr.GetSessionAttachedTo(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get attached owner %s: %w", id, err)
+	}
+	return domain.SessionID(owner), nil
+}
+
+// ListAttachedSessionIDs returns the attached specialist sessions of a worker.
+func (s *Store) ListAttachedSessionIDs(ctx context.Context, owner domain.SessionID) ([]domain.SessionID, error) {
+	ids, err := s.qr.ListAttachedSessionIDs(ctx, string(owner))
+	if err != nil {
+		return nil, fmt.Errorf("list attached sessions: %w", err)
+	}
+	return append(make([]domain.SessionID, 0, len(ids)), ids...), nil
 }

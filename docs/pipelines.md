@@ -10,10 +10,10 @@ Status by delivery slice (parent design: issue #1):
 | --- | --- |
 | Discover/validate definitions, project-default selection | shipped |
 | Single-stage Build run on an existing Chat worker, snapshots, verified results | shipped |
-| Attached specialists, validation, Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
+| Attached Chat specialists run sequentially in the same worktree | shipped |
+| Tester scope/result contract, validation, Review, repair, pause/resume, recovery | in flight, tracked by the subissues of #1 |
 
-A valid workflow that this build cannot execute (anything beyond a single Build
-stage today) can be selected but is shown as **unavailable**. AO never silently
+A valid workflow that this build cannot execute (one with a `review` stage today) can be selected but is shown as **unavailable**. AO never silently
 substitutes a normal worker for a selected workflow that cannot run, and a
 project default never changes what an ordinary spawn launches.
 
@@ -138,3 +138,36 @@ Daemon routes: `GET|POST /api/v1/sessions/{id}/pipeline`,
 `POST /api/v1/sessions/{id}/pipeline/results`. Progress surfaces through the
 existing session change stream; the desktop shows it in the task inspector
 (**Summary → Pipeline**).
+
+## Attached specialists (Build → Test → …)
+
+A `specialist` stage runs in its **own Chat conversation** inside the worker's own
+worktree. It is a hidden session row attached to the worker: it never appears as
+a board task, never owns the workspace, branch, or PR, and is excluded from every
+session listing, so the reaper, SCM observer, and startup reconcile cannot see or
+restart it. Only Chat controllers are supported; an unsupported harness is
+refused at start (or pauses the handoff) and **never falls back to a terminal**.
+
+Execution is exclusive. After a stage's result is accepted, the successor is
+recorded in `handoff` and a background driver (never the submitting request,
+which would deadlock on its own turn):
+
+1. fences the source executor's intake and drains it, then verifies no running
+   turn, queued work, pending approval, or background activity (idle alone is not
+   proof);
+2. verifies the worktree is still exactly the accepted checkpoint: same branch,
+   clean, `HEAD` equal to the accepted output commit;
+3. starts the specialist with its profile instructions, the task, the input
+   revision, and the handoff summary (it does not inherit the previous
+   executor's reasoning);
+4. only then marks the successor `active`.
+
+Anything unprovable pauses the run (`handoff_uncertain`, `unexpected_changes`,
+`stage_unsupported`, `stage_start_failed`) with the successor still recorded.
+Operational pauses never consume the repair budget and never reset the worktree.
+
+While a run is unfinished, an **execution gate** admits only the active stage's
+executor: messages, nudges, steering, approvals, restores, and resumes for the
+worker (during a specialist stage), for a finished specialist, or for anyone
+during a handoff are refused with `PIPELINE_EXECUTION_OWNED`. Ordinary sessions
+are never affected.

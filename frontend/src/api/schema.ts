@@ -4563,6 +4563,7 @@ export interface components {
         PipelineAttemptView: {
             attemptNo: number;
             controllerGeneration?: string;
+            conversationSessionId?: string;
             executorSessionId: string;
             /** Format: date-time */
             finishedAt?: null | string;
@@ -4573,6 +4574,7 @@ export interface components {
             noChange: boolean;
             outcome?: string;
             outputCommit?: string;
+            predecessorAttemptId?: string;
             stageId: string;
             /** Format: date-time */
             startedAt: string;
@@ -4683,7 +4685,7 @@ export interface components {
             repairTo?: string;
             settingsSource: string;
             /** @enum {string} */
-            state: "pending" | "active" | "accepted" | "failed" | "interrupted" | "paused";
+            state: "pending" | "handoff" | "active" | "accepted" | "failed" | "interrupted" | "paused";
         };
         PipelineValidationCommand: {
             command: string;

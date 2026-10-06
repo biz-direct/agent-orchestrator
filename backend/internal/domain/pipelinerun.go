@@ -27,6 +27,10 @@ type PipelineAttemptState string
 
 // Pipeline stage attempt states.
 const (
+	// PipelineAttemptHandoff marks a successor attempt that has been created
+	// (inputs recorded, predecessor accepted) but whose executor is not yet
+	// confirmed started. Nothing executes in this state.
+	PipelineAttemptHandoff     PipelineAttemptState = "handoff"
 	PipelineAttemptActive      PipelineAttemptState = "active"
 	PipelineAttemptAccepted    PipelineAttemptState = "accepted"
 	PipelineAttemptFailed      PipelineAttemptState = "failed"
@@ -99,6 +103,10 @@ type PipelineStageAttempt struct {
 	InstructionDelivery  string
 	StartedAt            time.Time
 	FinishedAt           *time.Time
+	// PredecessorAttemptID names the attempt whose output is this attempt's input.
+	PredecessorAttemptID string
+	// ResultJSON is the structured report submitted for the attempt.
+	ResultJSON string
 }
 
 // PipelineEvent is one append-only execution fact.
@@ -137,7 +145,16 @@ type PipelineAttemptFinish struct {
 	Outcome      string
 	Summary      string
 	ResultKey    string
+	ResultJSON   string
 	FinishedAt   time.Time
+}
+
+// PipelineAttemptActivation confirms a handoff attempt's executor started.
+type PipelineAttemptActivation struct {
+	ID                   string
+	ExecutorSessionID    SessionID
+	ControllerGeneration string
+	At                   time.Time
 }
 
 // PipelineTransition is one atomic change: optionally finish an attempt,
@@ -147,6 +164,10 @@ type PipelineTransition struct {
 	ExpectedRevision int64
 	Run              *PipelineRunUpdate
 	Attempt          *PipelineAttemptFinish
-	Events           []PipelineEvent
-	At               time.Time
+	// NewAttempt inserts a successor attempt in the same atomic change.
+	NewAttempt *PipelineStageAttempt
+	// Activate flips a handoff attempt to active.
+	Activate *PipelineAttemptActivation
+	Events   []PipelineEvent
+	At       time.Time
 }

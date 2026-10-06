@@ -2537,5 +2537,9 @@
 	"inspector.pipeline.stageState.accepted": "Accepted",
 	"inspector.pipeline.stageState.failed": "Failed",
 	"inspector.pipeline.stageState.interrupted": "Interrupted",
-	"inspector.pipeline.stageState.paused": "Paused"
+	"inspector.pipeline.stageState.paused": "Paused",
+	"inspector.pipeline.stageState.handoff": "Handing off",
+	"inspector.pipeline.openConversation": "Open {{stage}} conversation",
+	"inspector.pipeline.conversationTitle": "{{stage}} conversation",
+	"inspector.pipeline.conversationDescription": "Conversation of the {{stage}} pipeline stage"
 }
