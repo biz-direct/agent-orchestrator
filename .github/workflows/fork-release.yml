@@ -1,0 +1,49 @@
+# .github/workflows/fork-release.yml
+name: Fork release
+
+# FORK ONLY: on a v* tag, build the unsigned Apple Silicon macOS and Linux x64
+# desktop apps (via build-artifacts.yml) and attach them, plus sha256 digests,
+# to a GitHub Release on this repo. Replaces the external release conductor.
+# macOS output is unsigned (see docs/fork-ci.md). No auto-update feed
+# (latest-mac.yml) is published, so installs are manual.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-artifacts.yml
+    with:
+      ref: ${{ github.ref }}
+      version: ${{ github.ref_name }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: "{mac-arm64,linux,digests}"
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Real digests of the files being attached, in the standard format.
+          (cd assets && sha256sum agent-orchestrator-* > SHA256SUMS.txt)
+          ls -l assets
+          gh release create "$TAG" assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --generate-notes \
+            --verify-tag

@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   leaderboard:
+    # Fork: upstream-only PR stats comment.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     name: Post trailing 7-day review stats
     runs-on: ubuntu-latest
     steps:

@@ -19,7 +19,9 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ !github.event.repository.fork }}
+    # Fork: Pages deploy is upstream-only (explicit repo check; the fork flag is
+    # false when the repo was moved rather than forked).
+    if: ${{ !github.event.repository.fork && github.repository == 'OrchestratorInc/agent-orchestrator' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

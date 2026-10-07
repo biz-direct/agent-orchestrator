@@ -38,6 +38,8 @@ function findReleaseMutationViolations(workflows: WorkflowSource[]) {
 describe("desktop release workflows", () => {
   const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
   const artifactBuilder = path.join(workflowsDirectory, "build-artifacts.yml");
+  // Fork-only: the one workflow allowed to publish a GitHub Release.
+  const forkReleaseWorkflow = "fork-release.yml";
 
   async function readWorkflows() {
     const names = (await readdir(workflowsDirectory)).filter((name) =>
@@ -71,7 +73,9 @@ describe("desktop release workflows", () => {
   });
 
   it("prevents public workflows from mutating releases or release tags", async () => {
-    const workflows = await readWorkflows();
+    const workflows = (await readWorkflows()).filter(
+      ({ name }) => name !== forkReleaseWorkflow,
+    );
 
     expect(findReleaseMutationViolations(workflows)).toEqual([]);
   });
@@ -171,5 +175,42 @@ run: |
     expect(contents).toContain(
       "Repository variable VITE_WORKOS_CLIENT_ID is required",
     );
+  });
+
+  it("builds only Apple Silicon macOS and Linux x64", async () => {
+    const contents = await readFile(artifactBuilder, "utf8");
+
+    expect(contents).toContain("platform: darwin-arm64");
+    expect(contents).toContain("platform: linux-x64");
+    expect(contents).not.toMatch(/win32|windows-latest|darwin-x64|macos-15-intel/);
+    expect(contents).not.toMatch(/\.deb|\.rpm/);
+    expect(contents).toContain("workflow_call:");
+  });
+
+  it("limits the fork release publisher to unsigned v* tag builds", async () => {
+    const contents = await readFile(
+      path.join(workflowsDirectory, forkReleaseWorkflow),
+      "utf8",
+    );
+
+    expect(contents).toContain('tags: ["v*"]');
+    expect(contents).toContain("uses: ./.github/workflows/build-artifacts.yml");
+    expect(contents).not.toMatch(/branches:|schedule:|pull_request/);
+    expect(contents).not.toMatch(/secrets\.(?!GITHUB_TOKEN)/);
+    expect(contents).not.toMatch(/git (?:tag|push)\b|APPLE_/);
+    // Only the publish job may write.
+    expect(contents.match(/contents:\s*write/g)).toHaveLength(1);
+  });
+
+  it("gates upstream-only workflows off the fork", async () => {
+    for (const name of [
+      "release-latest-guard.yml",
+      "pr-review-leaderboard.yml",
+      "deploy-docs.yml",
+      "mac-update-e2e.yml",
+    ]) {
+      const contents = await readFile(path.join(workflowsDirectory, name), "utf8");
+      expect(contents, name).toMatch(/if:.*github\.repository == '(?:OrchestratorInc|Untrivial-ai)\/agent-orchestrator'/);
+    }
   });
 });
