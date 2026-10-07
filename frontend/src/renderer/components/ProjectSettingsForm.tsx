@@ -32,6 +32,7 @@ import { newestActiveOrchestrator } from "../types/workspace";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import { buildIntake, deriveRepoPath, deriveRepoHost, IntakeFields, intakeNeedsRule, type IntakeForm } from "./IntakeFields";
 import { ProductExternalLink } from "./ProductExternalLink";
+import { ProjectPipelineSettings } from "./ProjectPipelineSettings";
 import { ReviewerSelect, reviewerTrustWarning } from "./ReviewerSelect";
 import { AgentModelCombobox } from "./settings/AgentModelCombobox";
 import { SettingsOptionMenu } from "./settings/SettingsOptionMenu";
@@ -598,6 +599,7 @@ function SettingsBody({
 									</div>
 								</div>
 							</ProjectSettingsSection>
+							<ProjectPipelineSettings projectId={projectId} hostId={hostId} />
 						</>
 					)}
 				</>

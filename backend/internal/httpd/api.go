@@ -16,6 +16,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
+	pipelineruns "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
+	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
@@ -26,6 +28,8 @@ type APIDeps struct {
 	Agents             controllers.AgentCatalog
 	CodexAccounts      controllers.CodexAccountService
 	Projects           projectsvc.Manager
+	Pipelines          pipelinessvc.Manager
+	PipelineRuns       pipelineruns.Manager
 	Sessions           controllers.SessionService
 	Automations        controllers.AutomationService
 	DesktopWorkspaces  controllers.DesktopWorkspaceService
@@ -119,6 +123,8 @@ type API struct {
 	agents        *controllers.AgentsController
 	codexAccounts *controllers.CodexAccountsController
 	projects      *controllers.ProjectsController
+	pipelines     *controllers.PipelinesController
+	pipelineRuns  *controllers.PipelineRunsController
 	sessions      *controllers.SessionsController
 	automations   *controllers.AutomationsController
 	desktop       *controllers.DesktopWorkspaceController
@@ -166,7 +172,10 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		projects: &controllers.ProjectsController{
 			Mgr: deps.Projects,
 		},
+		pipelines:    &controllers.PipelinesController{Mgr: deps.Pipelines, Callers: pipelineCallers(deps)},
+		pipelineRuns: &controllers.PipelineRunsController{Mgr: deps.PipelineRuns, Callers: pipelineCallers(deps)},
 		sessions: &controllers.SessionsController{
+			Pipelines:                pipelineSelector(deps.PipelineRuns),
 			Svc:                      deps.Sessions,
 			Activity:                 deps.Activity,
 			Usage:                    deps.UsageHooks,
@@ -234,6 +243,8 @@ func (a *API) Register(root chi.Router) {
 			a.agents.Register(r)
 			a.codexAccounts.Register(r)
 			a.projects.Register(r)
+			a.pipelines.Register(r)
+			a.pipelineRuns.Register(r)
 			a.sessions.Register(r)
 			a.automations.Register(r)
 			a.desktop.Register(r)
@@ -318,4 +329,21 @@ func memoryPressure(svc controllers.SessionMemoryService) controllers.MemoryPres
 		return p
 	}
 	return nil
+}
+
+// pipelineSelector returns the run service as the spawn path's pipeline
+// selector, or a true nil interface when pipelines are not wired.
+func pipelineSelector(m pipelineruns.Manager) controllers.PipelineSelector {
+	if m == nil {
+		return nil
+	}
+	return m
+}
+
+// pipelineCallers lets pipeline routes attribute a request to an AO session
+// through the capability the daemon already issues to it. Without a session
+// service or validator no request can be attributed and the human-only guard
+// stays cooperative.
+func pipelineCallers(deps APIDeps) controllers.PipelineCallerAuthority {
+	return controllers.PipelineCallerAuthority{Sessions: deps.Sessions, Capabilities: deps.SessionCapabilities}
 }

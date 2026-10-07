@@ -535,6 +535,112 @@ type PRURLAlias struct {
 	CanonicalURL string
 }
 
+type PipelineCommandResult struct {
+	ID           int64
+	AttemptID    string
+	Round        int64
+	Ordinal      int64
+	CommandID    string
+	Command      string
+	Required     int64
+	Revision     string
+	Status       string
+	ExitCode     int64
+	StartedAt    time.Time
+	FinishedAt   sql.NullTime
+	Log          string
+	LogTruncated int64
+	Detail       string
+}
+
+type PipelineEvent struct {
+	ID        int64
+	RunID     string
+	AttemptID string
+	Kind      string
+	Detail    string
+	CreatedAt time.Time
+}
+
+type PipelineRepair struct {
+	ID              string
+	RunID           string
+	Ordinal         int64
+	SourceAttemptID string
+	SourceStageID   string
+	Kind            string
+	TargetStageID   string
+	ReturnStageID   string
+	CreatedAt       time.Time
+}
+
+type PipelineRepairGrant struct {
+	ID           string
+	RunID        string
+	Amount       int64
+	AuthorizedBy string
+	RequestKey   string
+	Note         string
+	CreatedAt    time.Time
+}
+
+type PipelineReviewLink struct {
+	AttemptID   string
+	RunID       string
+	PRURL       string
+	HeadSha     string
+	ReviewRunID string
+	LinkedAt    time.Time
+	UpdatedAt   time.Time
+}
+
+type PipelineRun struct {
+	ID             string
+	SessionID      string
+	ProjectID      string
+	WorkflowID     string
+	State          string
+	PauseReason    string
+	PauseDetail    string
+	CurrentStageID string
+	RequestedBy    string
+	ExpectedBranch string
+	RepairBudget   int64
+	RepairsUsed    int64
+	Snapshot       string
+	SnapshotSha256 string
+	Revision       int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	CompletedAt    sql.NullTime
+}
+
+type PipelineStageAttempt struct {
+	ID                    string
+	RunID                 string
+	StageID               string
+	StageKind             string
+	AttemptNo             int64
+	State                 string
+	ExecutorSessionID     string
+	ControllerGeneration  string
+	InputCommit           string
+	OutputCommit          string
+	NoChange              int64
+	Outcome               string
+	Summary               string
+	ResultKey             string
+	InstructionDelivery   string
+	StartedAt             time.Time
+	FinishedAt            sql.NullTime
+	PredecessorAttemptID  string
+	ResultJson            string
+	RepairSourceAttemptID string
+	ReturnStageID         string
+	FeedbackJson          string
+	RetryOfAttemptID      string
+}
+
 type Project struct {
 	ID            domain.ProjectID
 	Path          string
@@ -680,6 +786,8 @@ type Session struct {
 	ClientRequestCommitted           bool
 	CodexActivityFacts               string
 	ClaudeActivityFacts              string
+	AttachedToSessionID              string
+	AttachedForAttemptID             string
 }
 
 type SessionCleanupFact struct {
@@ -717,6 +825,19 @@ type SessionInterfaceTransitionMessage struct {
 	CreatedAt       time.Time
 	DeliveredAt     sql.NullTime
 	ClientMessageID string
+}
+
+type SessionPipelineIntent struct {
+	SessionID   string
+	ProjectID   string
+	WorkflowID  string
+	Source      string
+	RequestedBy string
+	State       string
+	Detail      string
+	RunID       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type SessionWorktree struct {

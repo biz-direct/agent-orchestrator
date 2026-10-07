@@ -60,6 +60,8 @@ import (
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	linkpreviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/linkpreview"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
+	pipelineruns "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
+	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/report"
@@ -605,7 +607,7 @@ func Run() error {
 		return errors.New("wire report delivery: session manager lacks semantic send support")
 	}
 	var reportCoordinator *reportsvc.Coordinator
-	reportSvc := reportsvc.New(reportsvc.Deps{Store: store, OnCreated: func(domain.ReportRecord) {
+	reportSvc := reportsvc.New(reportsvc.Deps{Store: store, Pipelines: pipelineruns.NewStoreGuard(store, log), OnCreated: func(domain.ReportRecord) {
 		if reportCoordinator != nil {
 			reportCoordinator.Wake()
 		}
@@ -790,10 +792,28 @@ func Run() error {
 	if reconcileErr := reviewSvc.RecoverChatReviewers(ctx); reconcileErr != nil {
 		log.Warn("reviewer chat recovery deferred", "err", reconcileErr)
 	}
+	// Interrupted pipeline execution pauses before anything can touch it: a run
+	// whose controller restarted or whose task ended is never replayed blindly.
+	pipelineGate := pipelineruns.NewStoreGate(store, log)
+	chatSvc.SetExecutionGate(pipelineGate)
+	if gated, ok := sessMgr.(interface {
+		SetPipelineGate(ports.PipelineExecutionGate)
+	}); ok {
+		gated.SetPipelineGate(pipelineGate)
+	}
+	executor, _ := sessMgr.(ports.PipelineExecutor)
+	pipelineRunSvc := pipelineruns.New(pipelineruns.Deps{Store: store, Messenger: sessionSvc, Executor: executor, Reviews: pipelineReviewGateway{store: store, reviews: reviewSvc}, Reporter: pipelineReporter{reports: reportSvc}, Logger: log})
+	if reconcileErr := pipelineRunSvc.ReconcileAll(ctx); reconcileErr != nil {
+		log.Warn("pipeline run reconcile deferred", "err", reconcileErr)
+	}
+	// Handoffs between stages run after the submitting executor's request has
+	// been answered; this loop (and a wake on every accepted stage) drives them,
+	// and picks up any handoff a restart interrupted.
+	lcStack.pipelineDone = pipelineRunSvc.Run(ctx)
 	agentSvc.WarmCodexAccounts()
 	automationSvc, automationDone := startAutomations(ctx, store, sessionSvc, log)
 	lcStack.automationDone = automationDone
-	autoReview := autoreview.New(store, reviewSvc, autoreview.Config{Logger: log})
+	autoReview := autoreview.New(store, reviewSvc, autoreview.Config{Logger: log, Pipelines: pipelineruns.NewStoreGuard(store, log)})
 	lcStack.autoReviewDone = autoReview.Start(ctx)
 	// Push-device registry: persisted phones that receive OS push notifications.
 	// A load failure must not block boot — degrade to no push rather than refusing
@@ -879,6 +899,8 @@ func Run() error {
 
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectSvc,
+		Pipelines:          pipelinessvc.New(store),
+		PipelineRuns:       pipelineRunSvc,
 		HostID:             hostIdentity.HostID,
 		Endpoints:          bs,
 		Agents:             agentSvc,

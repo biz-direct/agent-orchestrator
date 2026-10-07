@@ -3050,6 +3050,170 @@ paths:
       summary: Remember project permissions for future sessions
       tags:
       - projects
+  /api/v1/projects/{id}/pipelines:
+    get:
+      operationId: getProjectPipelines
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinesCatalogResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Discover and validate the project's repository-defined profiles and
+        pipelines
+      tags:
+      - projects
+  /api/v1/projects/{id}/pipelines/command-trust:
+    put:
+      operationId: setProjectPipelineCommandTrust
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPipelineCommandTrustRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineCommandTrust'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Authorize or revoke AO running validation commands declared in repository
+        pipeline profiles
+      tags:
+      - projects
+  /api/v1/projects/{id}/pipelines/default:
+    get:
+      operationId: getProjectDefaultPipeline
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinesDefaultStatus'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read the project-default pipeline selection and its availability
+      tags:
+      - projects
+    put:
+      operationId: setProjectDefaultPipeline
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelinesSetDefaultInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelinesDefaultStatus'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Save or clear the project-default pipeline without replacing other
+        project settings
+      tags:
+      - projects
   /api/v1/projects/{id}/tasks/prepare:
     post:
       operationId: prepareTask
@@ -6299,6 +6463,205 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Pin a session
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/pipeline:
+    get:
+      operationId: getSessionPipeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRunEnvelope'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read the task's pipeline run (latest), with stages, attempts, checkpoint,
+        and rejections
+      tags:
+      - sessions
+    post:
+      operationId: startSessionPipeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartPipelineRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRunEnvelope'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Start a snapshotted pipeline run on an existing worker task
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/pipeline/control:
+    post:
+      operationId: controlSessionPipeline
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineControlRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineControlResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Pause, resume, or cancel the task's pipeline run, or authorize additional
+        repairs (human only)
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/pipeline/results:
+    post:
+      operationId: submitSessionPipelineResult
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitPipelineResultRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitPipelineResultResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Submit an idempotent, revision-bound stage result for the active attempt
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/pr:
@@ -11743,6 +12106,8 @@ components:
         model:
           maxLength: 256
           type: string
+        pipeline:
+          $ref: '#/components/schemas/PipelineSelection'
         projectId:
           type: string
         taskPreparation:
@@ -11757,6 +12122,8 @@ components:
           type: boolean
         orchestratorId:
           type: string
+        pipeline:
+          $ref: '#/components/schemas/PipelineIntentView'
         workerId:
           type: string
       required:
@@ -13119,6 +13486,988 @@ components:
       - targetSha
       - status
       type: object
+    PipelineAttemptView:
+      properties:
+        attemptNo:
+          type: integer
+        controllerGeneration:
+          type: string
+        conversationSessionId:
+          type: string
+        executorSessionId:
+          type: string
+        feedback:
+          $ref: '#/components/schemas/PipelineFeedback'
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        id:
+          type: string
+        inputCommit:
+          type: string
+        instructionDelivery:
+          enum:
+          - pending
+          - delivered
+          - failed
+          type: string
+        noChange:
+          type: boolean
+        outcome:
+          type: string
+        outputCommit:
+          type: string
+        predecessorAttemptId:
+          type: string
+        repairSourceAttemptId:
+          type: string
+        report:
+          $ref: '#/components/schemas/PipelineStageReport'
+        stageId:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        state:
+          enum:
+          - active
+          - accepted
+          - failed
+          - interrupted
+          - cancelled
+          type: string
+        summary:
+          type: string
+        validation:
+          items:
+            $ref: '#/components/schemas/PipelineCommandResultView'
+          type: array
+      required:
+      - id
+      - stageId
+      - attemptNo
+      - state
+      - executorSessionId
+      - noChange
+      - instructionDelivery
+      - validation
+      - startedAt
+      type: object
+    PipelineCheckpointView:
+      properties:
+        inputCommit:
+          type: string
+        noChange:
+          type: boolean
+        outputCommit:
+          type: string
+        stageId:
+          type: string
+      required:
+      - stageId
+      - inputCommit
+      - outputCommit
+      - noChange
+      type: object
+    PipelineCommandResultView:
+      properties:
+        command:
+          type: string
+        commandId:
+          type: string
+        detail:
+          type: string
+        durationMs:
+          format: int64
+          type: integer
+        exitCode:
+          type: integer
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        log:
+          type: string
+        logTruncated:
+          type: boolean
+        required:
+          type: boolean
+        revision:
+          type: string
+        round:
+          type: integer
+        startedAt:
+          format: date-time
+          type: string
+        status:
+          enum:
+          - running
+          - passed
+          - failed
+          - operational
+          - timeout
+          - cancelled
+          - skipped
+          - unknown
+          type: string
+      required:
+      - round
+      - commandId
+      - command
+      - required
+      - revision
+      - status
+      - exitCode
+      - startedAt
+      - durationMs
+      - logTruncated
+      type: object
+    PipelineCommandTrust:
+      properties:
+        trusted:
+          type: boolean
+      required:
+      - trusted
+      type: object
+    PipelineControlRequest:
+      properties:
+        action:
+          enum:
+          - pause
+          - resume
+          - cancel
+          - authorize_repairs
+          type: string
+        additionalRepairs:
+          type: integer
+        expectedRevision:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        recovery:
+          enum:
+          - restore_conversation
+          type: string
+        requestKey:
+          type: string
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        runId:
+          type: string
+      required:
+      - runId
+      - action
+      - requestedBy
+      type: object
+    PipelineControlResponse:
+      properties:
+        changed:
+          type: boolean
+        run:
+          $ref: '#/components/schemas/PipelineRunView'
+        stop:
+          $ref: '#/components/schemas/PipelineStopView'
+      required:
+      - run
+      - changed
+      type: object
+    PipelineControlView:
+      properties:
+        canCancel:
+          type: boolean
+        canPause:
+          type: boolean
+        canResume:
+          type: boolean
+        lastRecovery:
+          $ref: '#/components/schemas/PipelinerunsRecoveryView'
+        lastStop:
+          $ref: '#/components/schemas/PipelineStopView'
+        needsRepairAuthorization:
+          type: boolean
+        recoveryOptions:
+          items:
+            type: string
+          type: array
+        resumeNeedsUser:
+          type: boolean
+      required:
+      - canPause
+      - canResume
+      - canCancel
+      - resumeNeedsUser
+      - needsRepairAuthorization
+      - recoveryOptions
+      type: object
+    PipelineDiagnostic:
+      properties:
+        field:
+          type: string
+        file:
+          type: string
+        message:
+          type: string
+      required:
+      - message
+      type: object
+    PipelineEventView:
+      properties:
+        at:
+          format: date-time
+          type: string
+        attemptId:
+          type: string
+        kind:
+          type: string
+        message:
+          type: string
+      required:
+      - kind
+      - at
+      type: object
+    PipelineEvidenceView:
+      properties:
+        attemptId:
+          type: string
+        commands:
+          type: integer
+        current:
+          type: boolean
+        defects:
+          type: integer
+        findings:
+          type: integer
+        outcome:
+          type: string
+        profile:
+          type: string
+        remainingIssues:
+          type: integer
+        revision:
+          type: string
+        stageId:
+          type: string
+      required:
+      - stageId
+      - attemptId
+      - revision
+      - outcome
+      - findings
+      - commands
+      - defects
+      - remainingIssues
+      - current
+      type: object
+    PipelineFeedback:
+      properties:
+        defects:
+          items:
+            $ref: '#/components/schemas/PipelineReportDefect'
+          type: array
+        failedChecks:
+          items:
+            $ref: '#/components/schemas/PipelineFeedbackCheck'
+          type: array
+        githubReviewId:
+          type: string
+        kind:
+          enum:
+          - production_defect
+          - validation_failed
+          - review_feedback
+          type: string
+        remainingIssues:
+          items:
+            type: string
+          type: array
+        reviewBody:
+          type: string
+        reviewRunId:
+          type: string
+        revision:
+          type: string
+        sourceAttemptId:
+          type: string
+        sourceStageId:
+          type: string
+        summary:
+          type: string
+      required:
+      - kind
+      - sourceStageId
+      - sourceAttemptId
+      - revision
+      - summary
+      - defects
+      - failedChecks
+      - remainingIssues
+      type: object
+    PipelineFeedbackCheck:
+      properties:
+        command:
+          type: string
+        commandId:
+          type: string
+        exitCode:
+          type: integer
+        output:
+          type: string
+        revision:
+          type: string
+      required:
+      - commandId
+      - command
+      - exitCode
+      - revision
+      type: object
+    PipelineIntentView:
+      properties:
+        detail:
+          type: string
+        normalWorker:
+          type: boolean
+        runId:
+          type: string
+        source:
+          enum:
+          - explicit
+          - default
+          type: string
+        state:
+          enum:
+          - pending
+          - started
+          - skipped
+          - failed
+          type: string
+        workflowId:
+          type: string
+      required:
+      - normalWorker
+      - source
+      - state
+      type: object
+    PipelineProfile:
+      properties:
+        allowedPaths:
+          items:
+            type: string
+          type: array
+        definitionSha256:
+          type: string
+        description:
+          type: string
+        harness:
+          type: string
+        id:
+          type: string
+        instructionsSha256:
+          type: string
+        instructionsSource:
+          type: string
+        model:
+          type: string
+        validation:
+          items:
+            $ref: '#/components/schemas/PipelineValidationCommand'
+          type: array
+      required:
+      - id
+      - description
+      - instructionsSource
+      - instructionsSha256
+      - definitionSha256
+      - allowedPaths
+      - validation
+      type: object
+    PipelineProfileEntry:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/PipelineDiagnostic'
+          type: array
+        file:
+          type: string
+        id:
+          type: string
+        profile:
+          $ref: '#/components/schemas/PipelineProfile'
+        valid:
+          type: boolean
+      required:
+      - id
+      - file
+      - valid
+      - diagnostics
+      type: object
+    PipelineRejectionView:
+      properties:
+        at:
+          format: date-time
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        paths:
+          items:
+            type: string
+          type: array
+      required:
+      - code
+      - message
+      - at
+      type: object
+    PipelineRepairGrantView:
+      properties:
+        amount:
+          type: integer
+        authorizedBy:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        note:
+          type: string
+      required:
+      - amount
+      - authorizedBy
+      - createdAt
+      type: object
+    PipelineRepairView:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        kind:
+          enum:
+          - production_defect
+          - validation_failed
+          - review_feedback
+          type: string
+        ordinal:
+          type: integer
+        returnStageId:
+          type: string
+        sourceAttemptId:
+          type: string
+        sourceStageId:
+          type: string
+        targetStageId:
+          type: string
+      required:
+      - ordinal
+      - kind
+      - sourceStageId
+      - sourceAttemptId
+      - targetStageId
+      - returnStageId
+      - createdAt
+      type: object
+    PipelineReportCommand:
+      properties:
+        command:
+          type: string
+        exitCode:
+          type: integer
+        summary:
+          type: string
+      required:
+      - command
+      - exitCode
+      type: object
+    PipelineReportDefect:
+      properties:
+        description:
+          type: string
+        paths:
+          items:
+            type: string
+          type: array
+      required:
+      - description
+      type: object
+    PipelineReportFinding:
+      properties:
+        criterion:
+          type: string
+        evidence:
+          type: string
+        status:
+          enum:
+          - met
+          - unmet
+          - not_applicable
+          - unverified
+          type: string
+      required:
+      - criterion
+      - status
+      type: object
+    PipelineReviewEvidenceView:
+      properties:
+        attemptId:
+          type: string
+        current:
+          type: boolean
+        headSha:
+          type: string
+        outcome:
+          type: string
+        prUrl:
+          type: string
+        reviewRunId:
+          type: string
+        revision:
+          type: string
+        stageId:
+          type: string
+        summary:
+          type: string
+      required:
+      - stageId
+      - attemptId
+      - revision
+      - current
+      type: object
+    PipelineReviewGateView:
+      properties:
+        autoReview:
+          type: boolean
+        checkpoint:
+          type: string
+        ci:
+          enum:
+          - passing
+          - no_checks
+          - non_required_failing
+          - pending
+          - failing
+          - unknown
+          type: string
+        ciDetail:
+          type: string
+        code:
+          type: string
+        headSha:
+          type: string
+        manual:
+          type: boolean
+        message:
+          type: string
+        prNumber:
+          type: integer
+        prUrl:
+          type: string
+        reviewRunId:
+          type: string
+        reviewStatus:
+          type: string
+        state:
+          enum:
+          - waiting
+          - ready
+          - blocked
+          type: string
+        verdict:
+          type: string
+      required:
+      - state
+      - code
+      - message
+      - manual
+      - autoReview
+      - checkpoint
+      type: object
+    PipelineRunEnvelope:
+      properties:
+        intent:
+          $ref: '#/components/schemas/PipelineIntentView'
+        run:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/PipelineRunView'
+            type: object
+      required:
+      - run
+      type: object
+    PipelineRunView:
+      properties:
+        attempts:
+          items:
+            $ref: '#/components/schemas/PipelineAttemptView'
+          type: array
+        checkpoint:
+          $ref: '#/components/schemas/PipelineCheckpointView'
+        completedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        control:
+          $ref: '#/components/schemas/PipelineControlView'
+        createdAt:
+          format: date-time
+          type: string
+        currentStageId:
+          type: string
+        events:
+          items:
+            $ref: '#/components/schemas/PipelineEventView'
+          type: array
+        evidence:
+          items:
+            $ref: '#/components/schemas/PipelineEvidenceView'
+          type: array
+        expectedBranch:
+          type: string
+        id:
+          type: string
+        lastRejection:
+          $ref: '#/components/schemas/PipelineRejectionView'
+        pauseDetail:
+          type: string
+        pauseReason:
+          type: string
+        projectId:
+          type: string
+        repairBudget:
+          type: integer
+        repairGrants:
+          items:
+            $ref: '#/components/schemas/PipelineRepairGrantView'
+          type: array
+        repairs:
+          items:
+            $ref: '#/components/schemas/PipelineRepairView'
+          type: array
+        repairsRemaining:
+          type: integer
+        repairsUsed:
+          type: integer
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        reviewGate:
+          $ref: '#/components/schemas/PipelineReviewGateView'
+        reviews:
+          items:
+            $ref: '#/components/schemas/PipelineReviewEvidenceView'
+          type: array
+        revision:
+          format: int64
+          type: integer
+        sessionId:
+          type: string
+        snapshotCapturedAt:
+          type: string
+        snapshotSha256:
+          type: string
+        stages:
+          items:
+            $ref: '#/components/schemas/PipelineStageView'
+          type: array
+        state:
+          enum:
+          - running
+          - paused
+          - completed
+          - cancelled
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        workflowId:
+          type: string
+      required:
+      - id
+      - sessionId
+      - projectId
+      - workflowId
+      - state
+      - requestedBy
+      - repairBudget
+      - repairsUsed
+      - repairsRemaining
+      - snapshotSha256
+      - snapshotCapturedAt
+      - stages
+      - attempts
+      - evidence
+      - repairs
+      - reviews
+      - control
+      - repairGrants
+      - events
+      - revision
+      - createdAt
+      - updatedAt
+      type: object
+    PipelineSelection:
+      properties:
+        mode:
+          enum:
+          - normal_worker
+          - workflow
+          type: string
+        workflowId:
+          type: string
+      required:
+      - mode
+      type: object
+    PipelineStage:
+      properties:
+        description:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        profile:
+          type: string
+        repairTo:
+          type: string
+      required:
+      - id
+      - kind
+      type: object
+    PipelineStageOverride:
+      properties:
+        harness:
+          type: string
+        model:
+          type: string
+      type: object
+    PipelineStageReport:
+      properties:
+        commands:
+          items:
+            $ref: '#/components/schemas/PipelineReportCommand'
+          type: array
+        defects:
+          items:
+            $ref: '#/components/schemas/PipelineReportDefect'
+          type: array
+        findings:
+          items:
+            $ref: '#/components/schemas/PipelineReportFinding'
+          type: array
+        remainingIssues:
+          items:
+            type: string
+          type: array
+      required:
+      - findings
+      - commands
+      - remainingIssues
+      - defects
+      type: object
+    PipelineStageView:
+      properties:
+        allowedPaths:
+          items:
+            type: string
+          type: array
+        harness:
+          type: string
+        id:
+          type: string
+        kind:
+          type: string
+        model:
+          type: string
+        profile:
+          type: string
+        repairTo:
+          type: string
+        settingsSource:
+          type: string
+        state:
+          enum:
+          - pending
+          - handoff
+          - active
+          - validating
+          - accepted
+          - failed
+          - interrupted
+          - paused
+          type: string
+      required:
+      - id
+      - kind
+      - settingsSource
+      - state
+      type: object
+    PipelineStopView:
+      properties:
+        confirmed:
+          type: boolean
+        detail:
+          type: string
+        requested:
+          type: boolean
+      required:
+      - requested
+      - confirmed
+      type: object
+    PipelineValidationCommand:
+      properties:
+        command:
+          type: string
+        id:
+          type: string
+        required:
+          type: boolean
+        timeoutSeconds:
+          type: integer
+      required:
+      - id
+      - command
+      - timeoutSeconds
+      - required
+      type: object
+    PipelineWorkflow:
+      properties:
+        definitionSha256:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        instructionsSha256:
+          type: string
+        instructionsSource:
+          type: string
+        repairBudget:
+          type: integer
+        stages:
+          items:
+            $ref: '#/components/schemas/PipelineStage'
+          type: array
+      required:
+      - id
+      - description
+      - definitionSha256
+      - repairBudget
+      - stages
+      type: object
+    PipelinerunsRecoveryView:
+      properties:
+        at:
+          format: date-time
+          type: string
+        message:
+          type: string
+        outcome:
+          enum:
+          - continued
+          - retrying
+          - paused
+          type: string
+      required:
+      - outcome
+      - message
+      - at
+      type: object
+    PipelinesCatalogResponse:
+      properties:
+        commandsTrusted:
+          type: boolean
+        default:
+          $ref: '#/components/schemas/PipelinesDefaultStatus'
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/PipelineDiagnostic'
+          type: array
+        profiles:
+          items:
+            $ref: '#/components/schemas/PipelineProfileEntry'
+          type: array
+        projectId:
+          type: string
+        workflows:
+          items:
+            $ref: '#/components/schemas/PipelinesWorkflowView'
+          type: array
+      required:
+      - projectId
+      - profiles
+      - workflows
+      - diagnostics
+      - default
+      - commandsTrusted
+      type: object
+    PipelinesDefaultStatus:
+      properties:
+        executable:
+          type: boolean
+        message:
+          type: string
+        selection:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/PipelineSelection'
+            type: object
+        state:
+          enum:
+          - unset
+          - normal_worker
+          - workflow_available
+          - workflow_unavailable
+          - workflow_invalid
+          - workflow_missing
+          type: string
+      required:
+      - selection
+      - state
+      - executable
+      - message
+      type: object
+    PipelinesSetDefaultInput:
+      properties:
+        selection:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/PipelineSelection'
+            type: object
+      required:
+      - selection
+      type: object
+    PipelinesWorkflowView:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/PipelineDiagnostic'
+          type: array
+        executable:
+          type: boolean
+        file:
+          type: string
+        id:
+          type: string
+        unavailableReason:
+          type: string
+        valid:
+          type: boolean
+        workflow:
+          $ref: '#/components/schemas/PipelineWorkflow'
+      required:
+      - id
+      - file
+      - valid
+      - diagnostics
+      - executable
+      type: object
     PrepareTaskResponse:
       properties:
         ok:
@@ -13243,6 +14592,8 @@ components:
           $ref: '#/components/schemas/ContainerReapConfig'
         defaultBranch:
           type: string
+        defaultPipeline:
+          $ref: '#/components/schemas/PipelineSelection'
         env:
           additionalProperties:
             type: string
@@ -13267,6 +14618,8 @@ components:
           type: array
         trackerIntake:
           $ref: '#/components/schemas/TrackerIntakeConfig'
+        trustPipelineCommands:
+          type: boolean
         worker:
           $ref: '#/components/schemas/RoleOverride'
       type: object
@@ -14464,6 +15817,19 @@ components:
       required:
       - title
       type: object
+    SetPipelineCommandTrustRequest:
+      properties:
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        trusted:
+          type: boolean
+      required:
+      - trusted
+      - requestedBy
+      type: object
     SetProjectConfigInput:
       properties:
         config:
@@ -14793,6 +16159,8 @@ components:
           type: string
         parentSessionId:
           type: string
+        pipeline:
+          $ref: '#/components/schemas/PipelineSelection'
         projectId:
           type: string
         prompt:
@@ -14806,6 +16174,8 @@ components:
       type: object
     SpawnSessionResponse:
       properties:
+        pipeline:
+          $ref: '#/components/schemas/PipelineIntentView'
         promptBytes:
           type: integer
         session:
@@ -14885,6 +16255,23 @@ components:
       required:
       - targetAccountId
       - idempotencyKey
+      type: object
+    StartPipelineRequest:
+      properties:
+        overrides:
+          additionalProperties:
+            $ref: '#/components/schemas/PipelineStageOverride'
+          type: object
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
+        workflowId:
+          type: string
+      required:
+      - workflowId
+      - requestedBy
       type: object
     StartPreviewServerRequest:
       properties:
@@ -14989,6 +16376,54 @@ components:
       required:
       - sourceGenerationId
       - handoff
+      type: object
+    SubmitPipelineResultRequest:
+      properties:
+        attemptId:
+          type: string
+        controllerGeneration:
+          type: string
+        expectedInputCommit:
+          type: string
+        idempotencyKey:
+          type: string
+        outcome:
+          enum:
+          - succeeded
+          - failed
+          - production_defect
+          type: string
+        outputCommit:
+          type: string
+        report:
+          $ref: '#/components/schemas/PipelineStageReport'
+        runId:
+          type: string
+        summary:
+          type: string
+      required:
+      - runId
+      - attemptId
+      - controllerGeneration
+      - idempotencyKey
+      - outcome
+      - expectedInputCommit
+      type: object
+    SubmitPipelineResultResponse:
+      properties:
+        accepted:
+          type: boolean
+        attempt:
+          $ref: '#/components/schemas/PipelineAttemptView'
+        replayed:
+          type: boolean
+        run:
+          $ref: '#/components/schemas/PipelineRunView'
+      required:
+      - run
+      - attempt
+      - accepted
+      - replayed
       type: object
     SubmitReviewInput:
       properties:

@@ -172,6 +172,12 @@ func WithTelemetry(sink ports.EventSink) Option {
 	return func(m *Manager) { m.telemetry = sink }
 }
 
+// WithPipelineGuard keeps merge-driven completion/cleanup from tearing down a
+// session whose pipeline run has not finished.
+func WithPipelineGuard(g ports.PipelineGuard) Option {
+	return func(m *Manager) { m.pipelines = g }
+}
+
 // WithContainerReaper wires the container leg of #2652: MarkTerminated will
 // force-remove the terminated session's ao.session-labeled Docker containers,
 // unless the project opts out via ProjectConfig.ContainerReap.Disabled.
@@ -235,6 +241,7 @@ type Manager struct {
 	usageFinalizer   sessionUsageFinalizer
 	usageReactivator sessionUsageReactivator
 	containers       ports.ContainerReaper
+	pipelines        ports.PipelineGuard
 	projects         projectConfigLoader
 	operationGateMu  sync.RWMutex
 	operationGate    sessionOperationGate

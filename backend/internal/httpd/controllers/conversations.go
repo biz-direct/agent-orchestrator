@@ -943,6 +943,10 @@ func writeConversationError(w http.ResponseWriter, r *http.Request, err error) {
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found",
 			"SESSION_NOT_FOUND", "session not found", nil)
 
+	case errors.Is(err, ports.ErrPipelineExecutionOwned):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict",
+			"PIPELINE_EXECUTION_OWNED", err.Error(), nil)
+
 	case errors.Is(err, chatsvc.ErrNotChatMode):
 		// Permanent for this request: retry only after an explicit interface switch.
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict",

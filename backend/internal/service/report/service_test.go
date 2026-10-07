@@ -101,3 +101,67 @@ func TestCreateDefendsValidationAndOwnership(t *testing.T) {
 		})
 	}
 }
+
+type fakePipelineGuard struct{ unfinished bool }
+
+func (g fakePipelineGuard) SuppressesLifecycleShortcuts(context.Context, domain.SessionID) bool {
+	return g.unfinished
+}
+
+// A worker's own "done" is a claim, not completion, while its pipeline run is
+// unfinished: it reaches the orchestrator as a labelled checkpoint instead.
+func TestWorkerDoneDuringAnUnfinishedPipelineIsAnInformationalCheckpoint(t *testing.T) {
+	now := time.Date(2026, 9, 7, 1, 2, 3, 0, time.UTC)
+	newSvc := func(g fakePipelineGuard) (*Service, *fakeStore) {
+		st := &fakeStore{ok: true, session: domain.SessionRecord{ID: "ao-7", ProjectID: "ao", Kind: domain.KindWorker}}
+		return New(Deps{Store: st, Pipelines: g, Now: func() time.Time { return now }, NewID: func() string { return "rpt_1" }}), st
+	}
+
+	svc, st := newSvc(fakePipelineGuard{unfinished: true})
+	got, err := svc.Create(context.Background(), CreateInput{SessionID: "ao-7", State: domain.ReportDone, Note: "all finished"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != domain.ReportCheckpoint || got.SettlementDeadline != (time.Time{}) || !got.AvailableAt.Equal(now.Add(domain.ReportBatchFallback)) {
+		t.Fatalf("done must not open a completion settlement window mid-pipeline: %+v", got)
+	}
+	if got.Note == "all finished" || len(got.Note) < len("all finished") || !contains(got.Note, "not task completion") || !contains(got.Note, "all finished") {
+		t.Fatalf("the worker's words are kept under an explanation: %q", got.Note)
+	}
+	if st.created.State != domain.ReportCheckpoint {
+		t.Fatalf("stored: %+v", st.created)
+	}
+
+	// A very long note still fits the report limit.
+	long := make([]rune, domain.MaxReportTextCharacters)
+	for i := range long {
+		long[i] = 'x'
+	}
+	got, err = svc.Create(context.Background(), CreateInput{SessionID: "ao-7", State: domain.ReportDone, Note: string(long)})
+	if err != nil || len([]rune(got.Note)) > domain.MaxReportTextCharacters {
+		t.Fatalf("note length %d err=%v", len([]rune(got.Note)), err)
+	}
+
+	// Other states are untouched, and a finished or absent pipeline changes nothing.
+	got, _ = svc.Create(context.Background(), CreateInput{SessionID: "ao-7", State: domain.ReportStuck, Note: "blocked"})
+	if got.State != domain.ReportStuck || got.Note != "blocked" {
+		t.Fatalf("%+v", got)
+	}
+	for name, s := range map[string]*Service{"finished pipeline": mustSvc(newSvc(fakePipelineGuard{})), "no pipelines": New(Deps{Store: &fakeStore{ok: true, session: domain.SessionRecord{ID: "ao-7", ProjectID: "ao", Kind: domain.KindWorker}}, Now: func() time.Time { return now }})} {
+		got, err := s.Create(context.Background(), CreateInput{SessionID: "ao-7", State: domain.ReportDone, Note: "finished"})
+		if err != nil || got.State != domain.ReportDone || got.Note != "finished" {
+			t.Fatalf("%s: %+v err=%v", name, got, err)
+		}
+	}
+}
+
+func mustSvc(s *Service, _ *fakeStore) *Service { return s }
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

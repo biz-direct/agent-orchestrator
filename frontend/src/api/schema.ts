@@ -1158,6 +1158,58 @@ export interface paths {
         patch: operations["setProjectPermissions"];
         trace?: never;
     };
+    "/api/v1/projects/{id}/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover and validate the project's repository-defined profiles and pipelines */
+        get: operations["getProjectPipelines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/pipelines/command-trust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Authorize or revoke AO running validation commands declared in repository pipeline profiles */
+        put: operations["setProjectPipelineCommandTrust"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/pipelines/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the project-default pipeline selection and its availability */
+        get: operations["getProjectDefaultPipeline"];
+        /** Save or clear the project-default pipeline without replacing other project settings */
+        put: operations["setProjectDefaultPipeline"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/tasks/prepare": {
         parameters: {
             query?: never;
@@ -2163,6 +2215,58 @@ export interface paths {
         post: operations["pinSession"];
         /** Unpin a session */
         delete: operations["unpinSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/pipeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the task's pipeline run (latest), with stages, attempts, checkpoint, and rejections */
+        get: operations["getSessionPipeline"];
+        put?: never;
+        /** Start a snapshotted pipeline run on an existing worker task */
+        post: operations["startSessionPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/pipeline/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause, resume, or cancel the task's pipeline run, or authorize additional repairs (human only) */
+        post: operations["controlSessionPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/pipeline/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit an idempotent, revision-bound stage result for the active attempt */
+        post: operations["submitSessionPipelineResult"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3968,12 +4072,14 @@ export interface components {
             /** @enum {string} */
             mode?: "tui" | "chat";
             model?: string;
+            pipeline?: components["schemas"]["PipelineSelection"];
             projectId: string;
             taskPreparation?: string;
         };
         DelegateTaskResponse: {
             ok: boolean;
             orchestratorId?: string;
+            pipeline?: components["schemas"]["PipelineIntentView"];
             workerId: string;
         };
         DesktopWorkspaceLocationResponse: {
@@ -4490,6 +4596,361 @@ export interface components {
             targetSha: string;
             title: string;
         };
+        PipelineAttemptView: {
+            attemptNo: number;
+            controllerGeneration?: string;
+            conversationSessionId?: string;
+            executorSessionId: string;
+            feedback?: components["schemas"]["PipelineFeedback"];
+            /** Format: date-time */
+            finishedAt?: null | string;
+            id: string;
+            inputCommit?: string;
+            /** @enum {string} */
+            instructionDelivery: "pending" | "delivered" | "failed";
+            noChange: boolean;
+            outcome?: string;
+            outputCommit?: string;
+            predecessorAttemptId?: string;
+            repairSourceAttemptId?: string;
+            report?: components["schemas"]["PipelineStageReport"];
+            stageId: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** @enum {string} */
+            state: "active" | "accepted" | "failed" | "interrupted" | "cancelled";
+            summary?: string;
+            validation: components["schemas"]["PipelineCommandResultView"][];
+        };
+        PipelineCheckpointView: {
+            inputCommit: string;
+            noChange: boolean;
+            outputCommit: string;
+            stageId: string;
+        };
+        PipelineCommandResultView: {
+            command: string;
+            commandId: string;
+            detail?: string;
+            /** Format: int64 */
+            durationMs: number;
+            exitCode: number;
+            /** Format: date-time */
+            finishedAt?: null | string;
+            log?: string;
+            logTruncated: boolean;
+            required: boolean;
+            revision: string;
+            round: number;
+            /** Format: date-time */
+            startedAt: string;
+            /** @enum {string} */
+            status: "running" | "passed" | "failed" | "operational" | "timeout" | "cancelled" | "skipped" | "unknown";
+        };
+        PipelineCommandTrust: {
+            trusted: boolean;
+        };
+        PipelineControlRequest: {
+            /** @enum {string} */
+            action: "pause" | "resume" | "cancel" | "authorize_repairs";
+            additionalRepairs?: number;
+            /** Format: int64 */
+            expectedRevision?: number;
+            reason?: string;
+            /** @enum {string} */
+            recovery?: "restore_conversation";
+            requestKey?: string;
+            /** @enum {string} */
+            requestedBy: "user" | "orchestrator";
+            runId: string;
+        };
+        PipelineControlResponse: {
+            changed: boolean;
+            run: components["schemas"]["PipelineRunView"];
+            stop?: components["schemas"]["PipelineStopView"];
+        };
+        PipelineControlView: {
+            canCancel: boolean;
+            canPause: boolean;
+            canResume: boolean;
+            lastRecovery?: components["schemas"]["PipelinerunsRecoveryView"];
+            lastStop?: components["schemas"]["PipelineStopView"];
+            needsRepairAuthorization: boolean;
+            recoveryOptions: string[];
+            resumeNeedsUser: boolean;
+        };
+        PipelineDiagnostic: {
+            field?: string;
+            file?: string;
+            message: string;
+        };
+        PipelineEventView: {
+            /** Format: date-time */
+            at: string;
+            attemptId?: string;
+            kind: string;
+            message?: string;
+        };
+        PipelineEvidenceView: {
+            attemptId: string;
+            commands: number;
+            current: boolean;
+            defects: number;
+            findings: number;
+            outcome: string;
+            profile?: string;
+            remainingIssues: number;
+            revision: string;
+            stageId: string;
+        };
+        PipelineFeedback: {
+            defects: components["schemas"]["PipelineReportDefect"][];
+            failedChecks: components["schemas"]["PipelineFeedbackCheck"][];
+            githubReviewId?: string;
+            /** @enum {string} */
+            kind: "production_defect" | "validation_failed" | "review_feedback";
+            remainingIssues: string[];
+            reviewBody?: string;
+            reviewRunId?: string;
+            revision: string;
+            sourceAttemptId: string;
+            sourceStageId: string;
+            summary: string;
+        };
+        PipelineFeedbackCheck: {
+            command: string;
+            commandId: string;
+            exitCode: number;
+            output?: string;
+            revision: string;
+        };
+        PipelineIntentView: {
+            detail?: string;
+            normalWorker: boolean;
+            runId?: string;
+            /** @enum {string} */
+            source: "explicit" | "default";
+            /** @enum {string} */
+            state: "pending" | "started" | "skipped" | "failed";
+            workflowId?: string;
+        };
+        PipelineProfile: {
+            allowedPaths: string[];
+            definitionSha256: string;
+            description: string;
+            harness?: string;
+            id: string;
+            instructionsSha256: string;
+            instructionsSource: string;
+            model?: string;
+            validation: components["schemas"]["PipelineValidationCommand"][];
+        };
+        PipelineProfileEntry: {
+            diagnostics: components["schemas"]["PipelineDiagnostic"][];
+            file: string;
+            id: string;
+            profile?: components["schemas"]["PipelineProfile"];
+            valid: boolean;
+        };
+        PipelineRejectionView: {
+            /** Format: date-time */
+            at: string;
+            code: string;
+            message: string;
+            paths?: string[];
+        };
+        PipelineRepairGrantView: {
+            amount: number;
+            authorizedBy: string;
+            /** Format: date-time */
+            createdAt: string;
+            note?: string;
+        };
+        PipelineRepairView: {
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            kind: "production_defect" | "validation_failed" | "review_feedback";
+            ordinal: number;
+            returnStageId: string;
+            sourceAttemptId: string;
+            sourceStageId: string;
+            targetStageId: string;
+        };
+        PipelineReportCommand: {
+            command: string;
+            exitCode: number;
+            summary?: string;
+        };
+        PipelineReportDefect: {
+            description: string;
+            paths?: string[];
+        };
+        PipelineReportFinding: {
+            criterion: string;
+            evidence?: string;
+            /** @enum {string} */
+            status: "met" | "unmet" | "not_applicable" | "unverified";
+        };
+        PipelineReviewEvidenceView: {
+            attemptId: string;
+            current: boolean;
+            headSha?: string;
+            outcome?: string;
+            prUrl?: string;
+            reviewRunId?: string;
+            revision: string;
+            stageId: string;
+            summary?: string;
+        };
+        PipelineReviewGateView: {
+            autoReview: boolean;
+            checkpoint: string;
+            /** @enum {string} */
+            ci?: "passing" | "no_checks" | "non_required_failing" | "pending" | "failing" | "unknown";
+            ciDetail?: string;
+            code: string;
+            headSha?: string;
+            manual: boolean;
+            message: string;
+            prNumber?: number;
+            prUrl?: string;
+            reviewRunId?: string;
+            reviewStatus?: string;
+            /** @enum {string} */
+            state: "waiting" | "ready" | "blocked";
+            verdict?: string;
+        };
+        PipelineRunEnvelope: {
+            intent?: components["schemas"]["PipelineIntentView"];
+            run: null | components["schemas"]["PipelineRunView"];
+        };
+        PipelineRunView: {
+            attempts: components["schemas"]["PipelineAttemptView"][];
+            checkpoint?: components["schemas"]["PipelineCheckpointView"];
+            /** Format: date-time */
+            completedAt?: null | string;
+            control: components["schemas"]["PipelineControlView"];
+            /** Format: date-time */
+            createdAt: string;
+            currentStageId?: string;
+            events: components["schemas"]["PipelineEventView"][];
+            evidence: components["schemas"]["PipelineEvidenceView"][];
+            expectedBranch?: string;
+            id: string;
+            lastRejection?: components["schemas"]["PipelineRejectionView"];
+            pauseDetail?: string;
+            pauseReason?: string;
+            projectId: string;
+            repairBudget: number;
+            repairGrants: components["schemas"]["PipelineRepairGrantView"][];
+            repairs: components["schemas"]["PipelineRepairView"][];
+            repairsRemaining: number;
+            repairsUsed: number;
+            /** @enum {string} */
+            requestedBy: "user" | "orchestrator";
+            reviewGate?: components["schemas"]["PipelineReviewGateView"];
+            reviews: components["schemas"]["PipelineReviewEvidenceView"][];
+            /** Format: int64 */
+            revision: number;
+            sessionId: string;
+            snapshotCapturedAt: string;
+            snapshotSha256: string;
+            stages: components["schemas"]["PipelineStageView"][];
+            /** @enum {string} */
+            state: "running" | "paused" | "completed" | "cancelled";
+            /** Format: date-time */
+            updatedAt: string;
+            workflowId: string;
+        };
+        PipelineSelection: {
+            /** @enum {string} */
+            mode: "normal_worker" | "workflow";
+            workflowId?: string;
+        };
+        PipelineStage: {
+            description?: string;
+            id: string;
+            kind: string;
+            profile?: string;
+            repairTo?: string;
+        };
+        PipelineStageOverride: {
+            harness?: string;
+            model?: string;
+        };
+        PipelineStageReport: {
+            commands: components["schemas"]["PipelineReportCommand"][];
+            defects: components["schemas"]["PipelineReportDefect"][];
+            findings: components["schemas"]["PipelineReportFinding"][];
+            remainingIssues: string[];
+        };
+        PipelineStageView: {
+            allowedPaths?: string[];
+            harness?: string;
+            id: string;
+            kind: string;
+            model?: string;
+            profile?: string;
+            repairTo?: string;
+            settingsSource: string;
+            /** @enum {string} */
+            state: "pending" | "handoff" | "active" | "validating" | "accepted" | "failed" | "interrupted" | "paused";
+        };
+        PipelineStopView: {
+            confirmed: boolean;
+            detail?: string;
+            requested: boolean;
+        };
+        PipelineValidationCommand: {
+            command: string;
+            id: string;
+            required: boolean;
+            timeoutSeconds: number;
+        };
+        PipelineWorkflow: {
+            definitionSha256: string;
+            description: string;
+            id: string;
+            instructionsSha256?: string;
+            instructionsSource?: string;
+            repairBudget: number;
+            stages: components["schemas"]["PipelineStage"][];
+        };
+        PipelinerunsRecoveryView: {
+            /** Format: date-time */
+            at: string;
+            message: string;
+            /** @enum {string} */
+            outcome: "continued" | "retrying" | "paused";
+        };
+        PipelinesCatalogResponse: {
+            commandsTrusted: boolean;
+            default: components["schemas"]["PipelinesDefaultStatus"];
+            diagnostics: components["schemas"]["PipelineDiagnostic"][];
+            profiles: components["schemas"]["PipelineProfileEntry"][];
+            projectId: string;
+            workflows: components["schemas"]["PipelinesWorkflowView"][];
+        };
+        PipelinesDefaultStatus: {
+            executable: boolean;
+            message: string;
+            selection: null | components["schemas"]["PipelineSelection"];
+            /** @enum {string} */
+            state: "unset" | "normal_worker" | "workflow_available" | "workflow_unavailable" | "workflow_invalid" | "workflow_missing";
+        };
+        PipelinesSetDefaultInput: {
+            selection: null | components["schemas"]["PipelineSelection"];
+        };
+        PipelinesWorkflowView: {
+            diagnostics: components["schemas"]["PipelineDiagnostic"][];
+            executable: boolean;
+            file: string;
+            id: string;
+            unavailableReason?: string;
+            valid: boolean;
+            workflow?: components["schemas"]["PipelineWorkflow"];
+        };
         PrepareTaskResponse: {
             ok: boolean;
             taskPreparation?: string;
@@ -4538,6 +4999,7 @@ export interface components {
             canonicalRepoURL?: string;
             containerReap?: components["schemas"]["ContainerReapConfig"];
             defaultBranch?: string;
+            defaultPipeline?: components["schemas"]["PipelineSelection"];
             env?: {
                 [key: string]: string;
             };
@@ -4548,6 +5010,7 @@ export interface components {
             sessionPrefix?: string;
             symlinks?: string[];
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
+            trustPipelineCommands?: boolean;
             worker?: components["schemas"]["RoleOverride"];
         };
         ProjectGetResponse: {
@@ -5024,6 +5487,11 @@ export interface components {
         SetConversationTitleResponse: {
             title: string;
         };
+        SetPipelineCommandTrustRequest: {
+            /** @enum {string} */
+            requestedBy: "user" | "orchestrator";
+            trusted: boolean;
+        };
         SetProjectConfigInput: {
             config: components["schemas"]["ProjectConfig"];
         };
@@ -5138,12 +5606,14 @@ export interface components {
             mode?: "chat" | "tui";
             model?: string;
             parentSessionId?: string;
+            pipeline?: components["schemas"]["PipelineSelection"];
             projectId?: string;
             prompt?: string;
             /** @enum {string} */
             trackerProvider?: "github" | "gitlab";
         };
         SpawnSessionResponse: {
+            pipeline?: components["schemas"]["PipelineIntentView"];
             promptBytes: number;
             session: components["schemas"]["ControllersSessionView"];
             systemPromptBytes: number;
@@ -5176,6 +5646,14 @@ export interface components {
             expectedAccountRevision?: null | number;
             idempotencyKey: string;
             targetAccountId: string;
+        };
+        StartPipelineRequest: {
+            overrides?: {
+                [key: string]: components["schemas"]["PipelineStageOverride"];
+            };
+            /** @enum {string} */
+            requestedBy: "user" | "orchestrator";
+            workflowId: string;
         };
         StartPreviewServerRequest: {
             /** @description Named preview configuration. Optional when exactly one configuration exists. */
@@ -5219,6 +5697,24 @@ export interface components {
             handoff: unknown;
             /** @description Source invocation generation that authored this handoff. */
             sourceGenerationId: string;
+        };
+        SubmitPipelineResultRequest: {
+            attemptId: string;
+            controllerGeneration: string;
+            expectedInputCommit: string;
+            idempotencyKey: string;
+            /** @enum {string} */
+            outcome: "succeeded" | "failed" | "production_defect";
+            outputCommit?: string;
+            report?: components["schemas"]["PipelineStageReport"];
+            runId: string;
+            summary?: string;
+        };
+        SubmitPipelineResultResponse: {
+            accepted: boolean;
+            attempt: components["schemas"]["PipelineAttemptView"];
+            replayed: boolean;
+            run: components["schemas"]["PipelineRunView"];
         };
         SubmitReviewInput: {
             /** @description Review body recorded by AO. Required for changes_requested. */
@@ -9601,6 +10097,205 @@ export interface operations {
             };
         };
     };
+    getProjectPipelines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesCatalogResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setProjectPipelineCommandTrust: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPipelineCommandTrustRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineCommandTrust"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getProjectDefaultPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesDefaultStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setProjectDefaultPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelinesSetDefaultInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesDefaultStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     prepareTask: {
         parameters: {
             query?: never;
@@ -13616,6 +14311,254 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSessionPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startSessionPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartPipelineRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunEnvelope"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    controlSessionPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineControlRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineControlResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    submitSessionPipelineResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitPipelineResultRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitPipelineResultResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

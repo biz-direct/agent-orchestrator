@@ -9,15 +9,15 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/devimport"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/legacyimport"
+	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentauth"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systemcheck"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systeminstall"
-
-	"github.com/aoagents/agent-orchestrator/backend/internal/mobilebridge"
 )
 
 // CreateReportRequest is the local caller-to-daemon report submission contract.
@@ -406,6 +406,11 @@ type SpawnSessionRequest struct {
 	// its bytes as standard base64 (no data: URL prefix). The daemon writes them
 	// into the session worktree and appends path references to the prompt.
 	Attachments []AttachmentInput `json:"attachments,omitempty"`
+	// Pipeline is an optional explicit choice for this task: a repository
+	// workflow, or the normal worker. Omitted, the project's default workflow
+	// applies. An unusable choice fails the request instead of quietly producing
+	// a normal worker.
+	Pipeline *domain.PipelineSelection `json:"pipeline,omitempty"`
 }
 
 // AttachmentInput is one file attached to a spawn, delegate, stage, or send
@@ -431,6 +436,9 @@ type SpawnSessionResponse struct {
 	Session           SessionView `json:"session"`
 	PromptBytes       int         `json:"promptBytes"`
 	SystemPromptBytes int         `json:"systemPromptBytes"`
+	// Pipeline is the workflow that will start on this task once it is ready,
+	// or the reason it will not. Absent for an ordinary worker.
+	Pipeline *pipelineruns.IntentView `json:"pipeline,omitempty"`
 }
 
 // SwitchAgentRequest is the body of POST /api/v1/sessions/{sessionId}/switch-agent.
@@ -1035,6 +1043,10 @@ type DelegateTaskRequest struct {
 	// TaskPreparation is the opaque worktree token returned while the New Task
 	// dialog is open. Missing or expired tokens fall back to normal creation.
 	TaskPreparation string `json:"taskPreparation,omitempty"`
+	// Pipeline is an optional explicit choice for this task: a repository
+	// workflow, or the normal worker. Omitted, the project's default workflow
+	// applies.
+	Pipeline *domain.PipelineSelection `json:"pipeline,omitempty"`
 }
 
 // PrepareTaskResponse returns the opaque token for a speculative task workspace.
@@ -1049,6 +1061,9 @@ type DelegateTaskResponse struct {
 	OK             bool             `json:"ok"`
 	WorkerID       domain.SessionID `json:"workerId"`
 	OrchestratorID domain.SessionID `json:"orchestratorId,omitempty"`
+	// Pipeline is the workflow that will start on the new task once it is ready,
+	// or the reason it will not. Absent for an ordinary worker.
+	Pipeline *pipelineruns.IntentView `json:"pipeline,omitempty"`
 }
 
 // SessionPRFacts is the pull-request read shape returned under session PR routes.

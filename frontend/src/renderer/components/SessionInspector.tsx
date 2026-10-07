@@ -49,6 +49,7 @@ import { captureRendererEvent } from "../lib/telemetry";
 import { formatTimeCompact } from "../lib/format-time";
 import { AgentAvatar } from "./AgentAvatar";
 import { OrchestratorChildrenSection } from "./OrchestratorChildrenSection";
+import { SessionPipelineSection } from "./SessionPipelineSection";
 import { ProductExternalLink } from "./ProductExternalLink";
 import { CopyButton } from "./chat/CopyButton";
 import { ResumeAgentControl } from "./ResumeAgentControl";
@@ -399,6 +400,7 @@ const SummaryView = memo(function SummaryView({
 			}
 			activityTitle={t("inspector.activity")}
 			completion={<SessionControls hostId={hostId} session={session} />}
+			context={<SessionPipelineSection hostId={hostId} session={session} />}
 			pullRequestCards={
 				<div className="flex flex-col gap-1.5">
 					{hasPRs ? (

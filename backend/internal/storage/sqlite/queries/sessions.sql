@@ -224,7 +224,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, effort, session_permissions,
     provision_state, provision_error, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts
-FROM sessions WHERE project_id IS ? ORDER BY num;
+FROM sessions WHERE project_id IS ? AND attached_to_session_id = '' ORDER BY num;
 
 -- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
@@ -241,7 +241,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     native_transcript_path, auto_inject_review, auto_inject_ci, auto_review_enabled, model, effort, session_permissions,
     provision_state, provision_error, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts
-FROM sessions ORDER BY project_id, num;
+FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num;
 
 -- name: PromoteTaskPreparation :execrows
 -- Claim the hidden row without touching branch/workspace facts that may be
@@ -363,6 +363,21 @@ SELECT EXISTS(
       AND latest_assistant_update = ''
       AND native_transcript_path = ''
 ) AS is_seed;
+
+-- name: SetSessionAttachedTo :exec
+UPDATE sessions SET attached_to_session_id = ? WHERE id = ?;
+
+-- name: GetSessionAttachedTo :one
+SELECT attached_to_session_id FROM sessions WHERE id = ?;
+
+-- name: SetSessionAttachedAttempt :exec
+UPDATE sessions SET attached_for_attempt_id = ? WHERE id = ?;
+
+-- name: GetAttachedSessionIDForAttempt :one
+SELECT id FROM sessions WHERE attached_for_attempt_id = ?;
+
+-- name: ListAttachedSessionIDs :many
+SELECT id FROM sessions WHERE attached_to_session_id = ? ORDER BY created_at, id;
 
 -- NOTE: the `DELETE FROM sessions WHERE id = ? AND <seed-state predicates>`
 -- statement is intentionally NOT a sqlc query — same sqlc 1.31 SQLite-parser

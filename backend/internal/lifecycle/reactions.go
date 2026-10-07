@@ -62,6 +62,12 @@ func (m *Manager) ApplyReviewBatch(ctx context.Context, workerID domain.SessionI
 	if m.guard == nil {
 		return ReviewDeliveryNoop, nil
 	}
+	// A task owned by an unfinished pipeline run takes review feedback through
+	// the run, not through a direct nudge that could wake a session the run has
+	// deliberately stopped. The run stays undelivered so nothing is lost.
+	if m.pipelines != nil && m.pipelines.SuppressesLifecycleShortcuts(ctx, workerID) {
+		return ReviewDeliveryNoop, nil
+	}
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].PRURL != results[j].PRURL {
 			return results[i].PRURL < results[j].PRURL
@@ -167,6 +173,13 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			return err
 		}
 		if rec.IsTerminated || !rec.TerminateOnPRMerge {
+			return nil
+		}
+		// An unfinished pipeline run still owns this worker's lifecycle: a merge
+		// must not tear it down before the pipeline reaches its completion gate.
+		// The observer keeps the terminal PR discoverable, so the next poll
+		// re-runs this reaction once the run has finished.
+		if m.pipelines != nil && m.pipelines.SuppressesLifecycleShortcuts(ctx, id) {
 			return nil
 		}
 		// A merge must not race the still-working agent (#2879). A session whose
@@ -349,6 +362,14 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// signature; rearmErr is surfaced at the end of this function alongside the
 	// other deferred read errors.
 
+	// An unfinished pipeline run owns the task's executors: a CI, review-comment,
+	// or merge-conflict nudge must not wake a session the run has stopped, or
+	// reach one that is not the active stage. The run carries review feedback
+	// itself, and nothing here is recorded as sent, so a nudge that still applies
+	// fires normally once the run has finished.
+	if len(nudges) > 0 && m.pipelines != nil && m.pipelines.SuppressesLifecycleShortcuts(ctx, id) {
+		nudges = nil
+	}
 	for _, n := range nudges {
 		if _, err := m.sendOnce(ctx, id, o.URL, n.key, n.sig, n.msg, n.maxAttempts, n.urgent); err != nil {
 			return err

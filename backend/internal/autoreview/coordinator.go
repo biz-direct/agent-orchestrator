@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 )
 
@@ -53,6 +54,7 @@ type Coordinator struct {
 	idleThreshold time.Duration
 	sweepInterval time.Duration
 	logger        *slog.Logger
+	pipelines     ports.PipelineGuard
 }
 
 // Config customizes coordinator timing and logging.
@@ -61,11 +63,14 @@ type Config struct {
 	IdleThreshold time.Duration
 	SweepInterval time.Duration
 	Logger        *slog.Logger
+	// Pipelines suppresses automatic review while a pipeline run owns the
+	// session. Nil leaves every worker's behavior unchanged.
+	Pipelines ports.PipelineGuard
 }
 
 // New constructs an auto-review coordinator.
 func New(store Store, reviews Trigger, cfg Config) *Coordinator {
-	c := &Coordinator{store: store, reviews: reviews, clock: cfg.Clock, idleThreshold: cfg.IdleThreshold, sweepInterval: cfg.SweepInterval, logger: cfg.Logger}
+	c := &Coordinator{store: store, reviews: reviews, clock: cfg.Clock, idleThreshold: cfg.IdleThreshold, sweepInterval: cfg.SweepInterval, logger: cfg.Logger, pipelines: cfg.Pipelines}
 	if c.clock == nil {
 		c.clock = time.Now
 	}
@@ -93,6 +98,9 @@ func (c *Coordinator) EvaluateSession(ctx context.Context, id domain.SessionID) 
 	}
 	if reason := sessionGate(session, c.clock(), c.idleThreshold); reason != "" {
 		return Result{Reason: reason}, nil
+	}
+	if c.pipelines != nil && c.pipelines.SuppressesLifecycleShortcuts(ctx, id) {
+		return Result{Reason: "pipeline_active"}, nil
 	}
 	project, ok, err := c.store.GetProject(ctx, string(session.ProjectID))
 	if err != nil || !ok {

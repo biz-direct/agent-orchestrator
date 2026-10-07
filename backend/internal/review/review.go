@@ -78,6 +78,9 @@ type Deps struct {
 	PRs      PRs
 	Projects Projects
 	Launcher Launcher
+	// Pipelines keeps automatic review from starting while a pipeline run owns
+	// the worker. Nil leaves ordinary review behavior unchanged.
+	Pipelines ports.PipelineGuard
 
 	// Clock and NewID are injectable for deterministic tests.
 	Clock func() time.Time
@@ -86,13 +89,14 @@ type Deps struct {
 
 // Engine is the core code-review engine.
 type Engine struct {
-	store    Store
-	sessions Sessions
-	prs      PRs
-	projects Projects
-	launcher Launcher
-	clock    func() time.Time
-	newID    func() string
+	store     Store
+	sessions  Sessions
+	prs       PRs
+	projects  Projects
+	launcher  Launcher
+	pipelines ports.PipelineGuard
+	clock     func() time.Time
+	newID     func() string
 
 	// triggerMu guards triggerLocks; triggerLocks holds one mutex per worker
 	// session so concurrent Trigger calls for the same worker serialise (see
@@ -119,6 +123,7 @@ func New(d Deps) *Engine {
 		prs:          d.PRs,
 		projects:     d.Projects,
 		launcher:     d.Launcher,
+		pipelines:    d.Pipelines,
 		clock:        clock,
 		newID:        newID,
 		triggerLocks: make(map[domain.SessionID]*sync.Mutex),
@@ -267,6 +272,21 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 	if source == domain.ReviewTriggerAuto {
 		if reason := autoReviewSessionReason(worker, e.clock()); reason != "" {
 			return TriggerResult{SkipReason: reason}, nil
+		}
+		// A pipeline's own Review stage passes the bypass marker; every other
+		// automatic trigger stays out of the way of an unfinished run.
+		if e.pipelines != nil && !ports.PipelineBypass(ctx) && e.pipelines.SuppressesLifecycleShortcuts(ctx, workerID) {
+			return TriggerResult{SkipReason: "pipeline_active"}, nil
+		}
+	}
+	// Manual passes are gated too: a task whose pipeline run is still in Build or
+	// Test must not be reviewed early, or an idle worker's trigger would bypass
+	// the stages in front of Review.
+	if source == domain.ReviewTriggerManual && e.pipelines != nil && !ports.PipelineBypass(ctx) {
+		if g, ok := e.pipelines.(ports.PipelineReviewGuard); ok {
+			if allowed, reason := g.ReviewTriggerAllowed(ctx, workerID); !allowed {
+				return TriggerResult{}, fmt.Errorf("%w: %s", ports.ErrPipelineReviewNotReady, reason)
+			}
 		}
 	}
 	if worker.IsTerminated {

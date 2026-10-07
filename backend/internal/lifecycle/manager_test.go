@@ -2599,6 +2599,49 @@ func TestPRObservation_CIFailingNudgesAgentWithLogs(t *testing.T) {
 	}
 }
 
+// While a pipeline run owns the task, CI nudges must not wake or reach a stage
+// that is not executing; once the run is finished the same nudge fires normally.
+func TestPRObservation_CINudgeDefersToUnfinishedPipeline(t *testing.T) {
+	for name, tc := range map[string]struct {
+		guard ports.PipelineGuard
+		want  int
+	}{
+		"no pipelines":        {guard: nil, want: 1},
+		"finished pipeline":   {guard: fakePipelineGuard{suppress: false}, want: 1},
+		"unfinished pipeline": {guard: fakePipelineGuard{suppress: true}, want: 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := newFakeStore()
+			st.sessions["mer-1"] = working("mer-1")
+			msg := &fakeMessenger{}
+			opts := []Option{}
+			if tc.guard != nil {
+				opts = append(opts, WithPipelineGuard(tc.guard))
+			}
+			m := New(st, msg, opts...)
+			o := ports.PRObservation{Fetched: true, URL: "pr1", CI: domain.CIFailing, Checks: []ports.PRCheckObservation{
+				{Name: "build", CommitHash: "c1", Status: domain.PRCheckFailed, URL: "https://ci.example/build", LogTail: "boom"},
+			}}
+			if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+				t.Fatal(err)
+			}
+			if len(msg.msgs) != tc.want {
+				t.Fatalf("nudges = %d, want %d: %v", len(msg.msgs), tc.want, msg.msgs)
+			}
+			if tc.want == 0 {
+				// Nothing was recorded as sent, so the nudge re-fires after the run.
+				m2 := New(st, msg)
+				if err := m2.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+					t.Fatal(err)
+				}
+				if len(msg.msgs) != 1 {
+					t.Fatalf("a held nudge must fire once the pipeline finishes: %v", msg.msgs)
+				}
+			}
+		})
+	}
+}
+
 func TestPRObservation_CancelledChecksDoNotNudge(t *testing.T) {
 	m, st, msg := newManager()
 	st.sessions["mer-1"] = working("mer-1")
@@ -3527,6 +3570,44 @@ func TestPRObservation_MergedUsesConfiguredTerminator(t *testing.T) {
 	}
 }
 
+type fakePipelineGuard struct{ suppress bool }
+
+func (g fakePipelineGuard) SuppressesLifecycleShortcuts(context.Context, domain.SessionID) bool {
+	return g.suppress
+}
+
+// A merge must not tear down a worker whose pipeline run has not finished; the
+// reaction re-runs on the next observation once the run is done.
+func TestPRObservation_MergedDefersCompletionWhilePipelineUnfinished(t *testing.T) {
+	for name, tc := range map[string]struct {
+		guard ports.PipelineGuard
+		want  int
+	}{
+		"no guard terminates as before": {guard: nil, want: 1},
+		"finished pipeline releases":    {guard: fakePipelineGuard{suppress: false}, want: 1},
+		"unfinished pipeline defers":    {guard: fakePipelineGuard{suppress: true}, want: 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, st, _ := newManager()
+			if tc.guard != nil {
+				WithPipelineGuard(tc.guard)(m)
+			}
+			terminator := &fakeCompletionTerminator{}
+			m.SetCompletionTerminator(terminator)
+			rec := exited("mer-1")
+			rec.TerminateOnPRMerge = true
+			st.sessions["mer-1"] = rec
+			st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1", Merged: true}}
+			if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
+				t.Fatal(err)
+			}
+			if terminator.calls != tc.want {
+				t.Fatalf("terminator calls = %d, want %d", terminator.calls, tc.want)
+			}
+		})
+	}
+}
+
 // TestPRObservation_MergedOnStillWorkingAgentDoesNotTerminate is the RED test
 // for #2879: an agent STILL CLIMBING (ActivityActive / `working`) with one PR
 // merged must NOT be flag-terminated. The merge may be PR #1 of several and
@@ -3816,6 +3897,41 @@ func TestApplyReviewBatchSuppressedByJITGuardIsNotDelivered(t *testing.T) {
 	}
 	if st.signatures[result.PRURL] != "" {
 		t.Fatal("suppressed nudge must not persist a sendOnce signature (it re-fires next observation)")
+	}
+}
+
+// A task owned by an unfinished pipeline run takes review feedback through the
+// run: the direct review nudge must neither reach nor wake the worker.
+func TestApplyReviewBatchDefersToUnfinishedPipeline(t *testing.T) {
+	for name, tc := range map[string]struct {
+		guard    ports.PipelineGuard
+		wantSent bool
+	}{
+		"no pipelines":        {guard: nil, wantSent: true},
+		"finished pipeline":   {guard: fakePipelineGuard{suppress: false}, wantSent: true},
+		"unfinished pipeline": {guard: fakePipelineGuard{suppress: true}, wantSent: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := newFakeStore()
+			st.sessions["mer-1"] = working("mer-1")
+			msg := &fakeMessenger{}
+			opts := []Option{}
+			if tc.guard != nil {
+				opts = append(opts, WithPipelineGuard(tc.guard))
+			}
+			m := New(st, msg, opts...)
+			result := ReviewResult{RunID: "run-1", BatchID: "batch-1", WorkerID: "mer-1", PRURL: "https://github.com/o/r/pull/1", TargetSHA: "sha1", Verdict: domain.VerdictChangesRequested, Body: "fix the bug"}
+			outcome, err := m.ApplyReviewBatch(ctx, "mer-1", "batch-1", []ReviewResult{result})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantSent && (outcome != ReviewDeliverySent || len(msg.msgs) != 1) {
+				t.Fatalf("outcome=%q msgs=%v, want one delivery", outcome, msg.msgs)
+			}
+			if !tc.wantSent && (outcome != ReviewDeliveryNoop || len(msg.msgs) != 0) {
+				t.Fatalf("outcome=%q msgs=%v, want no delivery so the run stays undelivered", outcome, msg.msgs)
+			}
+		})
 	}
 }
 

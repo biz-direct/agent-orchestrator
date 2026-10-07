@@ -295,3 +295,43 @@ func TestCoordinatorPeriodicallyEvaluatesPersistedFacts(t *testing.T) {
 	cancel()
 	<-done
 }
+
+type fakeGuard struct{ suppress bool }
+
+func (g fakeGuard) SuppressesLifecycleShortcuts(context.Context, domain.SessionID) bool {
+	return g.suppress
+}
+
+// A pipeline run that has not reached its review gate owns the worker: the
+// automatic reviewer must not start, whatever the idle/PR facts say. Ordinary
+// workers (no guard, or a guard that does not suppress) are unaffected.
+func TestEvaluateSessionRespectsPipelineGuard(t *testing.T) {
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	newStore := func() *fakeStore {
+		return &fakeStore{
+			session: domain.SessionRecord{ID: "s1", ProjectID: "p1", Kind: domain.KindWorker, Harness: domain.AgentHarness("codex"), AutoReviewEnabled: true, Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-time.Minute)}},
+			project: domain.ProjectRecord{ID: "p1"},
+			prs:     []domain.PullRequest{{URL: "pr1", Number: 1, HeadSHA: "sha1"}},
+		}
+	}
+	for name, tc := range map[string]struct {
+		guard         Config
+		wantTriggered bool
+		wantReason    string
+	}{
+		"no guard is an ordinary worker":      {guard: Config{Clock: func() time.Time { return now }}, wantTriggered: true},
+		"guard that does not suppress":        {guard: Config{Clock: func() time.Time { return now }, Pipelines: fakeGuard{}}, wantTriggered: true},
+		"unfinished pipeline suppresses auto": {guard: Config{Clock: func() time.Time { return now }, Pipelines: fakeGuard{suppress: true}}, wantReason: "pipeline_active"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			trigger := &fakeTrigger{}
+			result, err := New(newStore(), trigger, tc.guard).EvaluateSession(context.Background(), "s1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Triggered != tc.wantTriggered || (trigger.calls == 1) != tc.wantTriggered || (tc.wantReason != "" && result.Reason != tc.wantReason) {
+				t.Fatalf("triggered=%v calls=%d reason=%q", result.Triggered, trigger.calls, result.Reason)
+			}
+		})
+	}
+}

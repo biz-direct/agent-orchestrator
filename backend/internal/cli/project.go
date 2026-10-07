@@ -124,6 +124,13 @@ type projectConfig struct {
 	TrackerIntake     trackerIntakeConfig  `json:"trackerIntake,omitempty"`
 	AutoReview        bool                 `json:"autoReview,omitempty"`
 	Reviewers         []reviewerConfig     `json:"reviewers,omitempty"`
+	// DefaultPipeline round-trips the daemon's default-pipeline reference so
+	// project get/set-config JSON does not drop it. Use `ao pipeline default`
+	// to change it.
+	DefaultPipeline *pipelineSelectionDTO `json:"defaultPipeline,omitempty"`
+	// TrustPipelineCommands round-trips the user authorization for repository
+	// pipeline commands. Use `ao pipeline trust` to change it.
+	TrustPipelineCommands bool `json:"trustPipelineCommands,omitempty"`
 }
 
 // setConfigRequest mirrors the daemon's SetConfigInput body for

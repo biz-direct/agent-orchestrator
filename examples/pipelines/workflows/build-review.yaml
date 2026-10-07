@@ -1,0 +1,9 @@
+version: 1
+id: build-review
+description: Build with the regular worker, then AO's built-in review
+stages:
+  - id: build
+    kind: build
+  - id: review
+    kind: review
+    repairTo: build

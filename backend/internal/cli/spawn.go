@@ -34,6 +34,14 @@ type spawnOptions struct {
 	noTakeover      bool
 	skipAgentCheck  bool
 	trackerProvider string
+	pipeline        string
+	noPipeline      bool
+}
+
+// spawnPipelineSelection mirrors the daemon's PipelineSelection.
+type spawnPipelineSelection struct {
+	Mode       string `json:"mode"`
+	WorkflowID string `json:"workflowId,omitempty"`
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -50,6 +58,9 @@ type spawnRequest struct {
 	Prompt          string `json:"prompt,omitempty"`
 	Model           string `json:"model,omitempty"`
 	DisplayName     string `json:"displayName"`
+	// Pipeline is the explicit workflow or normal-worker choice; omitted, the
+	// project's default workflow (if any) applies.
+	Pipeline *spawnPipelineSelection `json:"pipeline,omitempty"`
 }
 
 type spawnResult struct {
@@ -60,6 +71,13 @@ type spawnResult struct {
 	} `json:"session"`
 	PromptBytes       int `json:"promptBytes,omitempty"`
 	SystemPromptBytes int `json:"systemPromptBytes,omitempty"`
+	Pipeline          *struct {
+		WorkflowID   string `json:"workflowId"`
+		NormalWorker bool   `json:"normalWorker"`
+		Source       string `json:"source"`
+		State        string `json:"state"`
+		Detail       string `json:"detail"`
+	} `json:"pipeline,omitempty"`
 }
 
 func newSpawnCommand(ctx *commandContext) *cobra.Command {
@@ -105,6 +123,13 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 					return usageError{fmt.Errorf("--agent is required with --standalone")}
 				}
 				opts.kind = "worker"
+			}
+
+			if opts.pipeline != "" && opts.noPipeline {
+				return usageError{fmt.Errorf("--pipeline and --no-pipeline are mutually exclusive")}
+			}
+			if (opts.pipeline != "" || opts.noPipeline) && (opts.standalone || opts.kind == "orchestrator") {
+				return usageError{fmt.Errorf("--pipeline and --no-pipeline apply to project worker tasks only")}
 			}
 
 			tp := strings.TrimSpace(opts.trackerProvider)
@@ -166,6 +191,12 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				Model:           strings.TrimSpace(opts.model),
 				DisplayName:     name,
 			}
+			switch {
+			case strings.TrimSpace(opts.pipeline) != "":
+				req.Pipeline = &spawnPipelineSelection{Mode: "workflow", WorkflowID: strings.TrimSpace(opts.pipeline)}
+			case opts.noPipeline:
+				req.Pipeline = &spawnPipelineSelection{Mode: "normal_worker"}
+			}
 			var res spawnResult
 			if err := ctx.postJSON(cmd.Context(), "sessions", req, &res); err != nil {
 				return err
@@ -202,6 +233,18 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 			if _, err := fmt.Fprintf(out, "spawned session %s %q (%s)%s%s\n", res.Session.ID, displayName, res.Session.Status, claimLabel, promptSize); err != nil {
 				return err
 			}
+			if p := res.Pipeline; p != nil {
+				label := fmt.Sprintf("pipeline %s (%s): %s", p.WorkflowID, p.Source, p.State)
+				if p.NormalWorker {
+					label = fmt.Sprintf("pipeline: normal worker (%s)", p.Source)
+				}
+				if p.Detail != "" {
+					label += " - " + p.Detail
+				}
+				if _, err := fmt.Fprintln(out, label); err != nil {
+					return err
+				}
+			}
 			if opts.claimPR != "" {
 				return writeClaimPRCheckout(out, claim.BranchChanged)
 			}
@@ -229,6 +272,8 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "github", "Issue tracker provider: github or gitlab (default: github)")
 	f.StringVar(&opts.name, "name", "", "Display name shown in the sidebar (required, max 100 characters)")
 	f.StringVar(&opts.claimPR, "claim-pr", "", "Claim PR ownership metadata only for the spawned session; does not check out the PR branch")
+	f.StringVar(&opts.pipeline, "pipeline", "", "Run this repository workflow on the new task (see `ao pipeline ls`); overrides the project default for this task")
+	f.BoolVar(&opts.noPipeline, "no-pipeline", false, "Run this task as an ordinary worker even when the project has a default workflow")
 	f.BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the claimed PR (requires --claim-pr)")
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip CLI readiness warnings (the daemon still validates launch readiness)")
 	return cmd

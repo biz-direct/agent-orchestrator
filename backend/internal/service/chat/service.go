@@ -52,6 +52,7 @@ type Service struct {
 	onModelChanged   func(domain.SessionID, string)
 	stopProviderHost func(context.Context, domain.SessionID) error
 	reports          *reportsvc.Coordinator
+	executionGate    ports.PipelineExecutionGate
 
 	mu               sync.RWMutex
 	controllers      map[domain.SessionID]*Controller
@@ -61,6 +62,12 @@ type Service struct {
 	gates            map[domain.ConversationOwner]controllerGate
 	probeMu          sync.Mutex
 	probed           map[domain.AgentHarness]ports.ChatCapabilities
+}
+
+// SetExecutionGate installs the pipeline execution gate after daemon wiring.
+// With no gate every session behaves exactly as before.
+func (s *Service) SetExecutionGate(gate ports.PipelineExecutionGate) {
+	s.executionGate = gate
 }
 
 // SetReportCoordinator installs the report piggyback hook after daemon wiring
@@ -1084,6 +1091,14 @@ func (s *Service) requireChatSession(ctx context.Context, id domain.SessionID) (
 	}
 	if domain.NormalizeSessionMode(record.Mode) != domain.SessionModeChat {
 		return domain.SessionRecord{}, ErrNotChatMode
+	}
+	// A pipeline run executing another stage owns this worktree. Messages,
+	// steering, and approvals for a session that is not the active executor
+	// cannot wake it or create overlapping execution.
+	if s.executionGate != nil {
+		if ok, reason := s.executionGate.AdmitSessionExecution(ctx, id); !ok {
+			return domain.SessionRecord{}, fmt.Errorf("%w: %s", ports.ErrPipelineExecutionOwned, reason)
+		}
 	}
 	return record, nil
 }

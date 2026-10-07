@@ -1060,3 +1060,60 @@ func TestSpawnModelFlagWiring(t *testing.T) {
 		t.Fatalf("spawn request model = %q, want gpt-5.6-sol", req.Model)
 	}
 }
+
+func TestSpawnPipelineSelectionWiring(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var bodies []spawnRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"https://github.com/aoagents/agent-orchestrator","defaultBranch":"main"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/readiness/ensure":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			var b spawnRequest
+			_ = json.NewDecoder(r.Body).Decode(&b)
+			bodies = append(bodies, b)
+			switch {
+			case b.Pipeline != nil && b.Pipeline.Mode == "workflow":
+				_, _ = io.WriteString(w, `{"session":{"id":"demo-1","status":"idle"},"pipeline":{"workflowId":"build-test-review","normalWorker":false,"source":"explicit","state":"pending"}}`)
+			case b.Pipeline != nil:
+				_, _ = io.WriteString(w, `{"session":{"id":"demo-2","status":"idle"},"pipeline":{"workflowId":"","normalWorker":true,"source":"explicit","state":"skipped","detail":"A normal worker was selected for this task"}}`)
+			default:
+				_, _ = io.WriteString(w, `{"session":{"id":"demo-3","status":"idle"}}`)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+	base := []string{"spawn", "--project", "demo", "--agent", "codex", "--name", "worker"}
+
+	out, _, err := executeCLI(t, deps, append(base, "--pipeline", "build-test-review")...)
+	if err != nil || !strings.Contains(out, "pipeline build-test-review (explicit): pending") {
+		t.Fatalf("explicit workflow: err=%v out=%s", err, out)
+	}
+	out, _, err = executeCLI(t, deps, append(base, "--no-pipeline")...)
+	if err != nil || !strings.Contains(out, "pipeline: normal worker (explicit)") || !strings.Contains(out, "A normal worker was selected") {
+		t.Fatalf("normal worker: err=%v out=%s", err, out)
+	}
+	out, _, err = executeCLI(t, deps, base...)
+	if err != nil || strings.Contains(out, "pipeline") {
+		t.Fatalf("no flag leaves the project default to the daemon: err=%v out=%s", err, out)
+	}
+	if len(bodies) != 3 || bodies[0].Pipeline == nil || bodies[0].Pipeline.WorkflowID != "build-test-review" || bodies[1].Pipeline == nil || bodies[1].Pipeline.Mode != "normal_worker" || bodies[2].Pipeline != nil {
+		t.Fatalf("requests: %+v", bodies)
+	}
+	if _, _, err := executeCLI(t, deps, append(base, "--pipeline", "x", "--no-pipeline")...); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("the two flags are mutually exclusive: %v", err)
+	}
+	if _, _, err := executeCLI(t, deps, "spawn", "--standalone", "--agent", "codex", "--name", "w", "--pipeline", "x"); err == nil || ExitCode(err) != 2 {
+		t.Fatalf("standalone workers have no pipelines: %v", err)
+	}
+	if len(bodies) != 3 {
+		t.Fatal("refused combinations must not reach the daemon")
+	}
+}
