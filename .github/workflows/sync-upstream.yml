@@ -78,7 +78,12 @@ jobs:
           if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
             git push origin "$branch"
           fi
-          pr="$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number // empty')"
+          # Only trust a PR whose head lives in THIS repo and sits at the commit
+          # we built; a same-named branch from an outside fork must not match.
+          head_sha="$(git rev-parse HEAD)"
+          pr="$(gh pr list --head "$branch" --base main --state open \
+            --json number,headRefOid,headRepository,headRepositoryOwner \
+            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefOid == "'"$head_sha"'") | .number' | head -n1)"
           if [ -z "$pr" ]; then
             pr="$(gh pr create --base main --head "$branch" \
               --title "chore: sync upstream $UPSTREAM@$SHA" \
@@ -86,15 +91,15 @@ jobs:
               | grep -oE '[0-9]+$')"
           fi
           # Supersede older sync PRs.
-          gh pr list --state open --base main --json number,headRefName \
-            --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | select(.headRefName != "'"$branch"'") | .number' |
+          gh pr list --state open --base main --json number,headRefName,headRepository,headRepositoryOwner \
+            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefName | startswith("sync/upstream-")) | select(.headRefName != "'"$branch"'") | .number' |
             while read -r old; do
               gh pr close "$old" --delete-branch --comment "Superseded by #$pr."
             done
           # Auto-merge waits for required checks; with none configured GitHub
           # reports a clean status and we merge directly.
-          if ! gh pr merge "$pr" --auto --merge; then
-            gh pr merge "$pr" --merge || echo "::warning::Could not merge #$pr automatically; merge it manually."
+          if ! gh pr merge "$pr" --auto --merge --match-head-commit "$head_sha"; then
+            gh pr merge "$pr" --merge --match-head-commit "$head_sha" || echo "::warning::Could not merge #$pr automatically; merge it manually."
           fi
       - name: Flag conflicts for manual resolution
         if: steps.merge.outputs.status == 'conflict'
