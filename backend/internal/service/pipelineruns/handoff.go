@@ -342,7 +342,7 @@ func (s *Service) pauseHandoff(ctx context.Context, run domain.PipelineRun, pend
 	if cerr := ctx.Err(); cerr != nil {
 		return cerr
 	}
-	if err := s.pause(ctx, run, pending, reason, detail); err != nil {
+	if err := s.pauseOrYield(ctx, run, pending, reason, detail); err != nil {
 		return err
 	}
 	return nil

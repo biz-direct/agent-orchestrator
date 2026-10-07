@@ -572,13 +572,13 @@ func (s *Service) Submit(ctx context.Context, in SubmitInput) (SubmitResult, err
 	}
 	if !ok || session.IsTerminated {
 		if perr := s.pause(ctx, run, &attempt, domain.PipelinePauseSessionTerminated, "The task ended while the stage was active"); perr != nil {
-			return SubmitResult{}, perr
+			return SubmitResult{}, submitPauseError(perr)
 		}
 		return SubmitResult{}, apierr.Conflict("PIPELINE_RUN_PAUSED", "The task ended while the stage was active; the run is paused", nil)
 	}
 	if session.Metadata.ControllerGeneration != attempt.ControllerGeneration {
 		if perr := s.pause(ctx, run, &attempt, domain.PipelinePauseControllerChanged, "The worker's controller restarted while the stage was active"); perr != nil {
-			return SubmitResult{}, perr
+			return SubmitResult{}, submitPauseError(perr)
 		}
 		return SubmitResult{}, apierr.Conflict("PIPELINE_RUN_PAUSED", "The worker's controller restarted while the stage was active; the run is paused", nil)
 	}
@@ -821,7 +821,9 @@ func (s *Service) finishSubmit(ctx context.Context, run domain.PipelineRun, atte
 }
 
 // pause persists an operational pause. It never consumes the repair budget and
-// never touches the worktree.
+// never touches the worktree. A lost compare-and-set (the run changed under us)
+// is returned as domain.ErrPipelineConflict: the run may not be paused, so a
+// caller that reports "paused" must not do so on a conflict.
 func (s *Service) pause(ctx context.Context, run domain.PipelineRun, attempt *domain.PipelineStageAttempt, reason domain.PipelinePauseReason, detail string) error {
 	now := s.clock()
 	t := domain.PipelineTransition{
@@ -837,11 +839,34 @@ func (s *Service) pause(ctx context.Context, run domain.PipelineRun, attempt *do
 			t.Attempt = &domain.PipelineAttemptFinish{ID: attempt.ID, State: domain.PipelineAttemptInterrupted, Outcome: "interrupted", FinishedAt: now}
 		}
 	}
-	if _, err := s.store.CommitPipelineTransition(ctx, t); err != nil && !errors.Is(err, domain.ErrPipelineConflict) {
+	if _, err := s.store.CommitPipelineTransition(ctx, t); err != nil {
+		if errors.Is(err, domain.ErrPipelineConflict) {
+			return err
+		}
 		s.logger.Error("pipeline: pause failed", "run_id", run.ID, "err", err)
 		return apierr.Internal("PIPELINE_PAUSE_FAILED", "Failed to pause the pipeline run")
 	}
 	return nil
+}
+
+// pauseOrYield is pause for the background drivers: losing the compare-and-set
+// means another writer (a control request, a cancel, a newer pass) already
+// decided the run's fate, and the next pass reads that result instead of
+// overwriting it.
+func (s *Service) pauseOrYield(ctx context.Context, run domain.PipelineRun, attempt *domain.PipelineStageAttempt, reason domain.PipelinePauseReason, detail string) error {
+	if err := s.pause(ctx, run, attempt, reason, detail); err != nil && !errors.Is(err, domain.ErrPipelineConflict) {
+		return err
+	}
+	return nil
+}
+
+// submitPauseError turns a lost pause race inside Submit into the same stale
+// answer other lost races give, instead of claiming the run is paused.
+func submitPauseError(err error) error {
+	if errors.Is(err, domain.ErrPipelineConflict) {
+		return apierr.Conflict("PIPELINE_ATTEMPT_STALE", "The run changed while the result was being processed; read the task's current run and try again", nil)
+	}
+	return err
 }
 
 // reconcileSession pauses a running run whose executor can no longer prove it
@@ -892,9 +917,9 @@ func (s *Service) reconcileRun(ctx context.Context, run domain.PipelineRun, anno
 	}
 	switch {
 	case !ok || session.IsTerminated:
-		return s.pause(ctx, run, active, domain.PipelinePauseSessionTerminated, "The stage's executor ended while the stage was active")
+		return s.pauseOrYield(ctx, run, active, domain.PipelinePauseSessionTerminated, "The stage's executor ended while the stage was active")
 	case session.Metadata.ControllerGeneration != active.ControllerGeneration:
-		return s.pause(ctx, run, active, domain.PipelinePauseControllerChanged, "The stage executor's controller restarted while the stage was active")
+		return s.pauseOrYield(ctx, run, active, domain.PipelinePauseControllerChanged, "The stage executor's controller restarted while the stage was active")
 	}
 	s.recordRecovery(ctx, run, announce, active.ID, "continued", fmt.Sprintf("After a restart, stage %q (attempt %d) is still attached to the same controller generation; AO did not start or replay anything%s", active.StageID, active.AttemptNo, note))
 	return nil
@@ -1169,5 +1194,5 @@ func (s *Service) reconcileValidation(ctx context.Context, run domain.PipelineRu
 			validating = &attempts[i]
 		}
 	}
-	return s.pause(ctx, run, validating, PauseValidationInterrupted, fmt.Sprintf("AO stopped while %d validation command(s) were running; their outcomes are unknown and they were not retried", n))
+	return s.pauseOrYield(ctx, run, validating, PauseValidationInterrupted, fmt.Sprintf("AO stopped while %d validation command(s) were running; their outcomes are unknown and they were not retried", n))
 }

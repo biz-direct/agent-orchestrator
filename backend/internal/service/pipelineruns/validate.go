@@ -111,7 +111,7 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 		return err
 	}
 	if !ok || owner.IsTerminated {
-		return s.pause(ctx, run, &attempt, domain.PipelinePauseSessionTerminated, "The task ended before validation finished")
+		return s.pauseOrYield(ctx, run, &attempt, domain.PipelinePauseSessionTerminated, "The task ended before validation finished")
 	}
 
 	// Repository-controlled commands only run with the user's explicit
@@ -121,19 +121,19 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 		return err
 	}
 	if !ok || !project.Config.TrustPipelineCommands {
-		return s.pause(ctx, run, &attempt, PauseCommandsNotAuthorized, fmt.Sprintf("Stage %q declares %d validation command(s) from repository files. AO runs repository-controlled commands only after you authorize them in the project's Pipeline settings (or `ao pipeline trust`).", attempt.StageID, len(commands)))
+		return s.pauseOrYield(ctx, run, &attempt, PauseCommandsNotAuthorized, fmt.Sprintf("Stage %q declares %d validation command(s) from repository files. AO runs repository-controlled commands only after you authorize them in the project's Pipeline settings (or `ao pipeline trust`).", attempt.StageID, len(commands)))
 	}
 
 	// Reserve the worktree: the executor must be proven stopped before AO's own
 	// processes write to it.
 	if s.executor != nil && attempt.ExecutorSessionID != "" {
 		if err := s.executor.RelinquishExecutor(ctx, attempt.ExecutorSessionID); err != nil {
-			return s.pause(ctx, run, &attempt, PauseHandoffUncertain, fmt.Sprintf("Could not prove stage %q stopped executing before validation: %v", attempt.StageID, err))
+			return s.pauseOrYield(ctx, run, &attempt, PauseHandoffUncertain, fmt.Sprintf("Could not prove stage %q stopped executing before validation: %v", attempt.StageID, err))
 		}
 	}
 	workspace := owner.Metadata.WorkspacePath
 	if reason := s.workspaceDrift(ctx, workspace, run, attempt.OutputCommit, true); reason != "" {
-		return s.pause(ctx, run, &attempt, PauseUnexpectedChanges, reason)
+		return s.pauseOrYield(ctx, run, &attempt, PauseUnexpectedChanges, reason)
 	}
 
 	round := s.nextRound(ctx, attempt.ID)
@@ -184,7 +184,7 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 	// round skips this: its commands were killed and it will not advance anyway.
 	if ctx.Err() == nil {
 		if reason := s.workspaceDrift(ctx, workspace, run, attempt.OutputCommit, false); reason != "" {
-			return s.pause(context.WithoutCancel(ctx), run, &attempt, PauseValidationMutated, reason+"; the changes are preserved")
+			return s.pauseOrYield(context.WithoutCancel(ctx), run, &attempt, PauseValidationMutated, reason+"; the changes are preserved")
 		}
 	}
 
@@ -206,7 +206,7 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 		if ctx.Err() != nil {
 			reason = PauseValidationInterrupted
 		}
-		return s.pause(pauseCtx, run, &attempt, reason, "Validation could not give a verdict: "+strings.Join(operational, "; ")+". This is not a code defect and did not use the repair budget")
+		return s.pauseOrYield(pauseCtx, run, &attempt, reason, "Validation could not give a verdict: "+strings.Join(operational, "; ")+". This is not a code defect and did not use the repair budget")
 	case len(requiredFailed) > 0:
 		now := s.clock()
 		detail := "Mandatory validation failed against " + shortCommit(attempt.OutputCommit) + ": " + strings.Join(requiredFailed, ", ")

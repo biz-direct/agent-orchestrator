@@ -65,10 +65,10 @@ func (s *Service) driveReviewAttempt(ctx context.Context, runID string) error {
 		return err
 	}
 	if !ok || owner.IsTerminated {
-		return s.pause(ctx, run, &attempt, domain.PipelinePauseSessionTerminated, "The task ended while its review was being evaluated")
+		return s.pauseOrYield(ctx, run, &attempt, domain.PipelinePauseSessionTerminated, "The task ended while its review was being evaluated")
 	}
 	if s.reviews == nil {
-		return s.pause(ctx, run, &attempt, PauseStageUnsupported, "This build cannot evaluate Review stages")
+		return s.pauseOrYield(ctx, run, &attempt, PauseStageUnsupported, "This build cannot evaluate Review stages")
 	}
 
 	dec, link, err := s.assessReview(ctx, run, attempt, owner)
@@ -107,7 +107,7 @@ func (s *Service) driveReviewAttempt(ctx context.Context, runID string) error {
 		if dec.FinishFailed {
 			return s.routeReviewFeedback(ctx, run, snap, attempt, dec)
 		}
-		return s.pause(ctx, run, &attempt, dec.Pause, dec.Detail)
+		return s.pauseOrYield(ctx, run, &attempt, dec.Pause, dec.Detail)
 	case gateComplete:
 		now := s.clock()
 		err := s.commitAcceptance(ctx, run, attempt, snap, &domain.PipelineAttemptFinish{
@@ -152,7 +152,7 @@ func (s *Service) assessReview(ctx context.Context, run domain.PipelineRun, atte
 func (s *Service) triggerReview(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, dec gateDecision) error {
 	skip, err := s.reviews.TriggerAuto(ports.WithPipelineBypass(ctx), run.SessionID)
 	if err != nil {
-		return s.pause(ctx, run, &attempt, PauseReviewOperational, fmt.Sprintf("The built-in review could not be started for revision %s: %v", shortCommit(attempt.InputCommit), err))
+		return s.pauseOrYield(ctx, run, &attempt, PauseReviewOperational, fmt.Sprintf("The built-in review could not be started for revision %s: %v", shortCommit(attempt.InputCommit), err))
 	}
 	if skip != "" {
 		dec.Code = WaitAwaitingAutoReview
