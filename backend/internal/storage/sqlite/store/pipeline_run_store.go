@@ -373,6 +373,17 @@ func (s *Store) CreateAttachedSessionForAttempt(ctx context.Context, rec domain.
 	return rec, nil
 }
 
+// ClearAttachedSessionAttempt releases an attached session's claim on the
+// attempt it was created for, so a later start of that attempt creates a fresh
+// session instead of looking for (and refusing to adopt) this one.
+func (s *Store) ClearAttachedSessionAttempt(ctx context.Context, id domain.SessionID) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.inTx(ctx, "clear attached session attempt", func(q *gen.Queries) error {
+		return q.SetSessionAttachedAttempt(ctx, gen.SetSessionAttachedAttemptParams{AttachedForAttemptID: "", ID: id})
+	})
+}
+
 // GetSessionAttachedTo returns the owner worker of an attached specialist
 // session, or "" for an ordinary session.
 func (s *Store) GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (domain.SessionID, error) {

@@ -46,6 +46,15 @@ func (s *attachedStore) CreateAttachedSession(_ context.Context, rec domain.Sess
 	return rec, nil
 }
 
+func (s *attachedStore) ClearAttachedSessionAttempt(_ context.Context, id domain.SessionID) error {
+	for attempt, sid := range s.forAttempt {
+		if sid == id {
+			delete(s.forAttempt, attempt)
+		}
+	}
+	return nil
+}
+
 func (s *attachedStore) GetSessionAttachedTo(_ context.Context, id domain.SessionID) (domain.SessionID, error) {
 	return s.attached[id], nil
 }
@@ -589,5 +598,51 @@ func TestCleanupNeverReclaimsTheWorkspaceThroughAnAttachedStage(t *testing.T) {
 	}
 	if ws.destroyed != 0 || len(res.Cleaned) != 0 || len(res.Skipped) != 0 {
 		t.Fatalf("cleanup must leave the owner's workspace alone: destroyed=%d result=%+v", ws.destroyed, res)
+	}
+}
+
+// A pause that wins the race with a handoff leaves a stage session that never
+// ran. Retrying the attempt must start a fresh stage, not find a stopped one it
+// may not adopt (which would turn a pause into a recovery decision).
+func TestDiscardStageEndsTheSessionAndReleasesTheAttemptSoARetryStartsFresh(t *testing.T) {
+	m, st, launcher, ws, owner := newPipelineStageManager(t)
+	start := ports.PipelineStageStart{RunID: "r1", StageID: "test", AttemptID: "a1", Owner: owner.ID, Harness: domain.HarnessClaudeCode, SystemPrompt: "S", Prompt: "PROMPT"}
+	first, err := m.StartStage(context.Background(), start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DiscardStage(context.Background(), first.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if !st.sessions[first.SessionID].IsTerminated || len(launcher.stopped) != 1 || launcher.stopped[0] != first.SessionID {
+		t.Fatalf("the discarded stage must be stopped and terminated: stopped=%v", launcher.stopped)
+	}
+	if ws.destroyed != 0 || st.sessions[owner.ID].IsTerminated {
+		t.Fatal("discarding a stage never touches the owner or its workspace")
+	}
+	if _, found, _ := st.FindAttachedSessionForAttempt(context.Background(), "a1"); found {
+		t.Fatal("the attempt's claim must be released")
+	}
+	second, err := m.StartStage(context.Background(), start)
+	if err != nil {
+		t.Fatalf("a retry must start fresh, not fail as unadoptable: %v", err)
+	}
+	if second.SessionID == first.SessionID || len(launcher.started) != 2 {
+		t.Fatalf("a fresh stage is started: %s vs %s, controllers=%d", second.SessionID, first.SessionID, len(launcher.started))
+	}
+	if err := m.DiscardStage(context.Background(), owner.ID); err == nil {
+		t.Fatal("the owner worker is not a stage session and must not be discardable")
+	}
+}
+
+func TestStartStageFailureReleasesTheAttemptSoARetryIsNotAnUnsafeAdoption(t *testing.T) {
+	m, st, launcher, _, owner := newPipelineStageManager(t)
+	launcher.turnErr = errors.New("provider rejected the turn")
+	start := ports.PipelineStageStart{RunID: "r1", StageID: "test", AttemptID: "a1", Owner: owner.ID, Harness: domain.HarnessClaudeCode, Prompt: "PROMPT"}
+	if _, err := m.StartStage(context.Background(), start); err == nil {
+		t.Fatal("the turn failure must surface")
+	}
+	if _, found, _ := st.FindAttachedSessionForAttempt(context.Background(), "a1"); found {
+		t.Fatal("a stage that never ran must not keep its claim on the attempt")
 	}
 }

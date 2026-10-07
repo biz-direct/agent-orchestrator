@@ -68,6 +68,7 @@ type fakeExecutor struct {
 	relinquish  []domain.SessionID
 	starts      []ports.PipelineStageStart
 	stopped     []domain.SessionID
+	discarded   []domain.SessionID
 	startedGens int
 }
 
@@ -213,6 +214,26 @@ func (e *fakeExecutor) ResumeExecutor(ctx context.Context, id domain.SessionID, 
 		return ports.PipelineStageStarted{}, fmt.Errorf("resume: session %s: %w", id, err)
 	}
 	return ports.PipelineStageStarted{SessionID: id, ControllerGeneration: rec.Metadata.ControllerGeneration}, nil
+}
+
+// DiscardStage ends a stage session created for an attempt that never became
+// active and releases the attempt, like the real executor.
+func (e *fakeExecutor) DiscardStage(ctx context.Context, id domain.SessionID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, "discard:"+string(id))
+	e.discarded = append(e.discarded, id)
+	for attempt, sid := range e.byAttempt {
+		if sid == id {
+			delete(e.byAttempt, attempt)
+		}
+	}
+	rec, ok, err := e.store.GetSession(ctx, id)
+	if err != nil || !ok {
+		return err
+	}
+	rec.IsTerminated = true
+	return e.store.UpdateSession(ctx, rec)
 }
 
 func (e *fakeExecutor) StopStage(_ context.Context, id domain.SessionID) error {
@@ -585,8 +606,11 @@ func TestStageExecutorStartedAfterRunPausedIsStopped(t *testing.T) {
 	if err := s.svc.DriveHandoffs(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.exec.stopped) != 1 {
-		t.Fatalf("an executor that lost the race must be stopped: %v", s.exec.stopped)
+	if len(s.exec.discarded) != 1 || len(s.exec.stopped) != 0 {
+		t.Fatalf("a stage that lost the race never ran: it must be discarded (ended and released), not left stopped for a retry to trip over: discarded=%v stopped=%v", s.exec.discarded, s.exec.stopped)
+	}
+	if rec, _, _ := s.store.GetSession(ctx, s.exec.discarded[0]); !rec.IsTerminated {
+		t.Fatal("the discarded stage session must end")
 	}
 	if _, err := os.Stat(filepath.Join(s.repo, "feature.txt")); err != nil {
 		t.Fatal("stage cleanup never touches the shared workspace")

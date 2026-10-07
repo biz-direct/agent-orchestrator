@@ -311,11 +311,29 @@ func (s *Service) driveRun(ctx context.Context, runID string) error {
 			return nil
 		}
 		cleanup := context.WithoutCancel(ctx)
+		// Another driver may have confirmed this very attempt with this very
+		// session first (it adopted the same conversation). That session belongs
+		// to the winner: stopping or discarding it would kill the live stage.
+		if latest, lerr := s.store.ListPipelineStageAttempts(cleanup, run.ID); lerr == nil {
+			for _, a := range latest {
+				if a.ID == pending.ID && a.State == domain.PipelineAttemptActive && a.ExecutorSessionID == started.SessionID {
+					return nil
+				}
+			}
+		}
 		var cleanErr error
-		if resumed {
+		switch {
+		case resumed:
 			cleanErr = s.executor.RelinquishExecutor(cleanup, started.SessionID)
-		} else {
-			cleanErr = s.executor.StopStage(cleanup, started.SessionID)
+		default:
+			// A conversation created for this attempt never ran. Discard it
+			// (end the row and release the attempt) so a later resume starts a
+			// fresh stage instead of finding a stopped one it must not adopt.
+			if discarder, ok := s.executor.(ports.PipelineStageDiscarder); ok {
+				cleanErr = discarder.DiscardStage(cleanup, started.SessionID)
+			} else {
+				cleanErr = s.executor.StopStage(cleanup, started.SessionID)
+			}
 		}
 		if cleanErr != nil {
 			s.logger.Error("pipeline: clean up stale stage executor failed", "run_id", run.ID, "session_id", started.SessionID, "err", cleanErr)

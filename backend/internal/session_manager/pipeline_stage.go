@@ -30,6 +30,23 @@ type attachedAttemptStore interface {
 	FindAttachedSessionForAttempt(ctx context.Context, attemptID string) (domain.SessionID, bool, error)
 }
 
+// attachedAttemptClearer releases an attached session's claim on its attempt.
+type attachedAttemptClearer interface {
+	ClearAttachedSessionAttempt(ctx context.Context, id domain.SessionID) error
+}
+
+// releaseAttachedAttempt clears the attempt claim of a terminated stage session
+// so a retry of the attempt creates a fresh stage rather than finding a dead one.
+func (m *Manager) releaseAttachedAttempt(ctx context.Context, id domain.SessionID) {
+	clearer, ok := m.store.(attachedAttemptClearer)
+	if !ok {
+		return
+	}
+	if err := clearer.ClearAttachedSessionAttempt(context.WithoutCancel(ctx), id); err != nil {
+		m.logger.Warn("pipeline: release stage session attempt claim failed", "sessionID", id, "error", err)
+	}
+}
+
 // deliverStagePrompt delivers a stage prompt under the pipeline's deterministic
 // key when one is set, so redelivery after a crash cannot create a second turn.
 func (m *Manager) deliverStagePrompt(ctx context.Context, id domain.SessionID, prompt string) error {
@@ -112,7 +129,10 @@ type liveChatProbe interface {
 	HasLiveChatController(id domain.SessionID) bool
 }
 
-var _ ports.PipelineExecutor = (*Manager)(nil)
+var (
+	_ ports.PipelineExecutor       = (*Manager)(nil)
+	_ ports.PipelineStageDiscarder = (*Manager)(nil)
+)
 
 // ErrPipelineExecutionOwned reports that a pipeline run, not this session, owns
 // execution right now.
@@ -323,6 +343,9 @@ func (m *Manager) StartStage(ctx context.Context, start ports.PipelineStageStart
 		m.stopChatBestEffort(ctx, rec.ID)
 		if created {
 			_ = m.lcm.MarkTerminated(context.WithoutCancel(ctx), rec.ID)
+			// A stage that never ran must not leave a claim that a retry of the
+			// attempt would read as a surviving conversation it cannot adopt.
+			m.releaseAttachedAttempt(ctx, rec.ID)
 		}
 		return ports.PipelineStageStarted{}, cause
 	}
@@ -490,6 +513,24 @@ func (m *Manager) StopStage(ctx context.Context, id domain.SessionID) error {
 		return nil
 	}
 	return m.chat.StopChat(ctx, id)
+}
+
+// DiscardStage implements ports.PipelineStageDiscarder. It ends a stage session
+// created for an attempt that never became active and releases the attempt, so a
+// retry starts a fresh stage. It touches nothing of the owner's workspace.
+func (m *Manager) DiscardStage(ctx context.Context, id domain.SessionID) error {
+	owner, err := m.attachedOwner(ctx, id)
+	if err != nil {
+		return fmt.Errorf("discard stage %s: %w", id, err)
+	}
+	if owner == "" {
+		return fmt.Errorf("discard stage %s: not an attached stage session", id)
+	}
+	if err := m.terminateAttachedSession(ctx, id); err != nil {
+		return err
+	}
+	m.releaseAttachedAttempt(ctx, id)
+	return nil
 }
 
 // ResumeExecutor implements ports.PipelineExecutor. It only ever resumes a

@@ -117,6 +117,17 @@ type PipelineExecutor interface {
 	StopStage(ctx context.Context, id domain.SessionID) error
 }
 
+// PipelineStageDiscarder is implemented by executors that can discard a stage
+// session created for an attempt that never became active (for example because
+// a pause or cancel won the race with the handoff). Unlike StopStage, which
+// keeps the conversation for later resumption, discarding ends the session and
+// releases its claim on the attempt, so a retry starts a fresh stage instead of
+// finding a stopped one it must not adopt. It still never touches the shared
+// workspace.
+type PipelineStageDiscarder interface {
+	DiscardStage(ctx context.Context, id domain.SessionID) error
+}
+
 // PipelineStageStart is everything an attached specialist needs.
 type PipelineStageStart struct {
 	RunID     string
