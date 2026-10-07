@@ -80,7 +80,8 @@ jobs:
           fi
           # Only trust a PR whose head lives in THIS repo and sits at the commit
           # we built; a same-named branch from an outside fork must not match.
-          head_sha="$(git rev-parse HEAD)"
+          # Use the commit actually on origin (a rerun's local merge commit differs).
+          head_sha="$(git ls-remote --heads origin "$branch" | cut -f1)"
           pr="$(gh pr list --head "$branch" --base main --state open \
             --json number,headRefOid,headRepository,headRepositoryOwner \
             --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefOid == "'"$head_sha"'") | .number' | head -n1)"
