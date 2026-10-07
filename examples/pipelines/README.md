@@ -49,7 +49,9 @@ and CI readiness, the repair budget, and pause/resume/cancel.
 - **Trusted commands.** Validation commands are repository-controlled. AO never runs
   them until a user authorizes the project (`ao pipeline trust`).
 - **Not a sandbox.** `allowedPaths` is checked on the commits a specialist hands
-  off. Stages share one worktree and run one at a time; this is not OS isolation.
+  off, judged on the net diff from the input revision (an out-of-scope commit that
+  is later reverted passes, and stays in the PR history). Stages share one worktree
+  and run one at a time; this is not OS isolation.
 - **Publishing and merging stay yours.** A pipeline never merges, pushes on your
   behalf, or implies host approvals or branch protection were satisfied.
 - **Review needs a pull request.** Without one the Review stage waits with a clear

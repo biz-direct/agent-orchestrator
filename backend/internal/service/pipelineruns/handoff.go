@@ -391,7 +391,7 @@ func specialistSystemPrompt(snap Snapshot, stage SnapshotStage, run domain.Pipel
 		b.WriteString(strings.TrimSpace(p.Instructions))
 		b.WriteString("\n")
 		if len(p.AllowedPaths) > 0 {
-			b.WriteString("\n### Change scope\nChange only paths matching: " + strings.Join(p.AllowedPaths, ", ") + ". This is a hand-off constraint checked on your commits, not a sandbox.\n")
+			b.WriteString("\n### Change scope\nChange only paths matching: " + strings.Join(p.AllowedPaths, ", ") + ". This is a hand-off constraint checked on your commits, not a sandbox. It is judged on the net diff from the input revision to your final commit, so a reverted out-of-scope commit would pass but would still remain in the pull request history: never commit an out-of-scope change, even temporarily.\n")
 		}
 	}
 	if snap.Workflow.Instructions != "" {

@@ -220,6 +220,13 @@ committing a revert). Path validation is a hand-off constraint, not a filesystem
 or process sandbox: it cannot stop a process writing elsewhere, only refuse to
 advance a stage whose commits do.
 
+Scope is judged on the **net** diff from the input revision to the stage's final
+commit, not commit by commit. An out-of-scope commit that is later reverted
+therefore passes the check, while both commits remain in the branch and pull
+request history that reviewers read. The Tester instructions say so explicitly
+(never commit an out-of-scope change "temporarily"), and the review stage is the
+place that history is judged; AO does not rewrite or squash it.
+
 Specialist results are listed as **evidence bound to the exact revision they
 cover**; they are never presented as validation of a later head.
 

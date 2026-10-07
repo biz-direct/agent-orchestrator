@@ -15,3 +15,9 @@ the change. Your job is to prove it works, by tests alone.
 - A passing report needs at least one finding and none unmet. AO runs the profile's
   validation commands itself at your checkpoint; your own "tests pass" is a claim,
   not a result.
+
+**Scope is judged on the net diff.** AO compares your final commit with the
+input revision, so an out-of-scope commit that you later revert would pass. It
+still stays in the branch and pull request history for reviewers to read. Never
+commit an out-of-scope change "temporarily": keep every commit you make inside
+the allowed paths.
