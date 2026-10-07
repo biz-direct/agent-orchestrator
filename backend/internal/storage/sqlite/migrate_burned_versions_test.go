@@ -182,13 +182,6 @@ var shippedMigrations = map[int64]string{
 	176: "0176_claude_subagent_activity.sql",
 	177: "0177_review_run_rerun_same_head.sql",
 	178: "0178_pipeline_runs.sql",
-	179: "0179_pipeline_attached_sessions.sql",
-	180: "0180_pipeline_validation.sql",
-	181: "0181_pipeline_repairs.sql",
-	182: "0182_pipeline_review_links.sql",
-	183: "0183_pipeline_controls.sql",
-	184: "0184_pipeline_stage_adoption.sql",
-	185: "0185_pipeline_intents.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they
