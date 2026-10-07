@@ -217,6 +217,11 @@ run: |
       "pr-review-leaderboard.yml",
       "deploy-docs.yml",
       "mac-update-e2e.yml",
+      "e2e-gate-tests.yml",
+      "mobile.yml",
+      "optional-private-submodule.yml",
+      "pricing-catalog-validate.yml",
+      "version-floor-guard.yml",
     ]) {
       const contents = await readFile(path.join(workflowsDirectory, name), "utf8");
       expect(contents, name).toMatch(/if:.*github\.repository == '(?:OrchestratorInc|Untrivial-ai)\/agent-orchestrator'/);

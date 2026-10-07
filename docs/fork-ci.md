@@ -16,5 +16,26 @@
 ## Upstream sync
 `sync-upstream.yml` runs daily (and on dispatch): merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch, opens a PR into `main` and merges it (auto-merge when checks are required, direct otherwise). On conflicts it opens an `upstream-sync-conflict` issue and pushes nothing. Needs secret `SYNC_PAT` (repo + workflow scopes) and "Allow auto-merge" enabled in repo settings.
 
-## Disabled on the fork
-`release-latest-guard`, `pr-review-leaderboard`, `deploy-docs` and `mac-update-e2e` are gated with `if: github.repository == '<upstream>'`.
+## Workflow audit
+Automatic on the fork: PR/push CI that guards code quality, plus the fork's own workflows. Upstream-only workflows are gated with a job-level `if: github.repository == 'OrchestratorInc/agent-orchestrator'` (skipped, not deleted, to keep upstream merges clean).
+
+| workflow | trigger | fork decision | why |
+|---|---|---|---|
+| go.yml | PR (backend/cloud/pricing paths), push main | keep; `windows-workspace` job gated off | core backend checks; Windows is not shipped |
+| frontend.yml | PR (frontend/workflow paths), push main | keep; PR concurrency cancel added | typecheck, vitest, renderer smoke |
+| gitleaks.yml | PR, push main | keep; PR concurrency cancel added | secret scan |
+| cli-e2e.yml | PR (backend/test paths), push main | keep on ubuntu+macOS; Windows dropped; concurrency added | real CLI/daemon coverage |
+| build-artifacts.yml | dispatch, workflow_call | keep | fork builds (mac arm64, linux AppImage) |
+| fork-release.yml | dispatch, `v*` tag | keep | fork releases |
+| sync-upstream.yml | daily cron, dispatch | keep | upstream sync |
+| pr-review-leaderboard.yml | pull_request_target | gated off | upstream PR stats |
+| deploy-docs.yml | push main (docs), dispatch | gated off | upstream GitHub Pages |
+| mac-update-e2e.yml | dispatch, workflow_call | gated off | needs signed upstream releases |
+| release-latest-guard.yml | release events, hourly cron, dispatch | already gated (jobs skip on fork) | upstream release-feed monitor |
+| e2e-gate-tests.yml | PR (gate paths), push main | gated off | upstream release-conductor pod gate |
+| mobile.yml | PR (mobile paths), push main | gated off | desktop-only fork |
+| optional-private-submodule.yml | PR/push (submodule paths) | gated off | upstream private submodule |
+| pricing-catalog-validate.yml | PR (pricing paths) | gated off | upstream-maintained catalog; external network |
+| version-floor-guard.yml | PR (version-floor file) | gated off | upstream desktop version-floor policy |
+
+To re-enable one, remove its `if:` line (or run it from a branch where the gate is dropped).
