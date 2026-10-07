@@ -84,6 +84,15 @@ func (g *StoreGate) AdmitSessionExecution(ctx context.Context, id domain.Session
 			return true, ""
 		}
 		if current.StageKind == "review" {
+			// While AO's review evaluates the revision nothing may change it. Once
+			// the run is paused on a Review reason that needs the worker (a failing
+			// check, a moved head, a closed or ambiguous pull request, requested
+			// changes) nothing is executing, and the person must be able to talk to
+			// the task's worker to fix it without cancelling the run. Resuming still
+			// revalidates the checkpoint, so this cannot slip a change past the gate.
+			if !attached && run.State == domain.PipelineRunPaused && reviewPauseNeedsWorker(run.PauseReason) {
+				return true, ""
+			}
 			return false, fmt.Sprintf("this task is in pipeline stage %q: AO's review is evaluating the current revision and nothing may change it", current.StageID)
 		}
 		return false, fmt.Sprintf("this task is running pipeline stage %q in a different conversation", current.StageID)
@@ -94,4 +103,14 @@ func (g *StoreGate) AdmitSessionExecution(ctx context.Context, id domain.Session
 	default:
 		return false, "this task's pipeline has no executing stage"
 	}
+}
+
+// reviewPauseNeedsWorker lists the Review pauses whose fix is work the task's
+// own worker does, so the worker is reachable while the run waits for a decision.
+func reviewPauseNeedsWorker(reason domain.PipelinePauseReason) bool {
+	switch reason {
+	case PauseCIFailing, PauseHeadChanged, PausePullRequestClosed, PausePullRequestAmbiguous, PauseReviewChangesRequested:
+		return true
+	}
+	return false
 }

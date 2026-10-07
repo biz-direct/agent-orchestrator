@@ -412,7 +412,7 @@ func buildControlView(run domain.PipelineRun, events []domain.PipelineEvent) Con
 	if run.State == domain.PipelineRunPaused {
 		exhausted := run.PauseReason == PauseRepairBudgetExhausted && run.RepairsUsed >= run.RepairBudget
 		c.NeedsRepairAuthorization = exhausted
-		c.CanResume = !exhausted && run.PauseReason != domain.PipelinePauseSessionTerminated
+		c.CanResume = !exhausted && run.PauseReason != domain.PipelinePauseSessionTerminated && run.PauseReason != PauseReviewChangesRequested
 		c.ResumeNeedsUser = humanOnlyPause(run.PauseReason)
 		if run.PauseReason == PauseRecoveryDecision {
 			c.RecoveryOptions = append(c.RecoveryOptions, RecoveryRestoreConversation)

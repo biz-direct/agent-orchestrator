@@ -468,6 +468,12 @@ func (s *Service) resumeByControl(ctx context.Context, run domain.PipelineRun, r
 	if run.PauseReason == domain.PipelinePauseSessionTerminated {
 		return ControlResult{}, apierr.Conflict("PIPELINE_SESSION_ENDED", "The task ended, so its pipeline cannot continue; cancel the run", nil)
 	}
+	if run.PauseReason == PauseReviewChangesRequested {
+		// Review repair is routed automatically when the workflow has a route; a run
+		// paused here has none. Resuming would re-evaluate the same revision, find
+		// the same requested changes, and pause again, so it is refused up front.
+		return ControlResult{}, apierr.Conflict("PIPELINE_RESUME_BLOCKED", "The built-in review requested changes on this revision and the workflow has no repair route, so resuming would only re-evaluate the same revision. Address the findings, then cancel this run and start a new one on the new head", nil)
+	}
 	owner, ok, err := s.store.GetSession(ctx, run.SessionID)
 	if err != nil {
 		return ControlResult{}, apierr.Internal("SESSION_LOAD_FAILED", "Failed to load session")

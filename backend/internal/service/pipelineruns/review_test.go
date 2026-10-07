@@ -361,8 +361,16 @@ func TestReviewChangesRequestedWithoutARepairRoutePausesAndDoesNotWakeTheWorker(
 	if len(r.messenger.sent) != sent {
 		t.Fatalf("the pipeline must not nudge the worker itself: %v", r.messenger.sent[sent:])
 	}
-	if r.admitted(r.sessionID) {
-		t.Fatal("a paused review keeps the worker stopped until a person decides")
+	if !r.admitted(r.sessionID) {
+		t.Fatal("a review paused on requested changes has nothing executing: the worker must be reachable so a person can talk to it without cancelling the run")
+	}
+	// Resuming would only re-evaluate the same revision and pause again, so it is
+	// not offered and the daemon refuses it.
+	if v.Control.CanResume {
+		t.Fatal("resume must not be offered after changes were requested without a repair route")
+	}
+	if _, err := r.svc.Control(context.Background(), pipelineruns.ControlInput{SessionID: r.sessionID, RunID: v.ID, Action: pipelineruns.ControlResume, RequestedBy: "user"}); code(t, err) != "PIPELINE_RESUME_BLOCKED" {
+		t.Fatalf("resume after requested changes must be refused: %v", err)
 	}
 	// A paused run no longer accepts a review pass until it is resumed.
 	if ok, reason := r.svc.ReviewTriggerAllowed(context.Background(), r.sessionID); ok || !strings.Contains(reason, "paused") {
@@ -433,6 +441,12 @@ func TestReviewUnknownOrUnclassifiedCINeverPasses(t *testing.T) {
 		},
 		"stale checks for an older commit": {
 			mutate:    func(f *pipelineruns.ReviewFacts) { f.Checks[reviewURL] = staleCheck },
+			wantState: "running", wantCode: pipelineruns.WaitAwaitingCIStatus,
+		},
+		"passing rollup but the provider still blocks the pull request": {
+			mutate: func(f *pipelineruns.ReviewFacts) {
+				f.PRs[0].CI, f.PRs[0].ProviderMergeStateStatus = domain.CIPassing, "BLOCKED"
+			},
 			wantState: "running", wantCode: pipelineruns.WaitAwaitingCIStatus,
 		},
 		"failing check that may be required": {
@@ -595,5 +609,29 @@ func TestReviewStageRejectsStageOverrides(t *testing.T) {
 	})
 	if code(t, err) != "INVALID_PIPELINE_OVERRIDE" {
 		t.Fatalf("the reviewer is configured in review settings, not per stage: %v", err)
+	}
+}
+
+func TestReviewPausedOnAWorkerFixableReasonAdmitsTheOwnerButNotWhileEvaluating(t *testing.T) {
+	r := newReviewing(t, false)
+	_, head := r.toReview()
+	r.setPR(head)
+	r.setRun(reviewRun("rr1", head, domain.ReviewRunRunning, domain.VerdictNone, time.Now()))
+	r.drive()
+	if r.admitted(r.sessionID) {
+		t.Fatal("while AO's review evaluates the revision nothing may change it")
+	}
+	// A failing, non-required-unprovable check pauses the run on ci_failing.
+	r.setRun(reviewRun("rr1", head, domain.ReviewRunComplete, domain.VerdictApproved, time.Now()))
+	r.reviews.set(func(f *pipelineruns.ReviewFacts) {
+		f.PRs[0].CI, f.PRs[0].ProviderMergeStateStatus = domain.CIFailing, "BLOCKED"
+	})
+	r.drive()
+	v := r.get()
+	if v.State != "paused" || v.PauseReason != string(pipelineruns.PauseCIFailing) {
+		t.Fatalf("setup: %+v", v)
+	}
+	if !r.admitted(r.sessionID) {
+		t.Fatal("the owner must be reachable to fix CI while the run is paused on it")
 	}
 }

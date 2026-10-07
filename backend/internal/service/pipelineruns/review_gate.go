@@ -219,7 +219,7 @@ func evaluateReview(in gateInput) gateDecision {
 	case run.Status == domain.ReviewRunFailed || run.Status == domain.ReviewRunCancelled:
 		return withPR(pause(PauseReviewOperational, fmt.Sprintf("The built-in review %s for revision %s. AO does not retry it behind the run's back; fix the reviewer and trigger it again", run.Status, shortCommit(in.Checkpoint))), d)
 	case run.Verdict == domain.VerdictChangesRequested:
-		out := withPR(pause(PauseReviewChangesRequested, fmt.Sprintf("The built-in review requested changes on revision %s. Review repair is not automatic yet; address the findings, then decide how to continue", shortCommit(in.Checkpoint))), d)
+		out := withPR(pause(PauseReviewChangesRequested, fmt.Sprintf("The built-in review requested changes on revision %s. This workflow has no repair route, so resuming would re-evaluate the same revision; address the findings, then cancel this run and start a new one on the new head", shortCommit(in.Checkpoint))), d)
 		out.FinishFailed, out.Outcome = true, "changes_requested"
 		return out
 	case run.Verdict != domain.VerdictApproved:
