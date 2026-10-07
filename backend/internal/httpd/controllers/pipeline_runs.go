@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	runssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
@@ -14,7 +15,23 @@ import (
 // read, and stage-result submission for a pipeline run attached to a worker. A
 // nil Mgr keeps routes registered but returns OpenAPI-backed 501s.
 type PipelineRunsController struct {
-	Mgr runssvc.Manager
+	Mgr     runssvc.Manager
+	Callers PipelineCallerAuthority
+}
+
+// bindRequester fixes the requester server-side when the daemon can tell the
+// request comes from inside an AO session: such a caller is never "user", whatever
+// the body claims. It reports false after writing the refusal.
+func (c *PipelineRunsController) bindRequester(w http.ResponseWriter, r *http.Request, requestedBy *string) bool {
+	fromSession, err := c.Callers.SessionCaller(r)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return false
+	}
+	if fromSession {
+		*requestedBy = string(domain.PipelineRequestedByOrchestrator)
+	}
+	return true
 }
 
 // Register mounts the pipeline run routes.
@@ -46,6 +63,9 @@ func (c *PipelineRunsController) start(w http.ResponseWriter, r *http.Request) {
 	var in runssvc.StartInput
 	if err := decodeJSONStrict(r, &in); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if !c.bindRequester(w, r, &in.RequestedBy) {
 		return
 	}
 	in.SessionID = sessionID(r)
@@ -84,6 +104,9 @@ func (c *PipelineRunsController) control(w http.ResponseWriter, r *http.Request)
 	var in runssvc.ControlInput
 	if err := decodeJSONStrict(r, &in); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if !c.bindRequester(w, r, &in.RequestedBy) {
 		return
 	}
 	in.SessionID = sessionID(r)

@@ -187,7 +187,7 @@ func TestCommandTrustIsAUserDecisionSavedWithoutTouchingOtherSettings(t *testing
 	if err != nil || cat.CommandsTrusted {
 		t.Fatalf("repository commands are untrusted by default: %+v err=%v", cat.CommandsTrusted, err)
 	}
-	got, err := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: true})
+	got, err := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: true, RequestedBy: "user"})
 	if err != nil || !got.Trusted || !st.row.Config.TrustPipelineCommands || st.row.Config.AgentRules != "keep" {
 		t.Fatalf("grant: %+v err=%v config=%+v", got, err, st.row.Config)
 	}
@@ -195,10 +195,25 @@ func TestCommandTrustIsAUserDecisionSavedWithoutTouchingOtherSettings(t *testing
 	if !cat.CommandsTrusted {
 		t.Fatal("the catalog reports the authorization")
 	}
-	if got, _ := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: false}); got.Trusted || st.row.Config.TrustPipelineCommands {
+	if got, _ := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: false, RequestedBy: "user"}); got.Trusted || st.row.Config.TrustPipelineCommands {
 		t.Fatal("revocation must take effect")
 	}
-	if _, err := svc.SetCommandTrust(context.Background(), "nope", pipelines.SetCommandTrustInput{Trusted: true}); apiCode(t, err) != "PROJECT_NOT_FOUND" {
+	if _, err := svc.SetCommandTrust(context.Background(), "nope", pipelines.SetCommandTrustInput{Trusted: true, RequestedBy: "user"}); apiCode(t, err) != "PROJECT_NOT_FOUND" {
 		t.Fatalf("unknown project: %v", err)
+	}
+}
+
+func TestCommandTrustRefusesAnyRequesterButAPerson(t *testing.T) {
+	svc, st := newFixture(t, map[string]string{pipeline.ProfilesDir + "/tester.yaml": profileYAML})
+	for name, requester := range map[string]string{"orchestrator": "orchestrator", "empty defaults to orchestrator": ""} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: true, RequestedBy: requester})
+			if apiCode(t, err) != "PIPELINE_TRUST_USER_ONLY" || st.row.Config.TrustPipelineCommands {
+				t.Fatalf("a non-human requester must not authorize repository commands: %v trusted=%v", err, st.row.Config.TrustPipelineCommands)
+			}
+		})
+	}
+	if _, err := svc.SetCommandTrust(context.Background(), "p", pipelines.SetCommandTrustInput{Trusted: true, RequestedBy: "bot"}); apiCode(t, err) != "INVALID_PIPELINE_REQUESTER" {
+		t.Fatalf("unknown requester: %v", err)
 	}
 }

@@ -33,6 +33,7 @@ ao spawn --project app --name "task" --prompt "..."                             
 
 ## Rules for agents
 
+- The "User only" subcommands (`trust`, overrides, `authorize-repairs`, resuming a recovery or spent-budget pause) are refused for sessions. The daemon enforces this for requests it can attribute to your session; on the local loopback API it is otherwise cooperative, so never evade it (no clearing `AO_SESSION_ID`/`AO_BROWSER_CAPABILITY`, no raw HTTP calls claiming `requestedBy: user`). Ask the human.
 - Only `executable` workflows can be selected. Do not assume a workflow exists; run `ao pipeline ls --json` first.
 - You cannot override a stage's harness or model, wake an inactive stage, force a gate to pass, resume a pause that is a person's decision (recovery, spent repair budget), or authorize extra repairs. Report what is needed and let the human decide.
 - A worker saying it is done mid-pipeline is a signal. Treat the task as complete only when AO reports the pipeline completed. Pipeline completion never merges anything.

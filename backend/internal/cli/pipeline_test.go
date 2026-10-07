@@ -148,6 +148,7 @@ func TestPipelineKeepsDaemonErrorEnvelope(t *testing.T) {
 }
 
 func TestPipelineTrustAuthorizesAndRevokes(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
 	var bodies []string
 	pipelineServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/projects/demo/pipelines/command-trust" {
@@ -166,7 +167,20 @@ func TestPipelineTrustAuthorizesAndRevokes(t *testing.T) {
 	if out, _, err := executeCLI(t, deps, "pipeline", "trust", "--revoke", "--project", "demo"); err != nil || !strings.Contains(out, "revoked") {
 		t.Fatalf("revoke: err=%v out=%s", err, out)
 	}
-	if len(bodies) != 2 || bodies[0] != `{"trusted":true}` || bodies[1] != `{"trusted":false}` {
+	if len(bodies) != 2 || bodies[0] != `{"trusted":true,"requestedBy":"user"}` || bodies[1] != `{"trusted":false,"requestedBy":"user"}` {
 		t.Fatalf("bodies: %v", bodies)
+	}
+}
+
+func TestPipelineTrustIsRefusedInsideAnAOSession(t *testing.T) {
+	called := false
+	pipelineServer(t, func(w http.ResponseWriter, r *http.Request) {
+		called = called || strings.HasSuffix(r.URL.Path, "/command-trust")
+		w.WriteHeader(http.StatusNotFound)
+	})
+	t.Setenv("AO_SESSION_ID", "orchestrator-1")
+	_, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "pipeline", "trust", "--project", "demo")
+	if err == nil || ExitCode(err) != 2 || called {
+		t.Fatalf("a session must not authorize repository commands: err=%v called=%v", err, called)
 	}
 }

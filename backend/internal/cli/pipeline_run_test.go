@@ -67,6 +67,34 @@ func TestPipelineStartIdentifiesCallerAndRefusesAgentOverrides(t *testing.T) {
 	}
 }
 
+func TestPipelineRequestsCarryTheSessionCapabilityForServerSideBinding(t *testing.T) {
+	var headers http.Header
+	runServer(t, func(w http.ResponseWriter, r *http.Request) {
+		headers = r.Header.Clone()
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, runningRunJSON)
+	})
+	deps := Deps{ProcessAlive: func(int) bool { return true }}
+
+	t.Setenv("AO_SESSION_ID", "orchestrator-1")
+	t.Setenv("AO_BROWSER_CAPABILITY", "cap-secret")
+	if _, _, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1"); err != nil {
+		t.Fatal(err)
+	}
+	if headers.Get("X-AO-Caller-Session") != "orchestrator-1" || headers.Get("X-AO-Browser-Capability") != "cap-secret" {
+		t.Fatalf("the daemon needs the session's identity to bind the requester: %v", headers)
+	}
+
+	t.Setenv("AO_SESSION_ID", "")
+	t.Setenv("AO_BROWSER_CAPABILITY", "")
+	if _, _, err := executeCLI(t, deps, "pipeline", "start", "wf", "--session", "w-1"); err != nil {
+		t.Fatal(err)
+	}
+	if headers.Get("X-AO-Caller-Session") != "" || headers.Get("X-AO-Browser-Capability") != "" {
+		t.Fatalf("a person at a shell sends no session identity: %v", headers)
+	}
+}
+
 func TestPipelineStatusWithoutRunSaysOrdinaryWorker(t *testing.T) {
 	runServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, `{"run":null}`) })
 	t.Setenv("AO_SESSION_ID", "w-1")

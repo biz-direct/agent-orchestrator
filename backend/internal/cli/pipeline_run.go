@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -239,6 +240,22 @@ func pipelineRequester() string {
 	return "user"
 }
 
+// pipelineCallerHeaders attaches the session's daemon-issued capability so the
+// daemon can bind the requester itself. Both values are absent for a person at a
+// shell (a user shell scoped to a session has its capability blanked), and then
+// the daemon relies on the declared requester: the human-only guard is
+// cooperative for requests it cannot attribute to a session.
+func pipelineCallerHeaders() map[string]string {
+	session := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+	capability := strings.TrimSpace(os.Getenv("AO_BROWSER_CAPABILITY"))
+	if session == "" || capability == "" {
+		return nil
+	}
+	return map[string]string{pipelineCallerSessionHeader: session, browserCapabilityHeader: capability}
+}
+
+const pipelineCallerSessionHeader = "X-AO-Caller-Session"
+
 func pipelineSessionID(flag string) (string, error) {
 	id := strings.TrimSpace(flag)
 	if id == "" {
@@ -283,7 +300,7 @@ func newPipelineStartCommand(ctx *commandContext) *cobra.Command {
 				return usageError{errors.New("--override-stage needs --harness or --model")}
 			}
 			var res pipelineRunEnvelopeDTO
-			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/pipeline", req, &res); err != nil {
+			if err := ctx.doJSONPathWithHeaders(cmd.Context(), http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/pipeline", req, &res, pipelineCallerHeaders()); err != nil {
 				return err
 			}
 			if jsonOutput {
@@ -344,7 +361,7 @@ func runControl(cmd *cobra.Command, ctx *commandContext, session string, build f
 	req := build(current.Run)
 	req.RunID, req.RequestedBy = current.Run.ID, pipelineRequester()
 	var res pipelineControlResultDTO
-	if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/pipeline/control", req, &res); err != nil {
+	if err := ctx.doJSONPathWithHeaders(cmd.Context(), http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/pipeline/control", req, &res, pipelineCallerHeaders()); err != nil {
 		return pipelineControlResultDTO{}, err
 	}
 	return res, nil

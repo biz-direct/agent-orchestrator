@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"text/tabwriter"
@@ -75,6 +76,11 @@ type pipelineTrustDTO struct {
 	Trusted bool `json:"trusted"`
 }
 
+type pipelineTrustRequestDTO struct {
+	Trusted     bool   `json:"trusted"`
+	RequestedBy string `json:"requestedBy"`
+}
+
 type pipelineCatalogDTO struct {
 	ProjectID       string                    `json:"projectId"`
 	Profiles        []pipelineProfileEntryDTO `json:"profiles"`
@@ -96,7 +102,9 @@ func newPipelineCommand(ctx *commandContext) *cobra.Command {
 		Long: "Pipelines are defined in repository files under .ao/pipelines/profiles and " +
 			".ao/pipelines/workflows. AO discovers and validates them; there is no editor. " +
 			"A valid workflow that this build cannot execute yet is shown as unavailable and " +
-			"is never silently replaced by a normal worker.",
+			"is never silently replaced by a normal worker. Decisions reserved for a person (trust, stage overrides, " +
+			"extra repairs, recovery decisions) are refused inside an AO session; the daemon enforces that for requests " +
+			"it can attribute to a session and it is cooperative on the unauthenticated loopback API otherwise.",
 	}
 	cmd.AddCommand(
 		newPipelineListCommand(ctx),
@@ -381,15 +389,21 @@ func newPipelineTrustCommand(ctx *commandContext) *cobra.Command {
 		Short: "Authorize (or --revoke) AO running validation commands declared in repository pipeline profiles",
 		Long: "Pipeline profiles can declare validation commands in repository files. Those are repository-controlled, " +
 			"so AO runs them only after you authorize it for the project. Authorization is checked each time commands " +
-			"are about to run, so --revoke takes effect immediately.",
+			"are about to run, so --revoke takes effect immediately. This is a person's decision: it is refused when run " +
+			"from inside an AO session, and the daemon refuses it for any request it can attribute to a session. " +
+			"On the unauthenticated loopback API the guard is cooperative for requests it cannot attribute.",
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if pipelineRequester() != "user" {
+				return usageError{errors.New("authorizing repository pipeline commands is user-only and cannot be done from inside an AO session")}
+			}
 			resolved, err := ctx.resolveSpawnProject(cmd.Context(), project)
 			if err != nil {
 				return err
 			}
 			var res pipelineTrustDTO
-			if err := ctx.putJSON(cmd.Context(), "projects/"+url.PathEscape(resolved.ID)+"/pipelines/command-trust", pipelineTrustDTO{Trusted: !revoke}, &res); err != nil {
+			if err := ctx.doJSONPathWithHeaders(cmd.Context(), http.MethodPut, "/api/v1/projects/"+url.PathEscape(resolved.ID)+"/pipelines/command-trust",
+				pipelineTrustRequestDTO{Trusted: !revoke, RequestedBy: pipelineRequester()}, &res, pipelineCallerHeaders()); err != nil {
 				return err
 			}
 			if jsonOutput {

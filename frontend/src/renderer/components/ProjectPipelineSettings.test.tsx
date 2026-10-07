@@ -154,7 +154,7 @@ describe("ProjectPipelineSettings", () => {
 		await waitFor(() =>
 			expect(putMock).toHaveBeenCalledWith("/api/v1/projects/{id}/pipelines/command-trust", {
 				params: { path: { id: "proj-1" } },
-				body: { trusted: true },
+				body: { trusted: true, requestedBy: "user" },
 			}),
 		);
 		await waitFor(() => expect(screen.queryByText(/AO runs them only after you allow it here/)).not.toBeInTheDocument());

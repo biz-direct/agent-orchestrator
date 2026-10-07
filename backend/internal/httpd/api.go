@@ -172,8 +172,8 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		projects: &controllers.ProjectsController{
 			Mgr: deps.Projects,
 		},
-		pipelines:    &controllers.PipelinesController{Mgr: deps.Pipelines},
-		pipelineRuns: &controllers.PipelineRunsController{Mgr: deps.PipelineRuns},
+		pipelines:    &controllers.PipelinesController{Mgr: deps.Pipelines, Callers: pipelineCallers(deps)},
+		pipelineRuns: &controllers.PipelineRunsController{Mgr: deps.PipelineRuns, Callers: pipelineCallers(deps)},
 		sessions: &controllers.SessionsController{
 			Pipelines:                pipelineSelector(deps.PipelineRuns),
 			Svc:                      deps.Sessions,
@@ -338,4 +338,12 @@ func pipelineSelector(m pipelineruns.Manager) controllers.PipelineSelector {
 		return nil
 	}
 	return m
+}
+
+// pipelineCallers lets pipeline routes attribute a request to an AO session
+// through the capability the daemon already issues to it. Without a session
+// service or validator no request can be attributed and the human-only guard
+// stays cooperative.
+func pipelineCallers(deps APIDeps) controllers.PipelineCallerAuthority {
+	return controllers.PipelineCallerAuthority{Sessions: deps.Sessions, Capabilities: deps.SessionCapabilities}
 }

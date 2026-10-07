@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
@@ -14,7 +15,8 @@ import (
 // repository-defined catalog and the project-default pipeline selection. A nil
 // Mgr keeps routes registered but returns OpenAPI-backed 501s.
 type PipelinesController struct {
-	Mgr pipelinessvc.Manager
+	Mgr     pipelinessvc.Manager
+	Callers PipelineCallerAuthority
 }
 
 // Register mounts the pipeline routes on the supplied router.
@@ -78,6 +80,17 @@ func (c *PipelinesController) setCommandTrust(w http.ResponseWriter, r *http.Req
 	if err := decodeJSONStrict(r, &in); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
+	}
+	// Authorizing repository commands is a person's decision: a request the
+	// daemon can attribute to an AO session is bound to "orchestrator" whatever
+	// the body claims.
+	fromSession, err := c.Callers.SessionCaller(r)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if fromSession {
+		in.RequestedBy = string(domain.PipelineRequestedByOrchestrator)
 	}
 	out, err := c.Mgr.SetCommandTrust(r.Context(), projectID(r), in)
 	if err != nil {

@@ -5488,6 +5488,8 @@ export interface components {
             title: string;
         };
         SetPipelineCommandTrustRequest: {
+            /** @enum {string} */
+            requestedBy: "user" | "orchestrator";
             trusted: boolean;
         };
         SetProjectConfigInput: {
@@ -10163,6 +10165,15 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

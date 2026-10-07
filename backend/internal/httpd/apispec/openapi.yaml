@@ -3114,6 +3114,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
         "404":
           content:
             application/json:
@@ -15813,10 +15819,16 @@ components:
       type: object
     SetPipelineCommandTrustRequest:
       properties:
+        requestedBy:
+          enum:
+          - user
+          - orchestrator
+          type: string
         trusted:
           type: boolean
       required:
       - trusted
+      - requestedBy
       type: object
     SetProjectConfigInput:
       properties:

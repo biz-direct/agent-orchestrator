@@ -82,7 +82,7 @@ export function ProjectPipelineSettings({ projectId, hostId }: { projectId: stri
 		mutationFn: async (trusted: boolean) => {
 			const { data, error } = await (hostId ? clientForHost(hostId) : apiClient).PUT("/api/v1/projects/{id}/pipelines/command-trust", {
 				params: { path: { id: projectId } },
-				body: { trusted },
+				body: { trusted, requestedBy: "user" },
 			});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data;

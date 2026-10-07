@@ -58,6 +58,10 @@ type CommandTrust struct {
 // SetCommandTrustInput is the body of PUT /projects/{id}/pipelines/command-trust.
 type SetCommandTrustInput struct {
 	Trusted bool `json:"trusted"`
+	// RequestedBy is "user" or "orchestrator". Authorizing (or revoking)
+	// repository-controlled commands is a person's decision, so any requester
+	// other than "user" is refused; an empty value is treated as orchestrator.
+	RequestedBy string `json:"requestedBy" enum:"user,orchestrator"`
 }
 
 // WorkflowView is one discovered workflow plus whether this build can run it.
@@ -229,6 +233,13 @@ func resolveDefault(sel *domain.PipelineSelection, cat pipeline.Catalog) Default
 
 // SetCommandTrust implements Manager.
 func (s *Service) SetCommandTrust(ctx context.Context, id domain.ProjectID, in SetCommandTrustInput) (CommandTrust, error) {
+	switch domain.PipelineRequester(strings.TrimSpace(in.RequestedBy)) {
+	case domain.PipelineRequestedByUser:
+	case "", domain.PipelineRequestedByOrchestrator:
+		return CommandTrust{}, apierr.Forbidden("PIPELINE_TRUST_USER_ONLY", "Authorizing repository pipeline commands is a person's decision; an orchestrator or worker cannot do it")
+	default:
+		return CommandTrust{}, apierr.Invalid("INVALID_PIPELINE_REQUESTER", `requestedBy must be "user" or "orchestrator"`, nil)
+	}
 	if _, err := s.project(ctx, id); err != nil {
 		return CommandTrust{}, err
 	}

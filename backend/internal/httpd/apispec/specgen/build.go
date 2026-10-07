@@ -2293,6 +2293,7 @@ func projectOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, pipelinessvc.CommandTrust{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusForbidden, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

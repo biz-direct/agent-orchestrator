@@ -127,7 +127,8 @@ ao pipeline submit --outcome succeeded --summary "…"   # run by the worker whe
   affect future runs only.
 - **Overrides.** Only an explicit *user* may override a stage's harness/model
   (`--override-stage`, `--harness`, `--model`). A command run inside an AO session
-  is treated as an orchestrator and cannot. Instructions, path constraints, and
+  is treated as an orchestrator and cannot (see "How the human-only guard is
+  enforced" for what the daemon can and cannot prove). Instructions, path constraints, and
   gates apply either way.
 - **Verified results.** `ao pipeline submit` only *claims* a result. The daemon
   accepts it for the active attempt, under the controller generation the attempt
@@ -233,7 +234,9 @@ agree.
 
 - **Trusted execution.** Commands come from repository files, so AO runs them
   only after the user authorizes it: **Settings → Project → Pipeline → Run
-  repository validation commands**, or `ao pipeline trust` / `--revoke`. The flag
+  repository validation commands**, or `ao pipeline trust` / `--revoke`. The
+  daemon refuses the request for any requester but `user` (`403
+  PIPELINE_TRUST_USER_ONLY`) and for any request it can attribute to an AO session. The flag
   is never read from a repository file and is checked every time commands are
   about to run, so revoking it stops later commands. Without it the run pauses
   with `commands_not_authorized` and nothing runs.
@@ -532,6 +535,26 @@ reasons, remaining repair budget, and the last restart recovery, without credent
 or runtime internals. The orchestrator also receives AO-authored reports: a
 `needs_input` report for any pause that needs a decision (with the reason and where
 to look) and a `done` report **only** from validated pipeline completion.
+
+**How the human-only guard is enforced (and where it is only cooperative).** The
+decisions reserved for a person are: stage harness/model overrides, authorizing
+repository validation commands (`ao pipeline trust`), authorizing extra repairs,
+and resuming a recovery or spent-budget pause. Every such request carries a
+`requestedBy` of `user` or `orchestrator` (empty means `orchestrator`), and the
+daemon refuses the human-only operations for anything but `user`. Where the daemon
+can tell a request comes from inside an AO session it **binds `requestedBy` to
+`orchestrator` itself**, whatever the body says: `ao pipeline` inside a session
+sends the session's daemon-issued capability (the same one `ao browser` uses,
+injected only into that session) in `X-AO-Caller-Session` /
+`X-AO-Browser-Capability`, and a request presenting an invalid one is refused
+(`PIPELINE_CALLER_INVALID`). The primary listener is unauthenticated loopback by
+design, though, so the daemon cannot prove a request did *not* come from a
+session: a caller that strips the session environment (for example
+`env -u AO_SESSION_ID -u AO_BROWSER_CAPABILITY ao pipeline ...`) or calls the HTTP
+API directly with `"requestedBy":"user"` is indistinguishable from a person at a
+shell. For those callers the guard is **cooperative**, not a security boundary. AO
+does not add authentication to the loopback listener for this; treat an agent that
+deliberately evades it as having the same local access as the user.
 
 **Control, with limits.** An orchestrator may pause, resume, and cancel. It cannot
 wake an inactive stage, force a gate to pass, resume a human-only pause (recovery,
