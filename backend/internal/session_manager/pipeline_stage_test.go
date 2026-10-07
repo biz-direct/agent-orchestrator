@@ -498,7 +498,9 @@ func TestKillOfTheOwnerStopsAndTerminatesItsAttachedStagesBeforeTheWorkspaceGoes
 	m, st, launcher, ws, owner := newPipelineStageManager(t)
 	stage := addAttachedStage(st, owner)
 	var stoppedBeforeDestroy bool
-	ws.destroyHook = func() { stoppedBeforeDestroy = len(launcher.stopped) > 0 && launcher.stopped[0] == stage.ID && st.sessions[stage.ID].IsTerminated }
+	ws.destroyHook = func() {
+		stoppedBeforeDestroy = len(launcher.stopped) > 0 && launcher.stopped[0] == stage.ID && st.sessions[stage.ID].IsTerminated
+	}
 
 	if _, err := m.Kill(context.Background(), owner.ID); err != nil {
 		t.Fatal(err)
