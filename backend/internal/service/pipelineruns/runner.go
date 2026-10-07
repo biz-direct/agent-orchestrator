@@ -216,15 +216,50 @@ func sanitizeLog(s string, env []string) string {
 	return s
 }
 
-// commandEnv is the environment validation commands receive: the daemon's own,
-// minus every AO-internal variable (session capabilities, run-file paths).
-func commandEnv() []string {
+// commandEnvAllow lists the daemon environment variables a validation command
+// may inherit: the process basics and the roots toolchains need to find
+// themselves. Everything else is dropped, so a repository-controlled command
+// never receives the daemon's credentials (cloud keys, registry and API tokens,
+// anything an AO or harness login exported). Variables are matched
+// case-insensitively because Windows environment names are.
+var commandEnvAllow = map[string]bool{
+	"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true,
+	"TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LANGUAGE": true, "TZ": true, "TERM": true,
+	// Toolchain roots and caches.
+	"GOPATH": true, "GOROOT": true, "GOCACHE": true, "GOMODCACHE": true, "GOTOOLCHAIN": true,
+	"CARGO_HOME": true, "RUSTUP_HOME": true, "NVM_DIR": true, "VOLTA_HOME": true, "FNM_DIR": true,
+	"PYENV_ROOT": true, "VIRTUAL_ENV": true, "JAVA_HOME": true, "GRADLE_USER_HOME": true,
+	"ASDF_DIR": true, "ASDF_DATA_DIR": true, "MISE_DATA_DIR": true, "DOTNET_ROOT": true,
+	"SDKROOT": true, "DEVELOPER_DIR": true,
+	// Windows process basics.
+	"SYSTEMROOT": true, "SYSTEMDRIVE": true, "WINDIR": true, "COMSPEC": true, "PATHEXT": true,
+	"USERPROFILE": true, "USERNAME": true, "HOMEDRIVE": true, "HOMEPATH": true,
+	"APPDATA": true, "LOCALAPPDATA": true, "PROGRAMFILES": true, "PROGRAMFILES(X86)": true, "PROGRAMDATA": true,
+}
+
+// commandEnvAllowPrefixes are families of locale and XDG directory variables.
+var commandEnvAllowPrefixes = []string{"LC_", "XDG_"}
+
+// filterCommandEnv keeps only allowlisted variables. AO_* never matches the
+// allowlist, so session capabilities and run-file paths are always stripped.
+func filterCommandEnv(environ []string) []string {
 	var env []string
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "AO_") {
-			continue
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		name = strings.ToUpper(name)
+		allowed := commandEnvAllow[name]
+		for _, prefix := range commandEnvAllowPrefixes {
+			allowed = allowed || strings.HasPrefix(name, prefix)
 		}
-		env = append(env, kv)
+		if allowed {
+			env = append(env, kv)
+		}
 	}
-	return append(env, "AO_PIPELINE_VALIDATION=1")
+	return env
+}
+
+// commandEnv is the environment validation commands receive: an allowlisted
+// subset of the daemon's own (see commandEnvAllow) plus AO_PIPELINE_VALIDATION.
+func commandEnv() []string {
+	return append(filterCommandEnv(os.Environ()), "AO_PIPELINE_VALIDATION=1")
 }

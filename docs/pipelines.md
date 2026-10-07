@@ -249,8 +249,15 @@ agree.
   proof it may have run) and then with its identity, revision, timing, exit
   status, and a bounded log (first 8 KiB + last 24 KiB). Logs are sanitized
   (terminal escapes and control bytes removed; token-shaped strings and the
-  values of secret-named environment variables redacted). Commands run with the
-  daemon's environment minus every `AO_*` variable.
+  values of secret-named environment variables redacted). Commands run with an
+  **allowlisted** environment, not the daemon's: `PATH`, `HOME`, `USER`, `SHELL`,
+  `TMPDIR`/`TMP`/`TEMP`, `LANG`/`LC_*`/`TZ`/`TERM`, `XDG_*`, the toolchain roots and
+  caches (`GOPATH`, `GOROOT`, `GOCACHE`, `GOMODCACHE`, `CARGO_HOME`, `RUSTUP_HOME`,
+  `NVM_DIR`, `VOLTA_HOME`, `PYENV_ROOT`, `JAVA_HOME`, …) and the Windows process
+  basics. Credentials in the daemon's environment (cloud keys, registry and API
+  tokens, `SSH_AUTH_SOCK`) and every `AO_*` variable are not passed. A command
+  that needs a secret must obtain it from its own repository tooling; AO does not
+  forward one.
 - **Verdicts.** A clean exit passes; an ordinary non-zero exit of a `required`
   check is a genuine failure (`validation_failed`, retained for repair routing).
   Launch failures (exit 126/127, cannot start), timeouts, cancellation, and
@@ -606,8 +613,8 @@ in v1: there is no visual editor and no global profile inheritance.
 - **Trusted commands.** Validation commands come from repository files, so AO runs
   them only after a user authorizes the project (`ao pipeline trust`, or the
   project's Pipeline settings). Revoking takes effect immediately, before the next
-  command. Commands run in their own process group with a timeout, a scrubbed AO
-  environment, and bounded, redacted output; they never run on a moving worktree.
+  command. Commands run in their own process group with a timeout, an allowlisted
+  environment (no daemon credentials, no `AO_*`), and bounded, redacted output; they never run on a moving worktree.
 - **Shared worktree, not isolation.** Stages share one checkout and run strictly one
   at a time under an execution gate; `allowedPaths` is checked on the commits a
   specialist hands off. Neither is a filesystem or process sandbox and neither stops

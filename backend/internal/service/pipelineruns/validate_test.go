@@ -414,3 +414,24 @@ func TestProfileWithoutCommandsStillAcceptsImmediately(t *testing.T) {
 	}
 	_ = pipeline.StageSpecialist
 }
+
+func TestCommandsReceiveAnAllowlistedEnvironmentNotTheDaemonsCredentials(t *testing.T) {
+	for k, v := range map[string]string{
+		"AWS_SECRET_ACCESS_KEY": "aws-secret-value", "GITHUB_TOKEN": "gh-token-value", "NPM_TOKEN": "npm-token-value",
+		"ANTHROPIC_API_KEY": "anthropic-key-value", "SSH_AUTH_SOCK": "/tmp/agent-sock", "AO_SESSION_ID": "leak-me",
+		"GOPATH": "/allowed/gopath", "LC_ALL": "C",
+	} {
+		t.Setenv(k, v)
+	}
+	v := newValidatedStage(t, "  - {id: unit, command: \"echo path=[$PATH] home=[$HOME] gopath=[$GOPATH] lc=[$LC_ALL] aws=[$AWS_SECRET_ACCESS_KEY] gh=[$GITHUB_TOKEN] npm=[$NPM_TOKEN] llm=[$ANTHROPIC_API_KEY] ssh=[$SSH_AUTH_SOCK] ao=[$AO_SESSION_ID]\"}\n", true)
+	v.submitPass()
+	log := commandsByID(v.validate().Attempts[1])["unit"].Log
+	for _, want := range []string{"gopath=[/allowed/gopath]", "lc=[C]", "aws=[]", "gh=[]", "npm=[]", "llm=[]", "ssh=[]", "ao=[]"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("want %q in %q", want, log)
+		}
+	}
+	if strings.Contains(log, "path=[]") || strings.Contains(log, "home=[]") {
+		t.Errorf("PATH and HOME must still be inherited: %q", log)
+	}
+}
