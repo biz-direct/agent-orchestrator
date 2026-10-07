@@ -63,6 +63,8 @@ jobs:
           if git merge --no-edit -m "Merge $UPSTREAM main ($sha) into fork" upstream/main; then
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
+            # Record the conflicted paths before the merge is aborted.
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
             git merge --abort
             echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
@@ -121,11 +123,22 @@ jobs:
           git merge FETCH_HEAD   # resolve conflicts, commit
           git push origin sync/upstream-$SHA   # then open a PR into main
           \`\`\`"
+          if [ -s "$RUNNER_TEMP/conflicts.txt" ]; then
+            files="$(sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt")"
+            body="$body
+
+          Conflicting files:
+          $files"
+            { echo "### Upstream sync conflicts"; echo "$files"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
           existing="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"
           else
-            gh issue create --label "$label" --title "Upstream sync conflict: $UPSTREAM@$SHA" --body "$body"
+            # Create without --label, then add it: gh issue create --label fails
+            # here with "label not found" even though the label exists.
+            url="$(gh issue create --title "Upstream sync conflict: $UPSTREAM@$SHA" --body "$body")"
+            gh issue edit "$url" --add-label "$label" || echo "::warning::Could not add label $label to $url."
           fi
           echo "::error::Merge conflicts with upstream; issue opened for manual resolution."
           exit 1
