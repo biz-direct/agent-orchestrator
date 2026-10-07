@@ -131,6 +131,10 @@ type ciAssessment struct {
 	Wait   bool
 	Fail   bool
 	Detail string
+	// Unproven reports that the provider's merge state does not confirm that
+	// every required check reported for this head, so a pass or "no checks"
+	// rests on the reported checks alone.
+	Unproven bool
 }
 
 // evaluateReview decides what a Review attempt should do now. It is pure so the
@@ -237,6 +241,9 @@ func evaluateReview(in gateInput) gateDecision {
 	}
 	d.Kind, d.Code = gateComplete, GateReady
 	d.Detail = fmt.Sprintf("Approved by the built-in review for %s; CI: %s", shortCommit(in.Checkpoint), d.CI.State)
+	if d.CI.Unproven {
+		d.Detail += " (required-check coverage unproven: " + d.CI.Detail + ")"
+	}
 	return d
 }
 
@@ -274,6 +281,22 @@ func latestRunForHead(runs []domain.ReviewRun, prURL, head string) *domain.Revie
 // non-passing checks are not required by branch protection.
 const providerUnstable = "UNSTABLE"
 
+// providerBlocked is GitHub's merge state when a requirement of the base
+// branch's rules is unmet: a required check that has not reported for the head
+// (it is absent from the check rollup, so the reported checks can all pass) or
+// another rule such as a required approval.
+const providerBlocked = "BLOCKED"
+
+// requiredChecksConfirmed reports whether the provider's merge state positively
+// confirms that the base branch's required checks are satisfied.
+func requiredChecksConfirmed(mergeState string) bool {
+	switch strings.ToUpper(strings.TrimSpace(mergeState)) {
+	case "CLEAN", "HAS_HOOKS", providerUnstable:
+		return true
+	}
+	return false
+}
+
 // assessCI decides whether required CI holds for head. AO has no per-check
 // "required" flag; the authoritative signal is the provider's merge state: an
 // UNSTABLE pull request is mergeable with only non-required checks failing or
@@ -286,8 +309,21 @@ func assessCI(pr domain.PullRequest, checks []domain.PullRequestCheck, head stri
 		}
 	}
 	nonRequiredOnly := strings.EqualFold(strings.TrimSpace(pr.ProviderMergeStateStatus), providerUnstable)
+	blocked := strings.EqualFold(strings.TrimSpace(pr.ProviderMergeStateStatus), providerBlocked)
+	unproven := !requiredChecksConfirmed(pr.ProviderMergeStateStatus)
 	switch pr.CI {
 	case domain.CIPassing:
+		if blocked {
+			// The rollup only lists checks that reported. A required check that
+			// never started for this head is absent from it, so "all reported
+			// checks pass" can hold while the provider still reports the pull
+			// request as blocked. BLOCKED is ambiguous (it also covers unmet
+			// approvals), but passing cannot be proven, so AO keeps waiting.
+			return ciAssessment{State: CIUnknown, Wait: true, Unproven: true, Detail: "All reported checks pass for the current head, but the provider's merge state is BLOCKED: a required check may not have reported for this head (or another merge requirement, such as a required approval, is unmet). AO cannot prove required CI is satisfied and will not treat the partial check set as passing"}
+		}
+		if unproven {
+			return ciAssessment{State: CIPassing, Unproven: true, Detail: "All reported checks pass for the current head; the provider's merge state does not confirm that every required check reported"}
+		}
 		return ciAssessment{State: CIPassing, Detail: "All reported checks pass for the current head"}
 	case domain.CIFailing:
 		if nonRequiredOnly {
@@ -304,7 +340,11 @@ func assessCI(pr domain.PullRequest, checks []domain.PullRequestCheck, head stri
 	// has not observed CI yet. Only a recorded observation with no checks counts
 	// as "no CI to wait for".
 	if len(checks) == 0 && !pr.CIObservedAt.IsZero() {
-		return ciAssessment{State: CINoChecks, Detail: "The provider reports no checks for the current head, so there is no CI requirement to wait for"}
+		detail := "The provider reports no checks for the current head, so there is no CI requirement to wait for"
+		if blocked {
+			detail += "; its merge state is BLOCKED, which may mean a required check has not reported, but AO does not invent a CI requirement"
+		}
+		return ciAssessment{State: CINoChecks, Unproven: blocked, Detail: detail}
 	}
 	return ciAssessment{State: CIUnknown, Wait: true, Detail: "CI status for the current head is not known yet; AO will not treat that as passing"}
 }

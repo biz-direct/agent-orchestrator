@@ -346,15 +346,23 @@ continues it.
    without a verdict, pauses (`review_operational`) and is not retried behind
    the run's back.
 5. Required CI for that head. AO has no per-check "required" flag, so it uses the
-   provider's merge state: passing → ok; failing or pending with merge state
+   provider's merge state: passing → ok, **unless the merge state is `BLOCKED`**: the
+   check rollup only lists checks that reported, so a required check that never
+   started for this head leaves "all reported checks pass" true while the provider
+   still blocks the pull request. That waits (`awaiting_ci_status`) with an explicit
+   reason (`BLOCKED` also covers unmet approvals, which AO cannot tell apart, so
+   resolve the block or cancel the run). A pass whose merge state does not positively
+   confirm required checks (`CLEAN`/`HAS_HOOKS`) is recorded as "required-check
+   coverage unproven" in the gate evidence. Failing or pending with merge state
    `UNSTABLE` → only non-required checks are affected, ok; failing otherwise →
    pauses (`ci_failing`) because AO cannot prove the check is not required;
    pending otherwise waits (`awaiting_ci`); results for another commit, or CI
    that has not been observed, wait (`awaiting_ci_status`). A repository whose
    provider reports **no checks** after CI was observed has no CI requirement and
-   AO does not invent one. Limitation: a required check that has not reported
-   yet cannot be told apart from "no checks"; the review itself normally takes
-   long enough for checks to appear.
+   AO does not invent one (a `BLOCKED` merge state with no checks is noted as
+   unproven in the evidence but does not wait). Limitation: with no reported checks
+   at all, a required check that has not reported yet cannot be told apart from "no
+   checks"; the review itself normally takes long enough for checks to appear.
 
 Only when approval **and** CI hold for the current head does the run complete.
 Completing a pipeline never merges, never publishes, and never implies that

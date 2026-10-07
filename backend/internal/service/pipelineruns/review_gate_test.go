@@ -2,6 +2,7 @@ package pipelineruns
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +36,8 @@ func TestEvaluateReviewDecisions(t *testing.T) {
 		failedAt bool
 	}{
 		{name: "approved and passing completes", kind: gateComplete, code: GateReady},
+		{name: "passing but provider blocked waits for CI status", mutate: func(in *gateInput) { in.Facts.PRs[0].ProviderMergeStateStatus = "BLOCKED" }, kind: gateWait, code: WaitAwaitingCIStatus},
+		{name: "passing and clean completes", mutate: func(in *gateInput) { in.Facts.PRs[0].ProviderMergeStateStatus = "CLEAN" }, kind: gateComplete, code: GateReady},
 		{name: "workspace unreadable", mutate: func(in *gateInput) { in.GitErr = errors.New("boom") }, kind: gatePause, pause: PauseReviewUnverifiable},
 		{name: "branch switched", mutate: func(in *gateInput) { in.Git.Branch = "other" }, kind: gatePause, pause: PauseUnexpectedChanges},
 		{name: "untracked files do not matter", mutate: func(in *gateInput) { in.Git.DirtyTotal = 3 }, kind: gateComplete, code: GateReady},
@@ -116,8 +119,14 @@ func TestAssessCI(t *testing.T) {
 		want   string
 		wait   bool
 		fail   bool
+		// unproven is whether required-check coverage is unconfirmed.
+		unproven bool
 	}{
-		{name: "passing", ci: domain.CIPassing, observ: true, checks: current, want: CIPassing},
+		{name: "passing", ci: domain.CIPassing, observ: true, checks: current, want: CIPassing, unproven: true},
+		{name: "passing clean is confirmed", ci: domain.CIPassing, merge: "CLEAN", observ: true, checks: current, want: CIPassing},
+		{name: "passing blocked cannot be proven", ci: domain.CIPassing, merge: "BLOCKED", observ: true, checks: current, want: CIUnknown, wait: true, unproven: true},
+		{name: "no checks and blocked is noted but not invented", ci: domain.CIUnknown, merge: "BLOCKED", observ: true, want: CINoChecks, unproven: true},
+		{name: "no checks and clean has no requirement", ci: domain.CIUnknown, merge: "CLEAN", observ: true, want: CINoChecks},
 		{name: "failing blocked", ci: domain.CIFailing, merge: "BLOCKED", observ: true, want: CIFailing, fail: true},
 		{name: "failing no merge state", ci: domain.CIFailing, observ: true, want: CIFailing, fail: true},
 		{name: "failing unstable is non required", ci: domain.CIFailing, merge: "unstable", observ: true, want: CINonRequiredOnly},
@@ -137,9 +146,21 @@ func TestAssessCI(t *testing.T) {
 				pr.CIObservedAt = time.Time{}
 			}
 			got := assessCI(pr, tc.checks, gateHead)
-			if got.State != tc.want || got.Wait != tc.wait || got.Fail != tc.fail || got.Detail == "" {
+			if got.State != tc.want || got.Wait != tc.wait || got.Fail != tc.fail || got.Unproven != tc.unproven || got.Detail == "" {
 				t.Fatalf("got %+v", got)
 			}
 		})
+	}
+}
+
+func TestReadyDetailStatesWhenRequiredCheckCoverageIsUnproven(t *testing.T) {
+	in := gateBase()
+	got := evaluateReview(in)
+	if got.Kind != gateComplete || !strings.Contains(got.Detail, "required-check coverage unproven") {
+		t.Fatalf("a pass without a confirming merge state must say so: %+v", got)
+	}
+	in.Facts.PRs[0].ProviderMergeStateStatus = "CLEAN"
+	if got := evaluateReview(in); got.Kind != gateComplete || strings.Contains(got.Detail, "unproven") {
+		t.Fatalf("a confirmed pass carries no caveat: %+v", got)
 	}
 }
