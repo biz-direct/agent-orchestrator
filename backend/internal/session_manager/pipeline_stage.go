@@ -42,6 +42,72 @@ func (m *Manager) deliverStagePrompt(ctx context.Context, id domain.SessionID, p
 	return err
 }
 
+// attachedSessionStore is the optional store capability that tells an attached
+// specialist stage session apart from an ordinary one. Stores without it have
+// no attached sessions.
+type attachedSessionStore interface {
+	GetSessionAttachedTo(ctx context.Context, id domain.SessionID) (domain.SessionID, error)
+	ListAttachedSessionIDs(ctx context.Context, owner domain.SessionID) ([]domain.SessionID, error)
+}
+
+// attachedOwner returns the owner worker of an attached stage session, or ""
+// for an ordinary session. A lookup failure is returned, never read as "not
+// attached": the answer decides whether a shared workspace may be destroyed.
+func (m *Manager) attachedOwner(ctx context.Context, id domain.SessionID) (domain.SessionID, error) {
+	store, ok := m.store.(attachedSessionStore)
+	if !ok {
+		return "", nil
+	}
+	return store.GetSessionAttachedTo(ctx, id)
+}
+
+// terminateAttachedSession ends an attached stage session: it stops the
+// controller and marks the row terminated, and nothing else. The worktree,
+// branch, reviewer, and restore markers belong to the owner worker, so none of
+// them are touched here.
+func (m *Manager) terminateAttachedSession(ctx context.Context, id domain.SessionID) error {
+	m.stopChatBestEffort(ctx, id)
+	termCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalIntentBudget)
+	defer cancel()
+	if err := m.lcm.MarkTerminated(termCtx, id); err != nil {
+		return fmt.Errorf("terminate attached stage session %s: %w", id, err)
+	}
+	m.cleanupSystemPromptDir(id)
+	return nil
+}
+
+// terminateAttachedSessionsOf stops and terminates every stage session attached
+// to owner. It runs before the owner's workspace is torn down so no controller
+// is left running in a removed directory, and so no hidden row outlives its
+// owner (every listing excludes attached rows, so nothing else would reap it).
+func (m *Manager) terminateAttachedSessionsOf(ctx context.Context, owner domain.SessionID) error {
+	store, ok := m.store.(attachedSessionStore)
+	if !ok {
+		return nil
+	}
+	ids, err := store.ListAttachedSessionIDs(ctx, owner)
+	if err != nil {
+		return fmt.Errorf("list attached stage sessions of %s: %w", owner, err)
+	}
+	for _, id := range ids {
+		rec, found, err := m.store.GetSession(ctx, id)
+		if err != nil {
+			return fmt.Errorf("load attached stage session %s: %w", id, err)
+		}
+		if !found {
+			continue
+		}
+		if rec.IsTerminated {
+			m.stopChatBestEffort(ctx, id)
+			continue
+		}
+		if err := m.terminateAttachedSession(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type liveChatProbe interface {
 	HasLiveChatController(id domain.SessionID) bool
 }

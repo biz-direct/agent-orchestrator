@@ -2264,6 +2264,18 @@ func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
 	if !ok {
 		return false, nil // already gone: benign race
 	}
+	// An attached pipeline stage shares its owner's worktree and branch, which
+	// are not its to remove: stop its controller and end the row, nothing more.
+	if owner, err := m.attachedOwner(ctx, id); err != nil {
+		return false, fmt.Errorf("kill %s: attached stage lookup: %w", id, err)
+	} else if owner != "" {
+		return false, m.terminateAttachedSession(ctx, id)
+	}
+	// Stage sessions attached to this worker die with it, before its workspace
+	// is removed, so none is left running in a deleted directory.
+	if err := m.terminateAttachedSessionsOf(ctx, id); err != nil {
+		return false, fmt.Errorf("kill %s: %w", id, err)
+	}
 	m.stopPreviewBestEffort(ctx, id)
 	m.destroyBrowserBestEffort(ctx, id)
 	handle := runtimeHandle(rec.Metadata)
@@ -2374,6 +2386,14 @@ func (m *Manager) RetireForReplacement(ctx context.Context, id domain.SessionID)
 	}
 	if !ok || rec.IsTerminated {
 		return nil
+	}
+	if owner, err := m.attachedOwner(ctx, id); err != nil {
+		return fmt.Errorf("retire replacement %s: attached stage lookup: %w", id, err)
+	} else if owner != "" {
+		return m.terminateAttachedSession(ctx, id)
+	}
+	if err := m.terminateAttachedSessionsOf(ctx, id); err != nil {
+		return fmt.Errorf("retire replacement %s: %w", id, err)
 	}
 	m.stopPreviewBestEffort(ctx, id)
 	m.destroyBrowserBestEffort(ctx, id)
@@ -4495,6 +4515,14 @@ func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (Cleanu
 	}
 	for _, rec := range recs {
 		if !rec.IsTerminated {
+			continue
+		}
+		// An attached pipeline stage shares its owner's worktree; only the
+		// owner's own cleanup may reclaim it.
+		if owner, err := m.attachedOwner(ctx, rec.ID); err != nil {
+			result.Skipped = append(result.Skipped, CleanupSkip{SessionID: rec.ID, Reason: "attached stage lookup failed"})
+			continue
+		} else if owner != "" {
 			continue
 		}
 		ws := workspaceInfo(rec)

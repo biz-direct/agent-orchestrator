@@ -46,6 +46,20 @@ func (s *attachedStore) CreateAttachedSession(_ context.Context, rec domain.Sess
 	return rec, nil
 }
 
+func (s *attachedStore) GetSessionAttachedTo(_ context.Context, id domain.SessionID) (domain.SessionID, error) {
+	return s.attached[id], nil
+}
+
+func (s *attachedStore) ListAttachedSessionIDs(_ context.Context, owner domain.SessionID) ([]domain.SessionID, error) {
+	var ids []domain.SessionID
+	for id, o := range s.attached {
+		if o == owner {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
 type fixedGate struct {
 	admit  bool
 	reason string
@@ -437,5 +451,100 @@ func TestResumeExecutorRefusesWhatWouldNeedAFreshController(t *testing.T) {
 	}
 	if _, err := m.ResumeExecutor(context.Background(), "ghost", "P"); !errors.Is(err, ports.ErrPipelineResumeUnsafe) {
 		t.Fatalf("a missing session: %v", err)
+	}
+}
+
+// addAttachedStage seeds an attached stage row that mirrors the owner's shared
+// workspace, plus a restore marker that must survive the stage ending.
+func addAttachedStage(st *attachedStore, owner domain.SessionRecord) domain.SessionRecord {
+	stage := owner
+	stage.ID = "mer-att-1"
+	stage.IsTerminated = false
+	st.sessions[stage.ID] = stage
+	if st.attached == nil {
+		st.attached = map[domain.SessionID]domain.SessionID{}
+	}
+	st.attached[stage.ID] = owner.ID
+	st.worktrees[stage.ID] = []domain.SessionWorktreeRecord{{SessionID: stage.ID}}
+	return stage
+}
+
+func TestKillOfAnAttachedStageSessionOnlyStopsItsControllerAndEndsTheRow(t *testing.T) {
+	m, st, launcher, ws, owner := newPipelineStageManager(t)
+	stage := addAttachedStage(st, owner)
+
+	freed, err := m.Kill(context.Background(), stage.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if freed || ws.destroyed != 0 {
+		t.Fatalf("a stage session must never remove the owner's worktree: freed=%v destroyed=%d", freed, ws.destroyed)
+	}
+	if len(launcher.stopped) != 1 || launcher.stopped[0] != stage.ID {
+		t.Fatalf("the stage's controller must be stopped: %v", launcher.stopped)
+	}
+	if !st.sessions[stage.ID].IsTerminated {
+		t.Fatal("the stage row must end up terminated")
+	}
+	if st.sessions[owner.ID].IsTerminated || st.sessions[owner.ID].Metadata.WorkspacePath != owner.Metadata.WorkspacePath {
+		t.Fatalf("the owner must be untouched: %+v", st.sessions[owner.ID])
+	}
+	if len(st.worktrees[stage.ID]) != 1 {
+		t.Fatal("restore markers are not the stage's to delete")
+	}
+}
+
+func TestKillOfTheOwnerStopsAndTerminatesItsAttachedStagesBeforeTheWorkspaceGoes(t *testing.T) {
+	m, st, launcher, ws, owner := newPipelineStageManager(t)
+	stage := addAttachedStage(st, owner)
+	var stoppedBeforeDestroy bool
+	ws.destroyHook = func() { stoppedBeforeDestroy = len(launcher.stopped) > 0 && launcher.stopped[0] == stage.ID && st.sessions[stage.ID].IsTerminated }
+
+	if _, err := m.Kill(context.Background(), owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !st.sessions[owner.ID].IsTerminated || ws.destroyed != 1 {
+		t.Fatalf("the owner is killed normally: terminated=%v destroyed=%d", st.sessions[owner.ID].IsTerminated, ws.destroyed)
+	}
+	if !st.sessions[stage.ID].IsTerminated {
+		t.Fatal("the attached stage leaked: its row is still live")
+	}
+	if !stoppedBeforeDestroy {
+		t.Fatalf("the stage must be stopped and ended before the workspace is removed: stopped=%v", launcher.stopped)
+	}
+}
+
+func TestRetireForReplacementTreatsAttachedStagesLikeKill(t *testing.T) {
+	m, st, launcher, ws, owner := newPipelineStageManager(t)
+	stage := addAttachedStage(st, owner)
+	if err := m.RetireForReplacement(context.Background(), stage.ID); err != nil {
+		t.Fatal(err)
+	}
+	if ws.destroyed != 0 || !st.sessions[stage.ID].IsTerminated || len(launcher.stopped) != 1 || len(st.worktrees[stage.ID]) != 1 {
+		t.Fatalf("retiring a stage must only stop it: destroyed=%d stopped=%v", ws.destroyed, launcher.stopped)
+	}
+
+	m, st, _, _, owner = newPipelineStageManager(t)
+	stage = addAttachedStage(st, owner)
+	if err := m.RetireForReplacement(context.Background(), owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !st.sessions[stage.ID].IsTerminated {
+		t.Fatal("retiring the owner must terminate its attached stages")
+	}
+}
+
+func TestCleanupNeverReclaimsTheWorkspaceThroughAnAttachedStage(t *testing.T) {
+	m, st, _, ws, owner := newPipelineStageManager(t)
+	stage := addAttachedStage(st, owner)
+	stage.IsTerminated = true
+	st.sessions[stage.ID] = stage
+	owner.IsTerminated = false
+	res, err := m.Cleanup(context.Background(), owner.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.destroyed != 0 || len(res.Cleaned) != 0 || len(res.Skipped) != 0 {
+		t.Fatalf("cleanup must leave the owner's workspace alone: destroyed=%d result=%+v", ws.destroyed, res)
 	}
 }
