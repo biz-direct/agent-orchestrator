@@ -82,6 +82,8 @@ permissions:
 
 jobs:
   update-e2e:
+    # Fork: needs signed upstream releases as the baseline; fork builds are unsigned.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     # macos-latest is Apple silicon, so the arm64 asset is the one under test.
     runs-on: macos-latest
     timeout-minutes: 60

@@ -1,0 +1,131 @@
+# .github/workflows/sync-upstream.yml
+name: Sync upstream
+
+# FORK ONLY: merge OrchestratorInc/agent-orchestrator main into this fork's
+# main through a PR. Clean merge: PR is opened and merged (auto-merge once
+# checks pass, direct merge if there are none). Conflicts: nothing is pushed or
+# forced; an issue is opened for manual resolution. Never tags or publishes.
+#
+# Needs the SYNC_PAT secret (PAT with repo + workflow scope): GITHUB_TOKEN
+# cannot push changes to .github/workflows, and pushes made with it do not
+# trigger CI on the sync PR.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: OrchestratorInc/agent-orchestrator
+
+jobs:
+  sync:
+    if: github.repository != 'OrchestratorInc/agent-orchestrator'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.SYNC_PAT }}
+    steps:
+      - name: Require SYNC_PAT
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Repository secret SYNC_PAT (PAT with repo + workflow scope) is required."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PAT }}
+      - name: Merge upstream main
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch --quiet upstream main
+          sha="$(git rev-parse --short=12 upstream/main)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date with $UPSTREAM@$sha"
+            echo "status=uptodate" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git checkout -b "sync/upstream-$sha"
+          if git merge --no-edit -m "Merge $UPSTREAM main ($sha) into fork" upstream/main; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open PR and merge when clean
+        if: steps.merge.outputs.status == 'clean'
+        shell: bash
+        env:
+          SHA: ${{ steps.merge.outputs.sha }}
+        run: |
+          set -euo pipefail
+          branch="sync/upstream-$SHA"
+          # No force pushes: if the branch already exists (a rerun), reuse it.
+          if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            git push origin "$branch"
+          fi
+          # Only trust a PR whose head lives in THIS repo and sits at the commit
+          # we built; a same-named branch from an outside fork must not match.
+          # Use the commit actually on origin (a rerun's local merge commit differs).
+          remote_ref="refs/heads/$branch"
+          head_sha="$(git ls-remote --heads origin "$remote_ref" |
+            awk -F '\t' -v ref="$remote_ref" '$2 == ref { print $1 }')"
+          pr="$(gh pr list --head "$branch" --base main --state open \
+            --json number,headRefOid,headRepository,headRepositoryOwner \
+            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefOid == "'"$head_sha"'") | .number' | head -n1)"
+          if [ -z "$pr" ]; then
+            pr="$(gh pr create --base main --head "$branch" \
+              --title "chore: sync upstream $UPSTREAM@$SHA" \
+              --body "Automated merge of \`$UPSTREAM\` main at \`$SHA\`. Created by sync-upstream.yml." \
+              | grep -oE '[0-9]+$')"
+          fi
+          # Supersede older sync PRs.
+          gh pr list --state open --base main --json number,headRefName,headRepository,headRepositoryOwner \
+            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefName | startswith("sync/upstream-")) | select(.headRefName != "'"$branch"'") | .number' |
+            while read -r old; do
+              gh pr close "$old" --delete-branch --comment "Superseded by #$pr."
+            done
+          # Auto-merge waits for required checks; with none configured GitHub
+          # reports a clean status and we merge directly.
+          if ! gh pr merge "$pr" --auto --merge --match-head-commit "$head_sha"; then
+            gh pr merge "$pr" --merge --match-head-commit "$head_sha" || echo "::warning::Could not merge #$pr automatically; merge it manually."
+          fi
+      - name: Flag conflicts for manual resolution
+        if: steps.merge.outputs.status == 'conflict'
+        shell: bash
+        env:
+          SHA: ${{ steps.merge.outputs.sha }}
+        run: |
+          set -euo pipefail
+          label="upstream-sync-conflict"
+          gh label create "$label" --color B60205 --description "Upstream sync needs manual merge" 2>/dev/null || true
+          body="Merging \`$UPSTREAM\` main (\`$SHA\`) into \`main\` conflicts. Resolve locally:
+
+          \`\`\`
+          git fetch https://github.com/$UPSTREAM.git main
+          git checkout -b sync/upstream-$SHA origin/main
+          git merge FETCH_HEAD   # resolve conflicts, commit
+          git push origin sync/upstream-$SHA   # then open a PR into main
+          \`\`\`"
+          existing="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --label "$label" --title "Upstream sync conflict: $UPSTREAM@$SHA" --body "$body"
+          fi
+          echo "::error::Merge conflicts with upstream; issue opened for manual resolution."
+          exit 1
