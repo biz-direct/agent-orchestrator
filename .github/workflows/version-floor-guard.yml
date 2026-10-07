@@ -6,6 +6,8 @@ on:
 
 jobs:
   validate:
+    # Fork: upstream desktop version-floor policy.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

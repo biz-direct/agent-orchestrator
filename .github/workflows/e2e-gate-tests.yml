@@ -28,6 +28,8 @@ permissions:
 
 jobs:
   test:
+    # Fork: tests the upstream release conductor's pod gate.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

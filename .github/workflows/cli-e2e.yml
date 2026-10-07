@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: cli-e2e-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Primary tier: the cross-platform Go E2E suite (build tag `e2e`) runs the real
   # `ao` binary against isolated state on every OS GitHub hosts. These runners
@@ -22,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest] # fork: Windows not shipped
     runs-on: ${{ matrix.os }}
     defaults:
       run:

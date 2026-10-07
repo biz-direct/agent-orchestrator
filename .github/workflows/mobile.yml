@@ -17,6 +17,8 @@ permissions:
 
 jobs:
   check:
+    # Fork: the fork ships desktop only.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     defaults:
       run:
