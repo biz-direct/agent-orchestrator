@@ -20,6 +20,8 @@ permissions:
 
 jobs:
   unauthenticated-recursive-clone:
+    # Fork: upstream private-submodule layout.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

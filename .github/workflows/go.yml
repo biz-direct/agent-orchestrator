@@ -159,6 +159,8 @@ jobs:
   # an open handle makes both fail. Scoped to those packages rather than the
   # whole suite to keep the matrix cheap.
   windows-workspace:
+    # Fork: the fork does not ship Windows.
+    if: github.repository == 'OrchestratorInc/agent-orchestrator'
     runs-on: windows-latest
     defaults:
       run:
