@@ -198,9 +198,24 @@ func (m *Manager) quiesceExecutor(ctx context.Context, id domain.SessionID, poli
 		if probe, ok := m.chat.(liveChatProbe); ok {
 			live = probe.HasLiveChatController(id)
 		}
+		if !live {
+			// No controller in this process is not proof that nothing is running:
+			// provider hosts outlive the daemon, so a host this daemon has not
+			// adopted may still be finishing a turn. Adopt it when it is there
+			// (and fence through it), accept only when it is provably not
+			// running, and otherwise stay uncertain.
+			adopted, rerr := m.ReconnectExecutor(ctx, id)
+			switch {
+			case rerr != nil:
+				return uncertain("the executor has no controller in this process and its host could not be probed: %v", rerr)
+			case adopted:
+				live = true
+			}
+		}
 		switch {
 		case !live:
-			// A missing controller cannot be running a turn.
+			// The host is provably not running (or never was), so it cannot be
+			// running a turn.
 		case !supported:
 			return uncertain("the Chat controller cannot be fenced in this build")
 		default:

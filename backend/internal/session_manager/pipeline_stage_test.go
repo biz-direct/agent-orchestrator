@@ -337,11 +337,12 @@ func TestRelinquishExecutorReportsUncertaintyInsteadOfGuessing(t *testing.T) {
 	}
 }
 
-func TestRelinquishExecutorAcceptsAMissingControllerButNotAnActiveAgent(t *testing.T) {
+func TestRelinquishExecutorAcceptsAControllerThatIsProvablyNotRunningButNotAnActiveAgent(t *testing.T) {
 	m, st, launcher, _, owner := newPipelineStageManager(t)
 	launcher.live = false
+	// No recorded conversation: there is no host that could be running a turn.
 	if err := m.RelinquishExecutor(context.Background(), owner.ID); err != nil {
-		t.Fatalf("a controller that is not running cannot be running a turn: %v", err)
+		t.Fatalf("an executor that never had a conversation cannot be running a turn: %v", err)
 	}
 	if len(launcher.armed) != 0 {
 		t.Fatal("nothing to fence without a live controller")
@@ -354,6 +355,46 @@ func TestRelinquishExecutorAcceptsAMissingControllerButNotAnActiveAgent(t *testi
 	if err := m.RelinquishExecutor(context.Background(), "ghost"); !errors.Is(err, ports.ErrPipelineExecutionUncertain) {
 		t.Fatalf("a missing session cannot be proven stopped: %v", err)
 	}
+}
+
+// A missing in-process controller is not proof of quiescence: the provider host
+// outlives the daemon and may still be finishing a turn.
+func TestRelinquishExecutorDoesNotTreatAnUnadoptedHostAsQuiescent(t *testing.T) {
+	withConversation := func(t *testing.T) (*Manager, *recordingLauncher, domain.SessionRecord) {
+		m, st, launcher, _, owner := newPipelineStageManager(t)
+		owner.Metadata.ProviderConversationID = "thread-1"
+		st.sessions[owner.ID] = owner
+		launcher.live = false
+		return m, launcher, owner
+	}
+	t.Run("a surviving host is adopted and fenced", func(t *testing.T) {
+		m, launcher, owner := withConversation(t)
+		launcher.afterReady = func() { launcher.live = true }
+		if err := m.RelinquishExecutor(context.Background(), owner.ID); err != nil {
+			t.Fatal(err)
+		}
+		if len(launcher.armed) != 1 || len(launcher.prepared) != 1 {
+			t.Fatalf("the adopted controller must be fenced and drained: armed=%v prepared=%v", launcher.armed, launcher.prepared)
+		}
+	})
+	t.Run("a host that is provably not running is accepted", func(t *testing.T) {
+		m, launcher, owner := withConversation(t)
+		launcher.startErr = ports.ErrChatHostNotRunning
+		if err := m.RelinquishExecutor(context.Background(), owner.ID); err != nil {
+			t.Fatalf("a host that is provably gone cannot be running a turn: %v", err)
+		}
+		if len(launcher.armed) != 0 {
+			t.Fatal("nothing to fence")
+		}
+	})
+	t.Run("an unprobeable host is uncertain", func(t *testing.T) {
+		m, launcher, owner := withConversation(t)
+		launcher.startErr = errors.New("dial unix: connection timed out")
+		err := m.RelinquishExecutor(context.Background(), owner.ID)
+		if !errors.Is(err, ports.ErrPipelineExecutionUncertain) {
+			t.Fatalf("an unknown probe is never proof of death: %v", err)
+		}
+	})
 }
 
 func TestStopStageOnlyStopsTheController(t *testing.T) {
