@@ -194,6 +194,15 @@ run: |
     );
 
     expect(contents).toContain('tags: ["v*"]');
+    expect(contents).toContain("workflow_dispatch:");
+    expect(contents).toMatch(/version:[\s\S]*required: true/);
+    expect(contents).toContain("--prerelease");
+    // Updater feeds must be generated and required before publishing.
+    expect(contents).toContain("frontend/scripts/feed.mjs");
+    expect(contents).toContain("latest-mac.yml");
+    expect(contents).toContain("latest-linux.yml");
+    // Fails when the release or tag already exists.
+    expect(contents).toContain("already exists");
     expect(contents).toContain("uses: ./.github/workflows/build-artifacts.yml");
     expect(contents).not.toMatch(/branches:|schedule:|pull_request/);
     expect(contents).not.toMatch(/secrets\.(?!GITHUB_TOKEN)/);

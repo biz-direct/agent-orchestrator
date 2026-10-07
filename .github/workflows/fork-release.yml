@@ -1,49 +1,160 @@
 # .github/workflows/fork-release.yml
 name: Fork release
 
-# FORK ONLY: on a v* tag, build the unsigned Apple Silicon macOS and Linux x64
-# desktop apps (via build-artifacts.yml) and attach them, plus sha256 digests,
-# to a GitHub Release on this repo. Replaces the external release conductor.
-# macOS output is unsigned (see docs/fork-ci.md). No auto-update feed
-# (latest-mac.yml) is published, so installs are manual.
+# FORK ONLY: build the unsigned Apple Silicon macOS and Linux x64 desktop apps
+# (via build-artifacts.yml) and attach them, sha256 digests and the updater
+# feed files (latest-mac.yml / latest-linux.yml) to a GitHub Release on this repo.
+# Replaces the external release conductor.
+#
+# Two entry points:
+#   - workflow_dispatch (Actions tab): enter a version; the workflow creates
+#     tag v<version> at the chosen ref together with the Release.
+#   - pushing a v* tag by hand.
+# No double run: the tag the dispatch path creates is made with the workflow's
+# GITHUB_TOKEN, and events caused by GITHUB_TOKEN never trigger other workflows.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, semver without leading v (e.g. 1.2.3)"
+        type: string
+        required: true
+      ref:
+        description: "Branch, tag or SHA to build"
+        type: string
+        default: main
+      prerelease:
+        description: "Mark as prerelease (not offered by the stable updater channel)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: fork-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      sha: ${{ steps.meta.outputs.sha }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      create_tag: ${{ steps.meta.outputs.create_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Validate version, ref and that the release does not exist
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+            create_tag=true
+            prerelease="$INPUT_PRERELEASE"
+          else
+            version="${REF_NAME#v}"
+            create_tag=false
+            prerelease=false
+          fi
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if ! [[ "$version" =~ $semver ]]; then
+            echo "::error::'$version' is not a valid semver version (expected e.g. 1.2.3 or 1.2.3-rc.1)."
+            exit 1
+          fi
+          # A pre-release version can never be the stable "latest".
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          tag="v$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists."
+            exit 1
+          fi
+          if [ "$create_tag" = true ] && git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag $tag already exists."
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "prerelease=$prerelease"
+            echo "create_tag=$create_tag"
+          } >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     uses: ./.github/workflows/build-artifacts.yml
     with:
-      ref: ${{ github.ref }}
-      version: ${{ github.ref_name }}
+      ref: ${{ needs.prepare.outputs.sha }}
+      version: ${{ needs.prepare.outputs.version }}
 
   publish:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # scripts/feed.mjs needs app-builder-lib (blockmap/hash helpers).
+      - name: Install feed tooling
+        working-directory: frontend
+        run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:
           path: assets
-          pattern: "{mac-arm64,linux,digests}"
+          pattern: "{mac-arm64,linux}"
           merge-multiple: true
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+      - name: Version file names, generate updater feeds and digests
         shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          # Real digests of the files being attached, in the standard format.
-          (cd assets && sha256sum agent-orchestrator-* > SHA256SUMS.txt)
-          ls -l assets
-          gh release create "$TAG" assets/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TAG" \
-            --generate-notes \
-            --verify-tag
+          cd assets
+          # feed.mjs only selects installers whose name contains the version.
+          mv agent-orchestrator-darwin-arm64.zip "agent-orchestrator-$VERSION-darwin-arm64.zip"
+          mv agent-orchestrator-linux-x64.AppImage "agent-orchestrator-$VERSION-linux-x64.AppImage"
+          node ../frontend/scripts/feed.mjs . "$VERSION" latest
+          # Both feeds must exist or the in-app updater has nothing to read.
+          test -s latest-mac.yml && test -s latest-linux.yml
+          # Blockmap sidecars are not published (see frontend/scripts/feed.mjs).
+          rm -f ./*.blockmap
+          sha256sum agent-orchestrator-* > SHA256SUMS.txt
+          jq -Rn '[inputs | split("  ") | {(.[1]): .[0]}] | add' SHA256SUMS.txt > digests.json
+          ls -l
+          { echo '### Release assets'; echo '```'; cat SHA256SUMS.txt latest-mac.yml latest-linux.yml; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          CREATE_TAG: ${{ needs.prepare.outputs.create_tag }}
+        run: |
+          set -euo pipefail
+          args=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes)
+          if [ "$CREATE_TAG" = true ]; then args+=(--target "$SHA"); else args+=(--verify-tag); fi
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease --latest=false); else args+=(--latest); fi
+          gh release create "$TAG" assets/* "${args[@]}"
