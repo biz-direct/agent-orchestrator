@@ -97,9 +97,17 @@ jobs:
           tag="v$version"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             if [ "$from_file" = true ]; then
-              echo "Release $tag already exists; nothing to do."
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
+              # Skip only a complete, published release. A draft or one missing
+              # assets is a broken release and must fail loudly, not be ignored.
+              complete="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,assets \
+                --jq '(.isDraft | not) and ([.assets[].name] as $n | all("agent-orchestrator-'"$version"'-darwin-arm64.zip", "agent-orchestrator-'"$version"'-linux-x64.AppImage", "latest-mac.yml", "latest-linux.yml", "digests.json", "SHA256SUMS.txt"; . as $f | $n | index($f) != null))')"
+              if [ "$complete" = true ]; then
+                echo "Release $tag already exists and is complete; nothing to do."
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "::error::Release $tag exists but is a draft or is missing assets. Delete it (and its tag) and re-run, or bump FORK_VERSION."
+              exit 1
             fi
             echo "::error::Release $tag already exists."
             exit 1
