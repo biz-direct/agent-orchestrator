@@ -204,7 +204,10 @@ run: |
     // Fails when the release or tag already exists.
     expect(contents).toContain("already exists");
     expect(contents).toContain("uses: ./.github/workflows/build-artifacts.yml");
-    expect(contents).not.toMatch(/branches:|schedule:|pull_request/);
+    // Only main, and only when FORK_VERSION changes, may release from a branch.
+    expect(contents).toContain("branches: [main]");
+    expect(contents).toContain("paths: [FORK_VERSION]");
+    expect(contents).not.toMatch(/schedule:|pull_request/);
     expect(contents).not.toMatch(/secrets\.(?!GITHUB_TOKEN)/);
     expect(contents).not.toMatch(/git (?:tag|push)\b|APPLE_/);
     // Only the publish job may write.

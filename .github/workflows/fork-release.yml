@@ -6,7 +6,9 @@ name: Fork release
 # feed files (latest-mac.yml / latest-linux.yml) to a GitHub Release on this repo.
 # Replaces the external release conductor.
 #
-# Two entry points:
+# Three entry points:
+#   - FORK_VERSION: a push to main that changes the FORK_VERSION file releases
+#     the version it contains (skipped quietly if that release already exists).
 #   - workflow_dispatch (Actions tab): enter a version; the workflow creates
 #     tag v<version> at the chosen ref together with the Release.
 #   - pushing a v* tag by hand.
@@ -15,6 +17,8 @@ name: Fork release
 
 on:
   push:
+    branches: [main]
+    paths: [FORK_VERSION]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -47,6 +51,7 @@ jobs:
       sha: ${{ steps.meta.outputs.sha }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       create_tag: ${{ steps.meta.outputs.create_tag }}
+      skip: ${{ steps.meta.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,12 +65,22 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_PRERELEASE: ${{ inputs.prerelease }}
           REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           set -euo pipefail
+          skip=false
+          from_file=false
           if [ "$EVENT" = "workflow_dispatch" ]; then
             version="${INPUT_VERSION#v}"
             create_tag=true
             prerelease="$INPUT_PRERELEASE"
+          elif [ "$REF_TYPE" = "branch" ]; then
+            # FORK_VERSION push to main.
+            from_file=true
+            version="$(tr -d '[:space:]' < FORK_VERSION)"
+            version="${version#v}"
+            create_tag=true
+            prerelease=false
           else
             version="${REF_NAME#v}"
             create_tag=false
@@ -81,6 +96,11 @@ jobs:
           if [[ "$version" == *-* ]]; then prerelease=true; fi
           tag="v$version"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "$from_file" = true ]; then
+              echo "Release $tag already exists; nothing to do."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "::error::Release $tag already exists."
             exit 1
           fi
@@ -94,10 +114,12 @@ jobs:
             echo "sha=$(git rev-parse HEAD)"
             echo "prerelease=$prerelease"
             echo "create_tag=$create_tag"
+            echo "skip=$skip"
           } >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     uses: ./.github/workflows/build-artifacts.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
@@ -105,6 +127,7 @@ jobs:
 
   publish:
     needs: [prepare, build]
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
