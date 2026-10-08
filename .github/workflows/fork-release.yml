@@ -155,9 +155,18 @@ jobs:
           SHA: ${{ needs.prepare.outputs.sha }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           CREATE_TAG: ${{ needs.prepare.outputs.create_tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           args=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes)
           if [ "$CREATE_TAG" = true ]; then args+=(--target "$SHA"); else args+=(--verify-tag); fi
           if [ "$PRERELEASE" = true ]; then args+=(--prerelease --latest=false); else args+=(--latest); fi
-          gh release create "$TAG" release-dist/* "${args[@]}"
+          # Explicit asset list: nothing else in release-dist may be published.
+          gh release create "$TAG" \
+            "release-dist/agent-orchestrator-$VERSION-darwin-arm64.zip" \
+            "release-dist/agent-orchestrator-$VERSION-linux-x64.AppImage" \
+            release-dist/latest-mac.yml \
+            release-dist/latest-linux.yml \
+            release-dist/digests.json \
+            release-dist/SHA256SUMS.txt \
+            "${args[@]}"
