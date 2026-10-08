@@ -122,9 +122,10 @@ jobs:
       - name: Install feed tooling
         working-directory: frontend
         run: npm ci --ignore-scripts
+      # Not `assets/`: that name collides with the repo's own assets/ directory.
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: release-dist
           pattern: "{mac-arm64,linux}"
           merge-multiple: true
       - name: Version file names, generate updater feeds and digests
@@ -133,7 +134,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          cd assets
+          cd release-dist
           # feed.mjs only selects installers whose name contains the version.
           mv agent-orchestrator-darwin-arm64.zip "agent-orchestrator-$VERSION-darwin-arm64.zip"
           mv agent-orchestrator-linux-x64.AppImage "agent-orchestrator-$VERSION-linux-x64.AppImage"
@@ -159,4 +160,4 @@ jobs:
           args=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes)
           if [ "$CREATE_TAG" = true ]; then args+=(--target "$SHA"); else args+=(--verify-tag); fi
           if [ "$PRERELEASE" = true ]; then args+=(--prerelease --latest=false); else args+=(--latest); fi
-          gh release create "$TAG" assets/* "${args[@]}"
+          gh release create "$TAG" release-dist/* "${args[@]}"
