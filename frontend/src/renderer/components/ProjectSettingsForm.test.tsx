@@ -2120,6 +2120,7 @@ describe("ProjectSettingsForm", () => {
 		submitSettings();
 
 		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		await screen.findByText("Saved");
 		const body = putMock.mock.calls.at(-1)?.[1].body;
 		expect(body.config).toMatchObject({
 			orchestratorRules: "Be terse.",
@@ -2159,12 +2160,14 @@ describe("ProjectSettingsForm", () => {
 		await chooseOption(await screen.findByRole("button", { name: "Orchestrator agent" }), "goose");
 		submitSettings();
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
-		await screen.findByText("Saved");
+		expect(await screen.findByText(/Orchestrator restart failed/)).toBeInTheDocument();
 
 		rerenderSection("prompts");
 		await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "More rules.");
-		submitSettings();
-		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
+		// Autosave (not an explicit submit, which clears the banner by design).
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2), { timeout: 3000 });
+		await waitFor(() => expect(screen.getByText(/Orchestrator restart failed/)).toBeInTheDocument());
+		await screen.findByText("Saved");
 		expect(postMock).toHaveBeenCalledTimes(1);
 	});
 });

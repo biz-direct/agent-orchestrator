@@ -154,16 +154,19 @@ type projectSetConfigOptions struct {
 	orchestratorRules           string
 	orchestratorRulesFile       string
 	skipGlobalOrchestratorRules bool
-	env                         []string
-	symlink                     []string
-	postCreate                  []string
-	trackerIntake               bool
-	trackerRepo                 string
-	trackerAssignee             string
-	reviewers                   []string
-	configJSON                  string
-	clear                       bool
-	json                        bool
+	// skipGlobalOrchestratorRulesSet records an explicit flag, so an explicit
+	// false still counts as a config flag.
+	skipGlobalOrchestratorRulesSet bool
+	env                            []string
+	symlink                        []string
+	postCreate                     []string
+	trackerIntake                  bool
+	trackerRepo                    string
+	trackerAssignee                string
+	reviewers                      []string
+	configJSON                     string
+	clear                          bool
+	json                           bool
 }
 
 type projectListResult struct {
@@ -320,6 +323,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
+			opts.skipGlobalOrchestratorRulesSet = cmd.Flags().Changed("skip-global-orchestrator-rules")
 			config, err := buildProjectConfig(opts)
 			if err != nil {
 				return err
@@ -404,7 +408,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 		},
 		Reviewers: reviewersForFlags(opts.reviewers),
 	}
-	if reflect.DeepEqual(cfg, projectConfig{}) {
+	if reflect.DeepEqual(cfg, projectConfig{}) && !opts.skipGlobalOrchestratorRulesSet {
 		return projectConfig{}, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}
 	}
 	return cfg, nil

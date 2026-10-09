@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettings, useUpdateGlobalOrchestratorRules } from "../../hooks/useSettings";
 import { Button } from "../ui/button";
@@ -23,7 +23,14 @@ export function PromptsSettingsSection({ titleHidden }: { titleHidden?: boolean 
 	const { update, saving, error: saveError } = useUpdateGlobalOrchestratorRules();
 	const saved = settings?.globalOrchestratorRules ?? "";
 	const [draft, setDraft] = useState(saved);
-	useEffect(() => setDraft(saved), [saved]);
+	// Follow the saved value only while the draft is untouched, so a refresh that
+	// lands after the user kept typing never overwrites the newer edits.
+	const syncedRef = useRef(saved);
+	useEffect(() => {
+		const previous = syncedRef.current;
+		syncedRef.current = saved;
+		setDraft((current) => (current.trim() === previous.trim() ? saved : current));
+	}, [saved]);
 
 	const tooLarge = orchestratorRulesBytes(draft) > MAX_ORCHESTRATOR_RULES_BYTES;
 	const dirty = draft.trim() !== saved.trim();
