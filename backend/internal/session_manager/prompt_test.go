@@ -2,11 +2,12 @@ package sessionmanager
 
 import (
 	"errors"
-	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 )
 
 func TestBuildTaskPrompt_IssueContextStaysInTaskPrompt(t *testing.T) {

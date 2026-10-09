@@ -18,6 +18,7 @@ import (
 // Reason says why a rules file could not be used.
 type Reason string
 
+// Reasons a rules file is rejected; see Reason.
 const (
 	ReasonOutsideRepo Reason = "outside_repo"
 	ReasonNotFound    Reason = "not_found"

@@ -2,8 +2,9 @@ package sessionmanager
 
 import (
 	"fmt"
-	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 	"strings"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 )
 
 type sessionPromptRole string
