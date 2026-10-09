@@ -63,6 +63,8 @@ jobs:
           if git merge --no-edit -m "Merge $UPSTREAM main ($sha) into fork" upstream/main; then
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
+            # Record the conflicted paths before the merge is aborted.
+            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
             git merge --abort
             echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
@@ -121,11 +123,28 @@ jobs:
           git merge FETCH_HEAD   # resolve conflicts, commit
           git push origin sync/upstream-$SHA   # then open a PR into main
           \`\`\`"
-          existing="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
+          if [ -s "$RUNNER_TEMP/conflicts.txt" ]; then
+            files="$(sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt")"
+            body="$body
+
+          Conflicting files:
+          $files"
+            { echo "### Upstream sync conflicts"; echo "$files"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # REST, not `gh issue create`: the GraphQL createIssue mutation is
+          # refused for SYNC_PAT ("Resource not accessible by personal access token").
+          # Match on the title, not the label: a label that failed to attach must
+          # not let a retry open a duplicate conflict issue.
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" \
+            --jq '[.[] | select(.pull_request | not) | select(.title | startswith("Upstream sync conflict:"))][0].number // empty')"
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$existing/comments" -f body="$body" >/dev/null
           else
-            gh issue create --label "$label" --title "Upstream sync conflict: $UPSTREAM@$SHA" --body "$body"
+            number="$(gh api "repos/$GITHUB_REPOSITORY/issues" \
+              -f title="Upstream sync conflict: $UPSTREAM@$SHA" -f body="$body" --jq .number)"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number/labels" -f "labels[]=$label" >/dev/null \
+              || echo "::warning::Could not add label $label to #$number."
+            echo "Opened issue #$number"
           fi
           echo "::error::Merge conflicts with upstream; issue opened for manual resolution."
           exit 1
