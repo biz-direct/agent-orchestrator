@@ -386,6 +386,13 @@ type SessionModeDefaults interface {
 	DefaultSessionMode(ctx context.Context) domain.SessionMode
 }
 
+// GlobalOrchestratorRulesReader supplies the daemon-wide orchestrator rules
+// added to every project's orchestrator prompt. A read error fails the prompt
+// build instead of silently dropping the layer.
+type GlobalOrchestratorRulesReader interface {
+	GlobalOrchestratorRules(ctx context.Context) (string, error)
+}
+
 // resolveSessionMode applies the precedence for a spawn:
 //
 //  1. the mode the caller explicitly requested;

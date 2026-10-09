@@ -25,7 +25,10 @@ type AppSettings struct {
 	// CloudOffering is the user's cloud toggle (Settings, Developer Mode). The
 	// daemon gate combines it with the deployment's control-plane URL.
 	CloudOffering bool
-	UpdatedAt     time.Time
+	// GlobalOrchestratorRules are standing instructions added to every
+	// project orchestrator prompt on this daemon. Empty means none.
+	GlobalOrchestratorRules string
+	UpdatedAt               time.Time
 }
 
 // GetAppSettings reads the preference row.
@@ -37,9 +40,10 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 	return AppSettings{
 		// Normalized on read: a value written by a build that knows a mode this
 		// one does not must still resolve to something dispatchable.
-		DefaultSessionMode: domain.NormalizeSessionMode(row.DefaultSessionMode),
-		CloudOffering:      row.CloudOffering,
-		UpdatedAt:          row.UpdatedAt,
+		DefaultSessionMode:      domain.NormalizeSessionMode(row.DefaultSessionMode),
+		CloudOffering:           row.CloudOffering,
+		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
+		UpdatedAt:               row.UpdatedAt,
 	}, nil
 }
 
@@ -68,6 +72,19 @@ func (s *Store) SetCloudOffering(ctx context.Context, enabled bool, now time.Tim
 		UpdatedAt:     now,
 	}); err != nil {
 		return fmt.Errorf("set cloud offering: %w", err)
+	}
+	return nil
+}
+
+// SetGlobalOrchestratorRules persists the daemon-wide orchestrator rules.
+func (s *Store) SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.SetGlobalOrchestratorRules(ctx, gen.SetGlobalOrchestratorRulesParams{
+		GlobalOrchestratorRules: rules,
+		UpdatedAt:               now,
+	}); err != nil {
+		return fmt.Errorf("set global orchestrator rules: %w", err)
 	}
 	return nil
 }

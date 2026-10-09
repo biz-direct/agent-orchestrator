@@ -32,6 +32,7 @@ import { newestActiveOrchestrator } from "../types/workspace";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import { buildIntake, deriveRepoPath, deriveRepoHost, IntakeFields, intakeNeedsRule, type IntakeForm } from "./IntakeFields";
 import { ProductExternalLink } from "./ProductExternalLink";
+import { ProjectPromptsSettings } from "./ProjectPromptsSettings";
 import { ProjectPipelineSettings } from "./ProjectPipelineSettings";
 import { ReviewerSelect, reviewerTrustWarning } from "./ReviewerSelect";
 import { AgentModelCombobox } from "./settings/AgentModelCombobox";
@@ -56,7 +57,7 @@ type SettingsSaveResult = {
 	spawnError: unknown;
 };
 
-export type ProjectSettingsSection = "general" | "agents";
+export type ProjectSettingsSection = "general" | "agents" | "prompts";
 export type ProjectSettingsSaveState = {
 	phase: "idle" | "pending" | "saving" | "saved" | "failed";
 	dirty?: boolean;
@@ -178,6 +179,8 @@ function SettingsBody({
 		intakeEnabled: intake.enabled ?? false,
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
+		orchestratorRules: config.orchestratorRules ?? "",
+		skipGlobalOrchestratorRules: config.skipGlobalOrchestratorRules ?? false,
 	});
 	const lastSavedRef = useRef(JSON.stringify(form));
 	const failedKeyRef = useRef<string | null>(null);
@@ -254,6 +257,8 @@ function SettingsBody({
 							...sharedAgentConfig,
 							permissions: undefined,
 						}),
+						orchestratorRules: values.orchestratorRules.trim() || undefined,
+						skipGlobalOrchestratorRules: values.skipGlobalOrchestratorRules || undefined,
 					}
 				: {
 						...config,
@@ -279,6 +284,8 @@ function SettingsBody({
 							...sharedAgentConfig,
 							permissions: undefined,
 						}),
+						orchestratorRules: values.orchestratorRules.trim() || undefined,
+						skipGlobalOrchestratorRules: values.skipGlobalOrchestratorRules || undefined,
 						reviewers: values.reviewerHarness
 							? [
 									{
@@ -308,8 +315,12 @@ function SettingsBody({
 				body: { displayName, config: next },
 			});
 			if (error) throw new Error(apiErrorMessage(error));
-			const replaceOrchestrator = replacementFailedRef.current || values.orchestratorAgent !== lastOrchestratorRef.current ||
-				(Boolean(activeOrchestrator && activeOrchestrator.provider !== values.orchestratorAgent) && !replacementAttemptedRef.current);
+			// Prompt text is read when an orchestrator is built, so editing only
+			// prompt fields must never replace the running one, even after an
+			// earlier replacement failed.
+			const promptOnly = isPromptOnlyChange(values, lastSavedRef.current);
+			const replaceOrchestrator = !promptOnly && (replacementFailedRef.current || values.orchestratorAgent !== lastOrchestratorRef.current ||
+				(Boolean(activeOrchestrator && activeOrchestrator.provider !== values.orchestratorAgent) && !replacementAttemptedRef.current));
 			lastOrchestratorRef.current = values.orchestratorAgent;
 			if (replaceOrchestrator) {
 				replacementAttemptedRef.current = true;
@@ -603,6 +614,18 @@ function SettingsBody({
 						</>
 					)}
 				</>
+			)}
+
+			{section === "prompts" && (
+				<ProjectSettingsSection title={t("settings.prompts")} titleHidden grouped>
+					<ProjectPromptsSettings
+						hostId={hostId}
+						orchestratorRules={form.orchestratorRules}
+						skipGlobal={form.skipGlobalOrchestratorRules}
+						onOrchestratorRulesChange={(orchestratorRules) => setForm((f) => ({ ...f, orchestratorRules }))}
+						onSkipGlobalChange={(skipGlobalOrchestratorRules) => setForm((f) => ({ ...f, skipGlobalOrchestratorRules }))}
+					/>
+				</ProjectSettingsSection>
 			)}
 
 			{section === "agents" && (
@@ -985,6 +1008,27 @@ function repositoryHref(repository: string): string | undefined {
 		}
 	}
 	return undefined;
+}
+
+const PROMPT_FORM_KEYS = ["orchestratorRules", "skipGlobalOrchestratorRules"] as const;
+
+/** True when the only differences from the last saved form are prompt fields. */
+function isPromptOnlyChange(values: Record<string, unknown>, lastSavedKey: string): boolean {
+	let saved: Record<string, unknown>;
+	try {
+		saved = JSON.parse(lastSavedKey) as Record<string, unknown>;
+	} catch {
+		return false;
+	}
+	const promptKeys = new Set<string>(PROMPT_FORM_KEYS);
+	const keys = new Set([...Object.keys(values), ...Object.keys(saved)]);
+	let promptChanged = false;
+	for (const key of keys) {
+		if (JSON.stringify(values[key]) === JSON.stringify(saved[key])) continue;
+		if (!promptKeys.has(key)) return false;
+		promptChanged = true;
+	}
+	return promptChanged;
 }
 
 function scratchSupportedConfig(config: ProjectConfig): ProjectConfig {

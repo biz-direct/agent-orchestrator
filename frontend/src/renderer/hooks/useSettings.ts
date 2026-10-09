@@ -30,6 +30,8 @@ export interface Settings {
 	cloudControlPlaneUrl: string;
 	/** Whether the daemon's AO_TRACKER_INTAKE gate is on. Off hides intake controls. */
 	trackerIntakeEnabled: boolean;
+	/** This daemon's global orchestrator prompt; empty means none. */
+	globalOrchestratorRules: string;
 }
 
 export function useSettings(hostId?: string, enabled = true) {
@@ -57,6 +59,7 @@ export function useSettings(hostId?: string, enabled = true) {
 				cloudEnabled: data?.cloudEnabled ?? false,
 				cloudControlPlaneUrl: data?.cloudControlPlaneUrl ?? "",
 				trackerIntakeEnabled: data?.trackerIntakeEnabled ?? false,
+				globalOrchestratorRules: data?.globalOrchestratorRules ?? "",
 			};
 		},
 	});
@@ -107,6 +110,27 @@ export function useUpdateCloudOffering() {
 
 	return {
 		update: (enabled: boolean) => mutation.mutate(enabled),
+		saving: mutation.isPending,
+		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
+	};
+}
+
+/** Saves this computer's global orchestrator prompt (the local daemon only). */
+export function useUpdateGlobalOrchestratorRules() {
+	const queryClient = useQueryClient();
+	const mutation = useMutation({
+		mutationFn: async (rules: string) => {
+			const { data, error } = await apiClient.PATCH("/api/v1/settings/global-orchestrator-rules", {
+				body: { globalOrchestratorRules: rules },
+			});
+			if (error) throw error;
+			return data;
+		},
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsQueryKey }),
+	});
+
+	return {
+		update: (rules: string) => mutation.mutateAsync(rules),
 		saving: mutation.isPending,
 		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
 	};

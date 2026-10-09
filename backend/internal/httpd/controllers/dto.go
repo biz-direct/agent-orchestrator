@@ -3028,6 +3028,9 @@ type SettingsResponse struct {
 	// TrackerIntakeEnabled reports the AO_TRACKER_INTAKE gate, so a client can
 	// avoid offering a per-project intake control the daemon will ignore.
 	TrackerIntakeEnabled bool `json:"trackerIntakeEnabled"`
+	// GlobalOrchestratorRules are this daemon's standing instructions added to
+	// every project orchestrator prompt. Empty means none.
+	GlobalOrchestratorRules string `json:"globalOrchestratorRules"`
 }
 
 // AgentInstallerCatalogResponse is the body of GET /api/v1/agents/installers.
@@ -3038,6 +3041,13 @@ type AgentInstallerCatalogResponse struct {
 // UpdateSessionInterfaceRequest changes the default interface for new sessions.
 type UpdateSessionInterfaceRequest struct {
 	DefaultSessionMode string `json:"defaultSessionMode" enum:"chat,tui"`
+}
+
+// UpdateGlobalOrchestratorRulesRequest replaces this daemon's global
+// orchestrator rules.
+type UpdateGlobalOrchestratorRulesRequest struct {
+	// GlobalOrchestratorRules is plain text, at most 32 KiB after trimming.
+	GlobalOrchestratorRules *string `json:"globalOrchestratorRules"`
 }
 
 // UpdateCloudOfferingRequest flips the user's cloud toggle.

@@ -36,7 +36,10 @@ type systemPromptConfig struct {
 	OrchestratorSessionID string
 	ProjectRules          string
 	OrchestratorRules     string
-	AdditionalSections    []string
+	// GlobalOrchestratorRules are the daemon-wide rules, already resolved
+	// (empty when the project skips the global layer).
+	GlobalOrchestratorRules string
+	AdditionalSections      []string
 }
 
 type projectRulesConfig struct {
@@ -73,6 +76,9 @@ func buildSystemPromptText(cfg systemPromptConfig) string {
 	switch cfg.Role {
 	case sessionPromptRoleOrchestrator:
 		sections = append(sections, orchestratorSystemPrompt(cfg.Project))
+		if rules := strings.TrimSpace(cfg.GlobalOrchestratorRules); rules != "" {
+			sections = append(sections, "## Global Orchestrator Rules\n"+rules)
+		}
 		if rules := strings.TrimSpace(cfg.OrchestratorRules); rules != "" {
 			sections = append(sections, "## Project-Specific Orchestrator Rules\n"+rules)
 		}

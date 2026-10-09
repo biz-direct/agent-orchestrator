@@ -126,6 +126,9 @@ func buildProjectConfig(pc legacyProjectConfig, notes *[]string) domain.ProjectC
 	} else if pc.OrchestratorRule != nil {
 		droppedRules = true
 	}
+	if pc.SkipGlobalRules != nil {
+		cfg.SkipGlobalOrchestratorRules = *pc.SkipGlobalRules
+	}
 
 	// Surface project-level fields the rewrite has no home for (#247 §4).
 	var dropped []string

@@ -51,7 +51,8 @@ ao project rm <project-id>
 | `orchestrator` | Orchestrator harness and agent-config overrides. |
 | `agentRules` | Standing instructions for workers. |
 | `agentRulesFile` | Repository-relative instructions appended to worker instructions. |
-| `orchestratorRules` | Standing instructions for orchestrators. |
+| `orchestratorRules` | Standing instructions for this project's orchestrators. Added after the global orchestrator prompt. At most 32 KiB. |
+| `skipGlobalOrchestratorRules` | `true` leaves the host's global orchestrator prompt out of this project's orchestrators. Defaults to `false`. |
 | `reviewers` | Harnesses used for AO review runs. |
 | `trackerIntake` | Opt-in, read-only issue intake that can start workers. Also requires `AO_TRACKER_INTAKE=on` in the daemon environment. |
 | `containerReap` | Project-wide opt-out from AO's session-container cleanup. |
@@ -105,6 +106,8 @@ If you explicitly request Chat from an unsupported harness, spawning fails. An i
 Use `env`, `symlinks`, and `postCreate` for repeatable workspace setup. A failing `postCreate` command prevents the agent from starting, so keep setup commands deterministic. Symlink restrictions are described in [Configuration fields](#configuration-fields).
 
 Use `agentRules` or `agentRulesFile` for worker instructions and `orchestratorRules` for supervision instructions. If both worker fields are set, AO combines the inline rules and file contents.
+
+Orchestrator instructions are layered and only ever add to AO's built-in orchestrator prompt: first the host's global orchestrator prompt (unless `skipGlobalOrchestratorRules` is `true`), then `orchestratorRules`. Edit both under **Settings → Prompts**, globally and per project. Changes take effect the next time an orchestrator is spawned or restored; running orchestrators are not updated. The global prompt belongs to each AO daemon, so a remote host has its own. AO Cloud and Coder sessions apply only `orchestratorRules`.
 
 For example, these fields link local setup files, install dependencies, and load worker rules. This is a configuration fragment; keep any other existing fields when applying it:
 

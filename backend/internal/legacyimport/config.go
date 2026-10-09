@@ -38,6 +38,7 @@ type legacyProjectConfig struct {
 	AgentRules       *yaml.Node         `yaml:"agentRules"`
 	AgentRulesFile   *yaml.Node         `yaml:"agentRulesFile"`
 	OrchestratorRule *yaml.Node         `yaml:"orchestratorRules"`
+	SkipGlobalRules  *bool              `yaml:"skipGlobalOrchestratorRules"`
 
 	// Captured only to surface as dropped in the report (no rewrite home).
 	Tracker   *yaml.Node `yaml:"tracker"`
