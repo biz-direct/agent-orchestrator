@@ -163,3 +163,24 @@ func TestBuildProjectRecord_DisplayNameFallbacks(t *testing.T) {
 		t.Fatalf("registeredAt = %s, want now fallback", rec.RegisteredAt)
 	}
 }
+
+func TestBuildProjectConfig_OrchestratorRulesFileAndSkipGlobal(t *testing.T) {
+	yes := true
+	var notes []string
+	cfg := buildProjectConfig(legacyProjectConfig{
+		OrchestratorFile: stringNode(" docs/orch.md "),
+		SkipGlobalRules:  &yes,
+	}, &notes)
+	if cfg.OrchestratorRulesFile != "docs/orch.md" || !cfg.SkipGlobalOrchestratorRules {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+
+	notes = nil
+	cfg = buildProjectConfig(legacyProjectConfig{OrchestratorFile: stringNode("../escape.md")}, &notes)
+	if cfg.OrchestratorRulesFile != "" {
+		t.Fatalf("an escaping path must be dropped, got %q", cfg.OrchestratorRulesFile)
+	}
+	if len(notes) == 0 {
+		t.Fatal("dropping the path must be reported")
+	}
+}

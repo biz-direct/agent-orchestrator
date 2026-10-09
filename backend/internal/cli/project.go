@@ -118,6 +118,7 @@ type projectConfig struct {
 	AgentRules                  string               `json:"agentRules,omitempty"`
 	AgentRulesFile              string               `json:"agentRulesFile,omitempty"`
 	OrchestratorRules           string               `json:"orchestratorRules,omitempty"`
+	OrchestratorRulesFile       string               `json:"orchestratorRulesFile,omitempty"`
 	SkipGlobalOrchestratorRules bool                 `json:"skipGlobalOrchestratorRules,omitempty"`
 	AgentConfig                 agentConfig          `json:"agentConfig,omitempty"`
 	Worker                      roleOverride         `json:"worker,omitempty"`
@@ -151,6 +152,7 @@ type projectSetConfigOptions struct {
 	agentRules                  string
 	agentRulesFile              string
 	orchestratorRules           string
+	orchestratorRulesFile       string
 	skipGlobalOrchestratorRules bool
 	env                         []string
 	symlink                     []string
@@ -345,6 +347,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.agentRules, "agent-rules", "", "Project-specific standing instructions for worker sessions")
 	f.StringVar(&opts.agentRulesFile, "agent-rules-file", "", "Repo-relative file containing worker standing instructions")
 	f.StringVar(&opts.orchestratorRules, "orchestrator-rules", "", "Project-specific standing instructions for orchestrator sessions")
+	f.StringVar(&opts.orchestratorRulesFile, "orchestrator-rules-file", "", "Repo-relative file containing orchestrator standing instructions")
 	f.BoolVar(&opts.skipGlobalOrchestratorRules, "skip-global-orchestrator-rules", false, "Leave the daemon's global orchestrator rules out of this project's orchestrator prompt")
 	f.StringArrayVar(&opts.env, "env", nil, "Env var KEY=VALUE forwarded into sessions (repeatable)")
 	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable)")
@@ -389,6 +392,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 		AgentRules:                  opts.agentRules,
 		AgentRulesFile:              opts.agentRulesFile,
 		OrchestratorRules:           opts.orchestratorRules,
+		OrchestratorRulesFile:       opts.orchestratorRulesFile,
 		SkipGlobalOrchestratorRules: opts.skipGlobalOrchestratorRules,
 		AgentConfig:                 agentConfig{Model: opts.model, Permissions: opts.permission},
 		Worker:                      roleOverride{Agent: opts.workerAgent},

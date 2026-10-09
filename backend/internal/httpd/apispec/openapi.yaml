@@ -3005,6 +3005,54 @@ paths:
       summary: Replace a project's per-project config
       tags:
       - projects
+  /api/v1/projects/{id}/orchestrator-rules-file:
+    get:
+      operationId: previewOrchestratorRulesFile
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Repo-relative candidate path to read. Omit to read the project's
+          saved orchestratorRulesFile.
+        in: query
+        name: path
+        schema:
+          description: Repo-relative candidate path to read. Omit to read the project's
+            saved orchestratorRulesFile.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOrchestratorRulesFilePreview'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read a project's orchestrator rules file (or a candidate path) without
+        saving
+      tags:
+      - projects
   /api/v1/projects/{id}/permissions:
     patch:
       operationId: setProjectPermissions
@@ -14648,6 +14696,8 @@ components:
           $ref: '#/components/schemas/RoleOverride'
         orchestratorRules:
           type: string
+        orchestratorRulesFile:
+          type: string
         postCreate:
           items:
             type: string
@@ -14688,6 +14738,16 @@ components:
       oneOf:
       - $ref: '#/components/schemas/Project'
       - $ref: '#/components/schemas/DegradedProject'
+      type: object
+    ProjectOrchestratorRulesFilePreview:
+      properties:
+        content:
+          type: string
+        path:
+          type: string
+      required:
+      - path
+      - content
       type: object
     ProjectResponse:
       properties:

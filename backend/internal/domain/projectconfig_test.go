@@ -229,3 +229,14 @@ func TestValidateOrchestratorRulesSize(t *testing.T) {
 		t.Fatalf("err = %v, want ErrOrchestratorRulesTooLarge", err)
 	}
 }
+
+func TestValidateOrchestratorRulesFilePath(t *testing.T) {
+	for _, bad := range []string{"/etc/passwd", "../x.md", "a/../../x.md", `\x`} {
+		if err := (ProjectConfig{OrchestratorRulesFile: bad}).Validate(); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+	if err := (ProjectConfig{OrchestratorRulesFile: "docs/orch.md"}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

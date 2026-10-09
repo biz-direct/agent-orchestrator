@@ -1141,6 +1141,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/orchestrator-rules-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a project's orchestrator rules file (or a candidate path) without saving */
+        get: operations["previewOrchestratorRulesFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/permissions": {
         parameters: {
             query?: never;
@@ -5025,6 +5042,7 @@ export interface components {
             };
             orchestrator?: components["schemas"]["RoleOverride"];
             orchestratorRules?: string;
+            orchestratorRulesFile?: string;
             postCreate?: string[];
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
@@ -5040,6 +5058,10 @@ export interface components {
             status: "ok" | "degraded";
         };
         ProjectOrDegraded: components["schemas"]["Project"] | components["schemas"]["DegradedProject"];
+        ProjectOrchestratorRulesFilePreview: {
+            content: string;
+            path: string;
+        };
         ProjectResponse: {
             project: components["schemas"]["Project"];
         };
@@ -10034,6 +10056,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    previewOrchestratorRulesFile: {
+        parameters: {
+            query?: {
+                /** @description Repo-relative candidate path to read. Omit to read the project's saved orchestratorRulesFile. */
+                path?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOrchestratorRulesFilePreview"];
                 };
             };
             /** @description Bad Request */

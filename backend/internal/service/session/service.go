@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/ownership"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reqid"
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 )
@@ -1182,6 +1183,10 @@ func mapSessionError(err error) error {
 		return nil
 	case errors.Is(err, sessionmanager.ErrNotFound):
 		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	case isRulesFileError(err):
+		var rfe *rulesfile.Error
+		_ = errors.As(err, &rfe)
+		return apierr.Invalid(rfe.Code(), rfe.Error(), rfe.Details())
 	case errors.Is(err, ports.ErrPipelineExecutionOwned):
 		return apierr.Conflict("PIPELINE_EXECUTION_OWNED", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrNotRestorable):
@@ -1468,4 +1473,9 @@ func (s *Service) harnessSignals(h domain.AgentHarness) bool {
 		return false
 	}
 	return s.signalCapable(h)
+}
+
+func isRulesFileError(err error) bool {
+	var rfe *rulesfile.Error
+	return errors.As(err, &rfe)
 }
