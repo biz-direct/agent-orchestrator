@@ -544,7 +544,7 @@ function SettingsBody({
 					return;
 				}
 				setValidationError(null);
-				mutation.mutate(form);
+				void saveWithRulesFileCheck(form, () => false);
 			}}
 		>
 			{section === "general" && (

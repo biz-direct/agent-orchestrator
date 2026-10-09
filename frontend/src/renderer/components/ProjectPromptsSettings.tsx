@@ -123,9 +123,10 @@ export function ProjectPromptsSettings({
 					value={orchestratorRulesFile}
 					placeholder="docs/orchestrator-rules.md"
 					aria-invalid={Boolean(fileMessage)}
+					aria-describedby={fileMessage ? "project-orchestrator-rules-file-error" : undefined}
 					onChange={(event) => onOrchestratorRulesFileChange(event.target.value)}
 				/>
-				{fileMessage ? <p role="alert" className="text-xs text-destructive">{fileMessage}</p> : null}
+				{fileMessage ? <p id="project-orchestrator-rules-file-error" role="alert" className="text-xs text-destructive">{fileMessage}</p> : null}
 				{trimmedFile && !fileMessage && previewPath === trimmedFile && filePreview.data !== undefined ? (
 					<pre
 						data-testid="rules-file-preview"
