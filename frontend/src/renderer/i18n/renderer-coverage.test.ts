@@ -30,6 +30,7 @@ const approvedLiterals: Record<string, readonly string[]> = {
 		"No workflow settings for scratch projects.",
 		"Tracker intake is not available for scratch projects.",
 	],
+	"components/ProjectPromptsSettings.tsx": ["docs/orchestrator-rules.md"],
 	"components/RemoteDirectoryPicker.tsx": ["/home/you/code"],
 	"components/SessionInspector.tsx": ["PR #"],
 	"components/Sidebar.tsx": ["Agent Orchestrator", "daemon"],
