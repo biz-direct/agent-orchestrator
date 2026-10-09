@@ -1091,6 +1091,7 @@
 	"settings.prompts.project.globalPreview": "Applied before this project's prompt",
 	"settings.prompts.project.skipped": "Skipped",
 	"settings.prompts.project.globalEmpty": "No global orchestrator prompt is set on this host.",
+	"settings.prompts.project.globalLoadFailed": "Could not load this host's global prompt.",
 	"settings.prompts.project.skipGlobal": "Skip global orchestrator prompt",
 	"settings.prompts.project.label": "Project orchestrator prompt",
 	"settings.prompts.project.takesEffect": "Changes take effect the next time this project's orchestrator is spawned or restored.",

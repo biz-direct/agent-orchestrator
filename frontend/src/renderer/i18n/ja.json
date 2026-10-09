@@ -1090,6 +1090,7 @@
 	"settings.prompts.project.globalPreview": "このプロジェクトのプロンプトの前に適用",
 	"settings.prompts.project.skipped": "スキップ",
 	"settings.prompts.project.globalEmpty": "このホストにはグローバルオーケストレーターのプロンプトが設定されていません。",
+	"settings.prompts.project.globalLoadFailed": "このホストのグローバルプロンプトを読み込めませんでした。",
 	"settings.prompts.project.skipGlobal": "グローバルオーケストレーターのプロンプトをスキップ",
 	"settings.prompts.project.label": "プロジェクトのオーケストレーターのプロンプト",
 	"settings.prompts.project.takesEffect": "変更は、このプロジェクトのオーケストレーターを次に起動または復元したときに反映されます。",

@@ -26,7 +26,7 @@ export function ProjectPromptsSettings({
 	onSkipGlobalChange: (value: boolean) => void;
 }) {
 	const { t } = useTranslation();
-	const { settings } = useSettings(hostId);
+	const { settings, isLoading, error } = useSettings(hostId);
 	const [previewOpen, setPreviewOpen] = useState(false);
 	const globalRules = (settings?.globalOrchestratorRules ?? "").trim();
 	const tooLarge = orchestratorRulesBytes(orchestratorRules) > MAX_ORCHESTRATOR_RULES_BYTES;
@@ -55,6 +55,8 @@ export function ProjectPromptsSettings({
 						>
 							{globalRules}
 						</pre>
+					) : isLoading ? null : error || !settings ? (
+						<p role="alert" className="text-xs text-destructive">{t("settings.prompts.project.globalLoadFailed")}</p>
 					) : (
 						<p className="text-xs text-muted-foreground">{t("settings.prompts.project.globalEmpty")}</p>
 					)

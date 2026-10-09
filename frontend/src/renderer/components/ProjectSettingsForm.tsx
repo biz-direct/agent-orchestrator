@@ -55,6 +55,8 @@ type SettingsSaveResult = {
 	replacementSessionId: string | null;
 	replacementFailure: OrchestratorReplacementFailure | null;
 	spawnError: unknown;
+	/** A prompt-only save leaves an earlier replacement failure visible. */
+	keepReplacementState?: boolean;
 };
 
 export type ProjectSettingsSection = "general" | "agents" | "prompts";
@@ -363,6 +365,7 @@ function SettingsBody({
 				replacementFailure: null,
 				spawnError: null,
 				savedKey,
+				keepReplacementState: promptOnly,
 			} satisfies SettingsSaveResult;
 		},
 		onSuccess: (result) => {
@@ -372,7 +375,7 @@ function SettingsBody({
 				project_id: projectId,
 			});
 			setSavedAt(Date.now());
-			setReplacementError(result.replacementError);
+			if (!result.keepReplacementState) setReplacementError(result.replacementError);
 			setValidationError(null);
 			void queryClient.invalidateQueries({ queryKey: projectQueryKey(projectId, hostId) });
 			void queryClient.invalidateQueries({ queryKey: hostId ? ["project-config", hostId, projectId] : ["project-config", projectId] });

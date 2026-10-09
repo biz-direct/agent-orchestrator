@@ -1072,6 +1072,7 @@
 	"settings.prompts.project.globalPreview": "在此项目提示词之前应用",
 	"settings.prompts.project.skipped": "已跳过",
 	"settings.prompts.project.globalEmpty": "此主机尚未设置全局编排器提示词。",
+	"settings.prompts.project.globalLoadFailed": "无法加载此主机的全局提示词。",
 	"settings.prompts.project.skipGlobal": "跳过全局编排器提示词",
 	"settings.prompts.project.label": "项目编排器提示词",
 	"settings.prompts.project.takesEffect": "更改将在此项目的编排器下次启动或恢复时生效。",
