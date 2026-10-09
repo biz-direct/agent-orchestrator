@@ -44,6 +44,9 @@ type ProjectConfig struct {
 	// OrchestratorRules are project-specific standing instructions for
 	// orchestrator sessions.
 	OrchestratorRules string `json:"orchestratorRules,omitempty"`
+	// OrchestratorRulesFile is a repo-relative Markdown/text file whose contents
+	// follow OrchestratorRules in the orchestrator prompt.
+	OrchestratorRulesFile string `json:"orchestratorRulesFile,omitempty"`
 	// SkipGlobalOrchestratorRules leaves the daemon's global orchestrator rules
 	// out of this project's orchestrator prompt.
 	SkipGlobalOrchestratorRules bool `json:"skipGlobalOrchestratorRules,omitempty"`
@@ -252,6 +255,9 @@ func (c ProjectConfig) Validate() error {
 	}
 	if err := validateRepoRelative(c.AgentRulesFile); err != nil {
 		return fmt.Errorf("agentRulesFile %q: %w", c.AgentRulesFile, err)
+	}
+	if err := validateRepoRelative(c.OrchestratorRulesFile); err != nil {
+		return fmt.Errorf("orchestratorRulesFile %q: %w", c.OrchestratorRulesFile, err)
 	}
 	if err := ValidateOrchestratorRulesSize(c.OrchestratorRules); err != nil {
 		return err

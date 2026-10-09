@@ -305,3 +305,7 @@ func TestE2E_SpawnAndProjectAddDTORoundTrip(t *testing.T) {
 func (f *fakeProjectManager) SetPermissions(_ context.Context, id domain.ProjectID, in projectsvc.SetPermissionsInput) (projectsvc.Project, error) {
 	return projectsvc.Project{ID: id, Config: &domain.ProjectConfig{AgentConfig: domain.AgentConfig{Permissions: in.Permissions}}}, nil
 }
+
+func (f *fakeProjectManager) PreviewOrchestratorRulesFile(context.Context, domain.ProjectID, string) (projectsvc.OrchestratorRulesFilePreview, error) {
+	return projectsvc.OrchestratorRulesFilePreview{}, nil
+}

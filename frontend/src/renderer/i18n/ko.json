@@ -1090,6 +1090,8 @@
 	"settings.prompts.project.globalPreview": "이 프로젝트 프롬프트 앞에 적용됨",
 	"settings.prompts.project.skipped": "건너뜀",
 	"settings.prompts.project.globalEmpty": "이 호스트에는 글로벌 오케스트레이터 프롬프트가 설정되어 있지 않습니다.",
+	"settings.prompts.project.rulesFile": "규칙 파일",
+	"settings.prompts.project.rulesFileEmpty": "파일이 비어 있습니다.",
 	"settings.prompts.project.globalLoadFailed": "이 호스트의 글로벌 프롬프트를 불러오지 못했습니다.",
 	"settings.prompts.project.skipGlobal": "글로벌 오케스트레이터 프롬프트 건너뛰기",
 	"settings.prompts.project.label": "프로젝트 오케스트레이터 프롬프트",

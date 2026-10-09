@@ -1110,6 +1110,8 @@
 	"settings.prompts.project.globalPreview": "Appliqué avant le prompt de ce projet",
 	"settings.prompts.project.skipped": "Ignoré",
 	"settings.prompts.project.globalEmpty": "Aucun prompt global d'orchestrateur n'est défini sur cet hôte.",
+	"settings.prompts.project.rulesFile": "Fichier de règles",
+	"settings.prompts.project.rulesFileEmpty": "Le fichier est vide.",
 	"settings.prompts.project.globalLoadFailed": "Impossible de charger le prompt global de cet hôte.",
 	"settings.prompts.project.skipGlobal": "Ignorer le prompt global de l'orchestrateur",
 	"settings.prompts.project.label": "Prompt de l'orchestrateur du projet",

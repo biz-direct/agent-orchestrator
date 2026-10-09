@@ -1,10 +1,13 @@
 package sessionmanager
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 )
 
 func TestBuildTaskPrompt_IssueContextStaysInTaskPrompt(t *testing.T) {
@@ -229,9 +232,10 @@ func TestBuildProjectRules_ReadsInlineAndFileRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := buildProjectRules(projectRulesConfig{
-		ProjectPath:    dir,
-		AgentRules:     "Inline rule.",
-		AgentRulesFile: "rules.md",
+		ProjectPath: dir,
+		Field:       rulesfile.FieldAgentRulesFile,
+		Inline:      "Inline rule.",
+		File:        "rules.md",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -243,9 +247,21 @@ func TestBuildProjectRules_ReadsInlineAndFileRules(t *testing.T) {
 	}
 }
 
-func TestProjectRelativeFileRejectsTraversal(t *testing.T) {
-	if _, err := projectRelativeFile(t.TempDir(), "../rules.md"); err == nil {
-		t.Fatal("expected traversal path to be rejected")
+func TestBuildProjectRulesRejectsTraversalAndSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	for _, rel := range []string{"../rules.md", "link.md"} {
+		_, err := buildProjectRules(projectRulesConfig{ProjectPath: dir, Field: rulesfile.FieldAgentRulesFile, File: rel})
+		var re *rulesfile.Error
+		if !errors.As(err, &re) || re.Reason != rulesfile.ReasonOutsideRepo {
+			t.Fatalf("%s: err = %v, want outside_repo", rel, err)
+		}
 	}
 }
 

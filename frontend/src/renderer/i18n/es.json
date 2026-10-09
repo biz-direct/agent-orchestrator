@@ -1110,6 +1110,8 @@
 	"settings.prompts.project.globalPreview": "Se aplica antes del prompt de este proyecto",
 	"settings.prompts.project.skipped": "Omitido",
 	"settings.prompts.project.globalEmpty": "No hay un prompt global del orquestador en este host.",
+	"settings.prompts.project.rulesFile": "Archivo de reglas",
+	"settings.prompts.project.rulesFileEmpty": "El archivo está vacío.",
 	"settings.prompts.project.globalLoadFailed": "No se pudo cargar el prompt global de este host.",
 	"settings.prompts.project.skipGlobal": "Omitir el prompt global del orquestador",
 	"settings.prompts.project.label": "Prompt del orquestador del proyecto",

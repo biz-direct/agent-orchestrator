@@ -22,6 +22,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reqid"
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 )
 
 // Manager is the controller-facing contract for the /api/v1/projects surface.
@@ -49,6 +50,11 @@ type Manager interface {
 	// and per-project config, returning the updated read-model.
 	UpdateSettings(ctx context.Context, id domain.ProjectID, in UpdateSettingsInput) (Project, error)
 	SetPermissions(ctx context.Context, id domain.ProjectID, in SetPermissionsInput) (Project, error)
+
+	// PreviewOrchestratorRulesFile reads the project's orchestrator rules file
+	// (or the repo-relative candidate path, when non-empty) with the same
+	// symlink-safe reader the prompt builder uses. It never writes.
+	PreviewOrchestratorRulesFile(ctx context.Context, id domain.ProjectID, candidate string) (OrchestratorRulesFilePreview, error)
 
 	// SetConfig replaces a project's per-project config, returning the updated
 	// read-model.
@@ -1082,4 +1088,34 @@ func invalidConfigError(err error) error {
 		return apierr.Invalid("ORCHESTRATOR_RULES_TOO_LARGE", err.Error(), nil)
 	}
 	return apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+}
+
+// PreviewOrchestratorRulesFile implements Manager.
+func (m *Service) PreviewOrchestratorRulesFile(ctx context.Context, id domain.ProjectID, candidate string) (OrchestratorRulesFilePreview, error) {
+	if err := validateProjectID(id); err != nil {
+		return OrchestratorRulesFilePreview{}, err
+	}
+	row, ok, err := m.store.GetProject(ctx, string(id))
+	if err != nil {
+		return OrchestratorRulesFilePreview{}, apierr.Internal("PROJECT_LOAD_FAILED", "Failed to load project")
+	}
+	if !ok || !row.ArchivedAt.IsZero() {
+		return OrchestratorRulesFilePreview{}, apierr.NotFound("PROJECT_NOT_FOUND", "Unknown project")
+	}
+	rel := strings.TrimSpace(candidate)
+	if rel == "" {
+		rel = strings.TrimSpace(row.Config.OrchestratorRulesFile)
+	}
+	if rel == "" {
+		return OrchestratorRulesFilePreview{}, apierr.Invalid("ORCHESTRATOR_RULES_FILE_REQUIRED", "No orchestrator rules file path to preview", nil)
+	}
+	data, err := rulesfile.Read(rulesfile.FieldOrchestratorRulesFile, row.Path, rel, domain.MaxOrchestratorRulesBytes)
+	if err != nil {
+		var rfe *rulesfile.Error
+		if errors.As(err, &rfe) {
+			return OrchestratorRulesFilePreview{}, apierr.Invalid(rfe.Code(), rfe.Error(), rfe.Details())
+		}
+		return OrchestratorRulesFilePreview{}, err
+	}
+	return OrchestratorRulesFilePreview{Path: rel, Content: string(data)}, nil
 }

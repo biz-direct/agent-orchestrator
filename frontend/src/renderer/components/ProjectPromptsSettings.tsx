@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { fetchOrchestratorRulesFile, orchestratorRulesFileQueryKey } from "../hooks/useOrchestratorRulesFile";
 import { useSettings } from "../hooks/useSettings";
 import { cn } from "../lib/utils";
 import { MAX_ORCHESTRATOR_RULES_BYTES, orchestratorRulesBytes } from "./settings/PromptsSettingsSection";
+import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 
@@ -13,22 +16,44 @@ import { Textarea } from "./ui/textarea";
  * through the project form's autosave; they never replace a running orchestrator.
  */
 export function ProjectPromptsSettings({
+	projectId,
 	hostId,
 	orchestratorRules,
+	orchestratorRulesFile,
+	rulesFileError,
 	skipGlobal,
 	onOrchestratorRulesChange,
+	onOrchestratorRulesFileChange,
 	onSkipGlobalChange,
 }: {
+	projectId: string;
 	hostId?: string;
 	orchestratorRules: string;
+	orchestratorRulesFile: string;
+	/** Set when saving was blocked because the file path did not validate. */
+	rulesFileError?: string | null;
 	skipGlobal: boolean;
 	onOrchestratorRulesChange: (value: string) => void;
+	onOrchestratorRulesFileChange: (value: string) => void;
 	onSkipGlobalChange: (value: boolean) => void;
 }) {
 	const { t } = useTranslation();
 	const { settings, isLoading, error } = useSettings(hostId);
 	const [previewOpen, setPreviewOpen] = useState(false);
 	const globalRules = (settings?.globalOrchestratorRules ?? "").trim();
+	const trimmedFile = orchestratorRulesFile.trim();
+	const [previewPath, setPreviewPath] = useState(trimmedFile);
+	useEffect(() => {
+		const timeout = window.setTimeout(() => setPreviewPath(trimmedFile), 400);
+		return () => window.clearTimeout(timeout);
+	}, [trimmedFile]);
+	const filePreview = useQuery({
+		queryKey: orchestratorRulesFileQueryKey(projectId, hostId, previewPath),
+		queryFn: () => fetchOrchestratorRulesFile(projectId, hostId, previewPath),
+		enabled: previewPath !== "",
+		retry: false,
+	});
+	const fileMessage = rulesFileError ?? (previewPath === trimmedFile && filePreview.error instanceof Error ? filePreview.error.message : null);
 	const tooLarge = orchestratorRulesBytes(orchestratorRules) > MAX_ORCHESTRATOR_RULES_BYTES;
 
 	return (
@@ -86,6 +111,30 @@ export function ProjectPromptsSettings({
 					onChange={(event) => onOrchestratorRulesChange(event.target.value)}
 				/>
 				{tooLarge ? <p role="alert" className="text-xs text-destructive">{t("settings.prompts.tooLarge")}</p> : null}
+			</div>
+
+			<div className="flex flex-col gap-2">
+				<label htmlFor="project-orchestrator-rules-file" className="text-sm font-medium text-foreground">
+					{t("settings.prompts.project.rulesFile")}
+				</label>
+				<Input
+					id="project-orchestrator-rules-file"
+					className="font-mono text-xs"
+					value={orchestratorRulesFile}
+					placeholder="docs/orchestrator-rules.md"
+					aria-invalid={Boolean(fileMessage)}
+					aria-describedby={fileMessage ? "project-orchestrator-rules-file-error" : undefined}
+					onChange={(event) => onOrchestratorRulesFileChange(event.target.value)}
+				/>
+				{fileMessage ? <p id="project-orchestrator-rules-file-error" role="alert" className="text-xs text-destructive">{fileMessage}</p> : null}
+				{trimmedFile && !fileMessage && previewPath === trimmedFile && filePreview.data !== undefined ? (
+					<pre
+						data-testid="rules-file-preview"
+						className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-input/50 px-3 py-2 font-mono text-xs text-foreground"
+					>
+						{filePreview.data.trim() === "" ? t("settings.prompts.project.rulesFileEmpty") : filePreview.data}
+					</pre>
+				) : null}
 			</div>
 
 			<p className="text-xs leading-relaxed text-muted-foreground">{t("settings.prompts.project.takesEffect")}</p>

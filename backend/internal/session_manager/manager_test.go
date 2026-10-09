@@ -26,6 +26,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
@@ -10897,5 +10898,56 @@ func TestSpawnOrchestrator_GlobalRulesReadFailureFailsSpawn(t *testing.T) {
 	cfg.SkipGlobalOrchestratorRules = true
 	if _, err := spawnOrchestratorWithGlobal(t, cfg, fakeGlobalRules{err: errors.New("db down")}); err != nil {
 		t.Fatalf("a skipping project must not read global rules: %v", err)
+	}
+}
+
+func spawnOrchestratorInDir(t *testing.T, dir string, cfg domain.ProjectConfig, global GlobalOrchestratorRulesReader) (string, error) {
+	t.Helper()
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: dir, Config: cfg}
+	agent := &recordingAgent{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, GlobalRules: global})
+	_, _, _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator})
+	return agent.lastLaunch.SystemPrompt, err
+}
+
+func TestSpawnOrchestrator_RulesFileFollowsInlineRules(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "orch.md"), []byte("File rule.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testRoleAgents()
+	cfg.OrchestratorRules = "Inline rule."
+	cfg.OrchestratorRulesFile = "orch.md"
+	prompt, err := spawnOrchestratorInDir(t, dir, cfg, fakeGlobalRules{rules: "Global rule."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	global := strings.Index(prompt, "## Global Orchestrator Rules\nGlobal rule.")
+	project := strings.Index(prompt, "## Project-Specific Orchestrator Rules\nInline rule.\n\nFile rule.")
+	scope := strings.Index(prompt, "## Publishing Scope")
+	if global < 0 || project < global || scope < project {
+		t.Fatalf("unexpected order (global %d project %d scope %d):\n%s", global, project, scope, prompt)
+	}
+}
+
+func TestSpawnOrchestrator_RulesFileFailureIsTypedConfigError(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testRoleAgents()
+	cfg.OrchestratorRulesFile = "missing.md"
+	_, err := spawnOrchestratorInDir(t, dir, cfg, nil)
+	var re *rulesfile.Error
+	if !errors.As(err, &re) || re.Reason != rulesfile.ReasonNotFound || re.Code() != "ORCHESTRATOR_RULES_FILE_INVALID" {
+		t.Fatalf("err = %v, want typed not_found orchestrator rules file error", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "big.md"), []byte(strings.Repeat("a", domain.MaxOrchestratorRulesBytes+1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.OrchestratorRulesFile = "big.md"
+	_, err = spawnOrchestratorInDir(t, dir, cfg, nil)
+	if !errors.As(err, &re) || re.Reason != rulesfile.ReasonTooLarge {
+		t.Fatalf("err = %v, want too_large", err)
 	}
 }

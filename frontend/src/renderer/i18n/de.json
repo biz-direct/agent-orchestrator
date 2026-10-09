@@ -1090,6 +1090,8 @@
 	"settings.prompts.project.globalPreview": "Wird vor dem Prompt dieses Projekts angewendet",
 	"settings.prompts.project.skipped": "Übersprungen",
 	"settings.prompts.project.globalEmpty": "Auf diesem Host ist kein globaler Orchestrator-Prompt festgelegt.",
+	"settings.prompts.project.rulesFile": "Regeldatei",
+	"settings.prompts.project.rulesFileEmpty": "Die Datei ist leer.",
 	"settings.prompts.project.globalLoadFailed": "Der globale Prompt dieses Hosts konnte nicht geladen werden.",
 	"settings.prompts.project.skipGlobal": "Globalen Orchestrator-Prompt überspringen",
 	"settings.prompts.project.label": "Orchestrator-Prompt des Projekts",

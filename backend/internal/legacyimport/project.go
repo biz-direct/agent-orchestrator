@@ -126,6 +126,18 @@ func buildProjectConfig(pc legacyProjectConfig, notes *[]string) domain.ProjectC
 	} else if pc.OrchestratorRule != nil {
 		droppedRules = true
 	}
+	if v, ok := legacyStringValue(pc.OrchestratorFile); ok {
+		// The importer writes straight to storage, so it must apply the same
+		// path validation the API does.
+		file := strings.TrimSpace(v)
+		if err := (domain.ProjectConfig{OrchestratorRulesFile: file}).Validate(); err != nil {
+			*notes = append(*notes, "orchestratorRulesFile dropped: "+err.Error())
+		} else {
+			cfg.OrchestratorRulesFile = file
+		}
+	} else if pc.OrchestratorFile != nil {
+		droppedRules = true
+	}
 	if pc.SkipGlobalRules != nil {
 		cfg.SkipGlobalOrchestratorRules = *pc.SkipGlobalRules
 	}

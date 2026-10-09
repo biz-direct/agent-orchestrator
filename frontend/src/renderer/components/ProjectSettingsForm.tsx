@@ -25,6 +25,7 @@ import { WORKER_DEFAULT_REVIEWERS } from "../lib/reviewer-harnesses";
 import { captureOrchestratorReplacementFailure } from "../lib/orchestrator-replacement-telemetry";
 import { OrchestratorSpawnError, spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { openRemoteOrchestrator } from "../lib/remote-orchestrator";
+import { fetchOrchestratorRulesFile } from "../hooks/useOrchestratorRulesFile";
 import { useSettings } from "../hooks/useSettings";
 import { captureRendererEvent } from "../lib/telemetry";
 import { type OrchestratorReplacementFailure, useUiStore } from "../stores/ui-store";
@@ -182,6 +183,7 @@ function SettingsBody({
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
 		orchestratorRules: config.orchestratorRules ?? "",
+		orchestratorRulesFile: config.orchestratorRulesFile ?? "",
 		skipGlobalOrchestratorRules: config.skipGlobalOrchestratorRules ?? false,
 	});
 	const lastSavedRef = useRef(JSON.stringify(form));
@@ -193,6 +195,7 @@ function SettingsBody({
 	const [showSaving, setShowSaving] = useState(false);
 	const [replacementError, setReplacementError] = useState<string | null>(null);
 	const [validationError, setValidationError] = useState<string | null>(null);
+	const [rulesFileError, setRulesFileError] = useState<string | null>(null);
 	const [tuningValidity, setTuningValidity] = useState({
 		worker: true,
 		orchestrator: true,
@@ -260,6 +263,7 @@ function SettingsBody({
 							permissions: undefined,
 						}),
 						orchestratorRules: values.orchestratorRules.trim() || undefined,
+						orchestratorRulesFile: values.orchestratorRulesFile.trim() || undefined,
 						skipGlobalOrchestratorRules: values.skipGlobalOrchestratorRules || undefined,
 					}
 				: {
@@ -287,6 +291,7 @@ function SettingsBody({
 							permissions: undefined,
 						}),
 						orchestratorRules: values.orchestratorRules.trim() || undefined,
+						orchestratorRulesFile: values.orchestratorRulesFile.trim() || undefined,
 						skipGlobalOrchestratorRules: values.skipGlobalOrchestratorRules || undefined,
 						reviewers: values.reviewerHarness
 							? [
@@ -393,6 +398,30 @@ function SettingsBody({
 		},
 	});
 
+	/**
+	 * Saves the form, first checking a changed orchestrator rules file through the
+	 * daemon that owns the project. A bad path is shown on the field and is not
+	 * autosaved; the file may still legitimately arrive later, so the daemon's
+	 * save-time check stays syntax-only and the spawn-time check is authoritative.
+	 */
+	const saveWithRulesFileCheck = async (values: typeof form, isCancelled: () => boolean) => {
+		const file = values.orchestratorRulesFile.trim();
+		if (file && file !== (config.orchestratorRulesFile ?? "").trim()) {
+			try {
+				await fetchOrchestratorRulesFile(projectId, hostId, file);
+			} catch (error) {
+				if (isCancelled()) return;
+				const message = error instanceof Error ? error.message : t("settings.project.saveFailed");
+				setRulesFileError(message);
+				setValidationError(message);
+				return;
+			}
+			if (isCancelled()) return;
+		}
+		setRulesFileError(null);
+		mutation.mutate(values);
+	};
+
 	useEffect(() => {
 		if (!mutation.isPending) {
 			setShowSaving(false);
@@ -406,6 +435,7 @@ function SettingsBody({
 		if (!hostConnected) return;
 		const key = JSON.stringify(form);
 		if (key === lastSavedRef.current || key === failedKeyRef.current || mutation.isPending) return;
+		let cancelled = false;
 		const timeout = window.setTimeout(() => {
 			const validation = validateProjectSettings(form, {
 				validateIntake: intakeVisible,
@@ -431,9 +461,12 @@ function SettingsBody({
 			}
 			setValidationError(null);
 			setSavedAt(null);
-			mutation.mutate(form);
+			void saveWithRulesFileCheck(form, () => cancelled);
 		}, 650);
-		return () => window.clearTimeout(timeout);
+		return () => {
+			cancelled = true;
+			window.clearTimeout(timeout);
+		};
 	}, [form, hostConnected, isScratchProject, mutation.isPending, project.name, t, tuningValidity]);
 
 	useEffect(() => {
@@ -511,7 +544,7 @@ function SettingsBody({
 					return;
 				}
 				setValidationError(null);
-				mutation.mutate(form);
+				void saveWithRulesFileCheck(form, () => false);
 			}}
 		>
 			{section === "general" && (
@@ -622,8 +655,15 @@ function SettingsBody({
 			{section === "prompts" && (
 				<ProjectSettingsSection title={t("settings.prompts")} titleHidden grouped>
 					<ProjectPromptsSettings
+						projectId={projectId}
 						hostId={hostId}
 						orchestratorRules={form.orchestratorRules}
+						orchestratorRulesFile={form.orchestratorRulesFile}
+						rulesFileError={rulesFileError}
+						onOrchestratorRulesFileChange={(orchestratorRulesFile) => {
+							setRulesFileError(null);
+							setForm((f) => ({ ...f, orchestratorRulesFile }));
+						}}
 						skipGlobal={form.skipGlobalOrchestratorRules}
 						onOrchestratorRulesChange={(orchestratorRules) => setForm((f) => ({ ...f, orchestratorRules }))}
 						onSkipGlobalChange={(skipGlobalOrchestratorRules) => setForm((f) => ({ ...f, skipGlobalOrchestratorRules }))}
@@ -1013,7 +1053,7 @@ function repositoryHref(repository: string): string | undefined {
 	return undefined;
 }
 
-const PROMPT_FORM_KEYS = ["orchestratorRules", "skipGlobalOrchestratorRules"] as const;
+const PROMPT_FORM_KEYS = ["orchestratorRules", "orchestratorRulesFile", "skipGlobalOrchestratorRules"] as const;
 
 /** True when the only differences from the last saved form are prompt fields. */
 function isPromptOnlyChange(values: Record<string, unknown>, lastSavedKey: string): boolean {

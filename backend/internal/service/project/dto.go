@@ -78,3 +78,12 @@ type SetPermissionsInput struct {
 	SourceHarness domain.AgentHarness   `json:"sourceHarness,omitempty"`
 	Permissions   domain.PermissionMode `json:"permissions" enum:"default,accept-edits,auto,bypass-permissions"`
 }
+
+// OrchestratorRulesFilePreview is the result of reading a project's
+// orchestrator rules file.
+type OrchestratorRulesFilePreview struct {
+	// Path is the repo-relative path that was read.
+	Path string `json:"path"`
+	// Content is the file's current contents.
+	Content string `json:"content"`
+}

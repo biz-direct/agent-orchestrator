@@ -11,6 +11,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/ownership"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 )
 
 // errCapture is a request-scoped slot WriteError records the raw service error
@@ -89,6 +90,13 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.As(err, &e) {
 		status, kind := httpStatus(e.Kind)
 		writeAPIError(w, r, status, kind, e.Code, e.Message, e.Details, reportingOwner)
+		return
+	}
+	// A rules file that cannot be used (outside the repo, missing, unreadable,
+	// too large) is a config problem the user can fix, not a server fault.
+	var rulesErr *rulesfile.Error
+	if errors.As(err, &rulesErr) {
+		writeAPIError(w, r, http.StatusBadRequest, "validation", rulesErr.Code(), rulesErr.Error(), rulesErr.Details(), reportingOwner)
 		return
 	}
 	// A transient failure (the database was momentarily busy/locked, or a

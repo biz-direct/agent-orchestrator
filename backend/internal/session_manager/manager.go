@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
+	"github.com/aoagents/agent-orchestrator/backend/internal/rulesfile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/sessionguard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/termtheme"
@@ -4950,7 +4951,17 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 
 	switch kind {
 	case domain.KindOrchestrator:
-		cfg.OrchestratorRules = project.Config.OrchestratorRules
+		rules, err := buildProjectRules(projectRulesConfig{
+			ProjectPath:  project.Path,
+			Field:        rulesfile.FieldOrchestratorRulesFile,
+			Inline:       project.Config.OrchestratorRules,
+			File:         project.Config.OrchestratorRulesFile,
+			MaxFileBytes: domain.MaxOrchestratorRulesBytes,
+		})
+		if err != nil {
+			return "", err
+		}
+		cfg.OrchestratorRules = rules
 		if !project.Config.SkipGlobalOrchestratorRules && m.globalRules != nil {
 			global, err := m.globalRules.GlobalOrchestratorRules(ctx)
 			if err != nil {
@@ -4969,9 +4980,10 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			}
 		}
 		rules, err := buildProjectRules(projectRulesConfig{
-			ProjectPath:    project.Path,
-			AgentRules:     project.Config.AgentRules,
-			AgentRulesFile: project.Config.AgentRulesFile,
+			ProjectPath: project.Path,
+			Field:       rulesfile.FieldAgentRulesFile,
+			Inline:      project.Config.AgentRules,
+			File:        project.Config.AgentRulesFile,
 		})
 		if err != nil {
 			return "", err

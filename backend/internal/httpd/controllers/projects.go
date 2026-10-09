@@ -33,6 +33,7 @@ func (c *ProjectsController) Register(r chi.Router) {
 	r.Get("/projects/{id}", c.get)
 	r.Put("/projects/{id}", c.updateSettings)
 	r.Put("/projects/{id}/config", c.setConfig)
+	r.Get("/projects/{id}/orchestrator-rules-file", c.previewOrchestratorRulesFile)
 	r.Patch("/projects/{id}/permissions", c.setPermissions)
 	r.Delete("/projects/{id}", c.remove)
 }
@@ -241,4 +242,17 @@ func (c *ProjectsController) setPermissions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ProjectResponse{Project: p})
+}
+
+func (c *ProjectsController) previewOrchestratorRulesFile(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/projects/{id}/orchestrator-rules-file")
+		return
+	}
+	preview, err := c.Mgr.PreviewOrchestratorRulesFile(r.Context(), projectID(r), r.URL.Query().Get("path"))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, preview)
 }
