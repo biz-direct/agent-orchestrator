@@ -2098,4 +2098,76 @@ describe("ProjectSettingsForm", () => {
 			"proj-1",
 		);
 	});
+
+	it("saves orchestrator prompt fields with the rest of the config and never replaces the orchestrator", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				agentRules: "keep me",
+			},
+		});
+
+		renderSettings("proj-1", undefined, "prompts");
+		await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "Be terse.");
+		await userEvent.click(screen.getByRole("switch", { name: "Skip global orchestrator prompt" }));
+		submitSettings();
+
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		await screen.findByText("Saved");
+		const body = putMock.mock.calls.at(-1)?.[1].body;
+		expect(body.config).toMatchObject({
+			orchestratorRules: "Be terse.",
+			skipGlobalOrchestratorRules: true,
+			agentRules: "keep me",
+			orchestrator: { agent: "claude-code" },
+		});
+		expect(postMock).not.toHaveBeenCalled();
+	});
+
+	it("does not retry a failed orchestrator replacement when only prompt fields change", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+		postMock.mockResolvedValue({ data: undefined, error: { code: "ORCHESTRATOR_SPAWN_FAILED", message: "boom" }, response: { status: 500 } });
+
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+		const rerenderSection = (section: ProjectSettingsSection) =>
+			view.rerender(
+				<TooltipProvider>
+					<QueryClientProvider client={queryClient}>
+						<TestProjectSettings projectId="proj-1" section={section} />
+					</QueryClientProvider>
+				</TooltipProvider>,
+			);
+		const view = rtlRender(<div />);
+		rerenderSection("agents");
+		await chooseOption(await screen.findByRole("button", { name: "Orchestrator agent" }), "goose");
+		submitSettings();
+		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		expect(await screen.findByText(/Orchestrator restart failed/)).toBeInTheDocument();
+
+		rerenderSection("prompts");
+		await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "More rules.");
+		// Autosave (not an explicit submit, which clears the banner by design).
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2), { timeout: 3000 });
+		await waitFor(() => expect(screen.getByText(/Orchestrator restart failed/)).toBeInTheDocument());
+		await screen.findByText("Saved");
+		expect(postMock).toHaveBeenCalledTimes(1);
+	});
 });

@@ -44,6 +44,9 @@ type ProjectConfig struct {
 	// OrchestratorRules are project-specific standing instructions for
 	// orchestrator sessions.
 	OrchestratorRules string `json:"orchestratorRules,omitempty"`
+	// SkipGlobalOrchestratorRules leaves the daemon's global orchestrator rules
+	// out of this project's orchestrator prompt.
+	SkipGlobalOrchestratorRules bool `json:"skipGlobalOrchestratorRules,omitempty"`
 
 	// AgentConfig is the default agent config for the project.
 	AgentConfig AgentConfig `json:"agentConfig,omitempty"`
@@ -250,6 +253,9 @@ func (c ProjectConfig) Validate() error {
 	if err := validateRepoRelative(c.AgentRulesFile); err != nil {
 		return fmt.Errorf("agentRulesFile %q: %w", c.AgentRulesFile, err)
 	}
+	if err := ValidateOrchestratorRulesSize(c.OrchestratorRules); err != nil {
+		return err
+	}
 	for i, rv := range c.Reviewers {
 		if !rv.Harness.IsKnown() {
 			return fmt.Errorf("reviewers[%d].harness: unknown harness %q", i, rv.Harness)
@@ -310,6 +316,23 @@ func validateRepoRelative(p string) error {
 		if seg == ".." {
 			return fmt.Errorf("path must be repo-relative and must not escape the project root")
 		}
+	}
+	return nil
+}
+
+// MaxOrchestratorRulesBytes caps one orchestrator rules value: 32 KiB of UTF-8,
+// measured after trimming surrounding whitespace.
+const MaxOrchestratorRulesBytes = 32 * 1024
+
+// ErrOrchestratorRulesTooLarge is returned when a new orchestrator rules value
+// exceeds MaxOrchestratorRulesBytes. Values already stored above the limit are
+// still used at spawn; only new saves are rejected.
+var ErrOrchestratorRulesTooLarge = fmt.Errorf("orchestrator rules exceed %d bytes", MaxOrchestratorRulesBytes)
+
+// ValidateOrchestratorRulesSize rejects a value above the size limit.
+func ValidateOrchestratorRulesSize(rules string) error {
+	if len(strings.TrimSpace(rules)) > MaxOrchestratorRulesBytes {
+		return ErrOrchestratorRulesTooLarge
 	}
 	return nil
 }

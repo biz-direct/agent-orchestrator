@@ -278,7 +278,7 @@ func (m *Service) Add(ctx context.Context, in AddInput) (Project, error) {
 	var projectConfig domain.ProjectConfig
 	if in.Config != nil {
 		if err := in.Config.Validate(); err != nil {
-			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+			return Project{}, invalidConfigError(err)
 		}
 		projectConfig = *in.Config
 	}
@@ -300,7 +300,7 @@ func (m *Service) Add(ctx context.Context, in AddInput) (Project, error) {
 		row.Kind = domain.ProjectKindWorkspace
 		row.RepoOriginURL = resolveGitOriginURL(path)
 		if err := row.Config.ValidateCanonicalRepository(row.RepoOriginURL); err != nil {
-			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+			return Project{}, invalidConfigError(err)
 		}
 		if err := m.store.UpsertWorkspaceProject(ctx, row, repos); err != nil {
 			return Project{}, apierr.Internal("PROJECT_ADD_FAILED", "Failed to register workspace project")
@@ -349,7 +349,7 @@ func (m *Service) Add(ctx context.Context, in AddInput) (Project, error) {
 	}
 	row.RepoOriginURL = originURL
 	if err := row.Config.ValidateCanonicalRepository(row.RepoOriginURL); err != nil {
-		return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		return Project{}, invalidConfigError(err)
 	}
 	if err := m.store.UpsertProject(ctx, row); err != nil {
 		return Project{}, apierr.Internal("PROJECT_ADD_FAILED", "Failed to register project")
@@ -707,7 +707,7 @@ func (m *Service) UpdateSettings(ctx context.Context, id domain.ProjectID, in Up
 		return Project{}, apierr.Invalid("DISPLAY_NAME_REQUIRED", "Display name is required", nil)
 	}
 	if err := in.Config.Validate(); err != nil {
-		return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		return Project{}, invalidConfigError(err)
 	}
 	row, ok, err := m.store.GetProject(ctx, string(id))
 	if err != nil {
@@ -721,11 +721,11 @@ func (m *Service) UpdateSettings(ctx context.Context, id domain.ProjectID, in Up
 	}
 	if row.Kind.WithDefault() == domain.ProjectKindScratch {
 		if err := validateScratchProjectConfig(in.Config); err != nil {
-			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+			return Project{}, invalidConfigError(err)
 		}
 	}
 	if err := in.Config.ValidateCanonicalRepository(row.RepoOriginURL); err != nil {
-		return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		return Project{}, invalidConfigError(err)
 	}
 	updated, err := m.store.UpdateProjectSettings(ctx, string(id), inDisplayName, in.Config)
 	if err != nil {
@@ -753,7 +753,7 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 		return Project{}, err
 	}
 	if err := in.Config.Validate(); err != nil {
-		return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		return Project{}, invalidConfigError(err)
 	}
 	row, ok, err := m.store.GetProject(ctx, string(id))
 	if err != nil {
@@ -764,11 +764,11 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	}
 	if row.Kind.WithDefault() == domain.ProjectKindScratch {
 		if err := validateScratchProjectConfig(in.Config); err != nil {
-			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+			return Project{}, invalidConfigError(err)
 		}
 	}
 	if err := in.Config.ValidateCanonicalRepository(row.RepoOriginURL); err != nil {
-		return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		return Project{}, invalidConfigError(err)
 	}
 	row.Config = in.Config
 	if err := m.store.UpsertProject(ctx, row); err != nil {
@@ -1072,4 +1072,14 @@ func (m *Service) SetPermissions(ctx context.Context, id domain.ProjectID, in Se
 		return Project{}, apierr.NotFound("PROJECT_NOT_FOUND", "Unknown project")
 	}
 	return m.projectFromRow(ctx, row), nil
+}
+
+// invalidConfigError maps a ProjectConfig.Validate failure to its API error. An
+// oversized orchestrator rules value gets its own stable code so clients can
+// say what to trim.
+func invalidConfigError(err error) error {
+	if errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
+		return apierr.Invalid("ORCHESTRATOR_RULES_TOO_LARGE", err.Error(), nil)
+	}
+	return apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
 }

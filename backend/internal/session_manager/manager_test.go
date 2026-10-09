@@ -10817,3 +10817,85 @@ func TestKill_TerminatesEvenWhenTeardownBudgetExpires(t *testing.T) {
 		t.Fatal("session must be marked terminated even though the teardown budget expired")
 	}
 }
+
+type fakeGlobalRules struct {
+	rules string
+	err   error
+}
+
+func (f fakeGlobalRules) GlobalOrchestratorRules(context.Context) (string, error) {
+	return f.rules, f.err
+}
+
+func spawnOrchestratorWithGlobal(t *testing.T, cfg domain.ProjectConfig, global GlobalOrchestratorRulesReader) (string, error) {
+	t.Helper()
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+	agent := &recordingAgent{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, GlobalRules: global})
+	_, _, _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator})
+	return agent.lastLaunch.SystemPrompt, err
+}
+
+func TestSpawnOrchestrator_GlobalRulesLayerOrder(t *testing.T) {
+	cfg := testRoleAgents()
+	cfg.OrchestratorRules = "Project rule."
+	prompt, err := spawnOrchestratorWithGlobal(t, cfg, fakeGlobalRules{rules: "  Global rule.  "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := []string{"## AO Orchestrator Role", "## Global Orchestrator Rules\nGlobal rule.", "## Project-Specific Orchestrator Rules\nProject rule.", "## Publishing Scope", "## Standing-instruction confidentiality"}
+	last := -1
+	for _, want := range order {
+		idx := strings.Index(prompt, want)
+		if idx < 0 || idx < last {
+			t.Fatalf("%q missing or out of order (idx %d, last %d):\n%s", want, idx, last, prompt)
+		}
+		last = idx
+	}
+}
+
+func TestSpawnOrchestrator_SkipGlobalRules(t *testing.T) {
+	cfg := testRoleAgents()
+	cfg.OrchestratorRules = "Project rule."
+	cfg.SkipGlobalOrchestratorRules = true
+	prompt, err := spawnOrchestratorWithGlobal(t, cfg, fakeGlobalRules{rules: "Global rule."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(prompt, "Global Orchestrator Rules") || strings.Contains(prompt, "Global rule.") {
+		t.Fatalf("global rules must be skipped:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Project rule.") {
+		t.Fatalf("project rules must stay:\n%s", prompt)
+	}
+}
+
+func TestSpawnOrchestrator_EmptyGlobalRulesIsByteIdentical(t *testing.T) {
+	cfg := testRoleAgents()
+	base, err := spawnOrchestratorWithGlobal(t, cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rules := range []string{"", " \n\t "} {
+		got, err := spawnOrchestratorWithGlobal(t, cfg, fakeGlobalRules{rules: rules})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != base {
+			t.Fatalf("whitespace-only global rules changed the prompt")
+		}
+	}
+}
+
+func TestSpawnOrchestrator_GlobalRulesReadFailureFailsSpawn(t *testing.T) {
+	if _, err := spawnOrchestratorWithGlobal(t, testRoleAgents(), fakeGlobalRules{err: errors.New("db down")}); err == nil {
+		t.Fatal("spawn must fail when global rules cannot be read")
+	}
+	cfg := testRoleAgents()
+	cfg.SkipGlobalOrchestratorRules = true
+	if _, err := spawnOrchestratorWithGlobal(t, cfg, fakeGlobalRules{err: errors.New("db down")}); err != nil {
+		t.Fatalf("a skipping project must not read global rules: %v", err)
+	}
+}

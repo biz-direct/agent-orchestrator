@@ -1,9 +1,14 @@
 package settings
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 func TestOfferingFromConfigCarriesTrackerIntake(t *testing.T) {
@@ -58,5 +63,33 @@ func TestOfferingBakedURLDoesNotEnableCloud(t *testing.T) {
 	}
 	if offering.CloudEnabled(Snapshot{CloudOffering: false}) {
 		t.Fatal("cloud enabled with only the baked URL set; a local-only install must stay off")
+	}
+}
+
+type rulesStore struct {
+	Store
+	snap Snapshot
+}
+
+func (s *rulesStore) GetAppSettings(context.Context) (Snapshot, error) { return s.snap, nil }
+func (s *rulesStore) SetGlobalOrchestratorRules(_ context.Context, rules string, _ time.Time) error {
+	s.snap.GlobalOrchestratorRules = rules
+	return nil
+}
+
+func TestSetGlobalOrchestratorRules(t *testing.T) {
+	store := &rulesStore{}
+	svc := New(store, nil, Offering{}, nil)
+	snap, err := svc.SetGlobalOrchestratorRules(context.Background(), "  be careful \n")
+	if err != nil || snap.GlobalOrchestratorRules != "be careful" {
+		t.Fatalf("got %q, %v; want trimmed value", snap.GlobalOrchestratorRules, err)
+	}
+	got, err := svc.GlobalOrchestratorRules(context.Background())
+	if err != nil || got != "be careful" {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+	_, err = svc.SetGlobalOrchestratorRules(context.Background(), strings.Repeat("x", domain.MaxOrchestratorRulesBytes+1))
+	if !errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
+		t.Fatalf("err = %v, want too large", err)
 	}
 }

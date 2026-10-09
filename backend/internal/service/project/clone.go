@@ -116,7 +116,7 @@ func (m *Service) prepareClone(ctx context.Context, in CloneInput, resume bool) 
 	}
 	if in.Config != nil {
 		if err := in.Config.Validate(); err != nil {
-			return ClonePreparationResult{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+			return ClonePreparationResult{}, invalidConfigError(err)
 		}
 	}
 	if in.ProjectID != nil {

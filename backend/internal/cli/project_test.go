@@ -451,3 +451,16 @@ func TestProjectRemove_YesSkipsConfirmationAndSupportsBackendRemoveEnvelope(t *t
 		t.Fatalf("--yes output should skip prompt and print removal:\n%s", out)
 	}
 }
+
+func TestBuildProjectConfigExplicitSkipGlobalFalseIsAFlag(t *testing.T) {
+	if _, err := buildProjectConfig(projectSetConfigOptions{}); err == nil {
+		t.Fatal("no flags must be rejected")
+	}
+	cfg, err := buildProjectConfig(projectSetConfigOptions{skipGlobalOrchestratorRulesSet: true})
+	if err != nil {
+		t.Fatalf("explicit --skip-global-orchestrator-rules=false must be accepted: %v", err)
+	}
+	if cfg.SkipGlobalOrchestratorRules {
+		t.Fatal("skip must stay false")
+	}
+}

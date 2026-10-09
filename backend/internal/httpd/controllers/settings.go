@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ type SettingsService interface {
 	Get(ctx context.Context) (settingssvc.Snapshot, error)
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode) (settingssvc.Snapshot, error)
 	SetCloudOffering(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
+	SetGlobalOrchestratorRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
 	ChatHarnesses(candidates []domain.AgentHarness) []domain.AgentHarness
 	Offering() settingssvc.Offering
 }
@@ -35,6 +37,7 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Get("/settings", c.get)
 	r.Patch("/settings/session-interface", c.setSessionInterface)
 	r.Patch("/settings/cloud-offering", c.setCloudOffering)
+	r.Patch("/settings/global-orchestrator-rules", c.setGlobalOrchestratorRules)
 }
 
 func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +102,33 @@ func (c *SettingsController) setCloudOffering(w http.ResponseWriter, r *http.Req
 	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
 }
 
+func (c *SettingsController) setGlobalOrchestratorRules(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/global-orchestrator-rules")
+		return
+	}
+	var req UpdateGlobalOrchestratorRulesRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	if req.GlobalOrchestratorRules == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"GLOBAL_ORCHESTRATOR_RULES_INVALID", "globalOrchestratorRules must be a string", nil)
+		return
+	}
+	snapshot, err := c.Svc.SetGlobalOrchestratorRules(r.Context(), *req.GlobalOrchestratorRules)
+	if errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"ORCHESTRATOR_RULES_TOO_LARGE", err.Error(), nil)
+		return
+	}
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+}
+
 func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsResponse {
 	// Reported so the client can warn that choosing chat narrows which agents are
 	// available, instead of letting the user discover it at spawn time.
@@ -109,13 +139,14 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 	}
 	offering := c.Svc.Offering()
 	return SettingsResponse{
-		DefaultSessionMode:   string(snapshot.DefaultSessionMode),
-		ChatHarnesses:        names,
-		Client:               offering.Client,
-		LocalEnabled:         offering.LocalEnabled,
-		CloudOffering:        snapshot.CloudOffering,
-		CloudEnabled:         offering.CloudEnabled(snapshot),
-		CloudControlPlaneURL: offering.CloudControlPlaneURL,
-		TrackerIntakeEnabled: offering.TrackerIntakeEnabled,
+		DefaultSessionMode:      string(snapshot.DefaultSessionMode),
+		ChatHarnesses:           names,
+		Client:                  offering.Client,
+		LocalEnabled:            offering.LocalEnabled,
+		CloudOffering:           snapshot.CloudOffering,
+		CloudEnabled:            offering.CloudEnabled(snapshot),
+		CloudControlPlaneURL:    offering.CloudControlPlaneURL,
+		TrackerIntakeEnabled:    offering.TrackerIntakeEnabled,
+		GlobalOrchestratorRules: snapshot.GlobalOrchestratorRules,
 	}
 }

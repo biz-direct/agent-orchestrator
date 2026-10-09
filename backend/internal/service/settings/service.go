@@ -8,6 +8,7 @@ package settings
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -20,6 +21,7 @@ type Store interface {
 	GetAppSettings(ctx context.Context) (Snapshot, error)
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode, now time.Time) error
 	SetCloudOffering(ctx context.Context, enabled bool, now time.Time) error
+	SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error
 }
 
 // Snapshot is the current preference set.
@@ -27,7 +29,10 @@ type Snapshot struct {
 	DefaultSessionMode domain.SessionMode
 	// CloudOffering is the user's cloud toggle (Settings, Developer Mode).
 	CloudOffering bool
-	UpdatedAt     time.Time
+	// GlobalOrchestratorRules are standing instructions added to every
+	// project orchestrator prompt on this daemon.
+	GlobalOrchestratorRules string
+	UpdatedAt               time.Time
 }
 
 // Offering reports which AO offerings this daemon exposes to clients. It is
@@ -132,6 +137,32 @@ func (s *Service) SetDefaultSessionMode(ctx context.Context, mode domain.Session
 // new reads; nothing about running sessions changes.
 func (s *Service) SetCloudOffering(ctx context.Context, enabled bool) (Snapshot, error) {
 	if err := s.store.SetCloudOffering(ctx, enabled, s.now()); err != nil {
+		return Snapshot{}, err
+	}
+	return s.store.GetAppSettings(ctx)
+}
+
+// GlobalOrchestratorRules returns the daemon-wide orchestrator rules. A read
+// failure is returned rather than swallowed: dropping the layer silently would
+// start an orchestrator without instructions the user configured.
+func (s *Service) GlobalOrchestratorRules(ctx context.Context) (string, error) {
+	snapshot, err := s.store.GetAppSettings(ctx)
+	if err != nil {
+		return "", err
+	}
+	return snapshot.GlobalOrchestratorRules, nil
+}
+
+// SetGlobalOrchestratorRules replaces the daemon-wide orchestrator rules. The
+// value is stored trimmed. Running orchestrators are untouched: the rules apply
+// the next time an orchestrator prompt is built (spawn, restore, agent switch,
+// interface transition).
+func (s *Service) SetGlobalOrchestratorRules(ctx context.Context, rules string) (Snapshot, error) {
+	rules = strings.TrimSpace(rules)
+	if err := domain.ValidateOrchestratorRulesSize(rules); err != nil {
+		return Snapshot{}, err
+	}
+	if err := s.store.SetGlobalOrchestratorRules(ctx, rules, s.now()); err != nil {
 		return Snapshot{}, err
 	}
 	return s.store.GetAppSettings(ctx)

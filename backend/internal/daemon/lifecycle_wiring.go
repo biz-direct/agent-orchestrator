@@ -293,6 +293,7 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 		Messenger:           messenger,
 		Chat:                chat,
 		Defaults:            defaults,
+		GlobalRules:         globalOrchestratorRules(defaults),
 		Lifecycle:           lcm,
 		Preview:             previewLifecycle,
 		Browser:             browserLifecycle,
@@ -705,4 +706,11 @@ func (c chatLauncher) AbortChatHandoff(id domain.SessionID) {
 
 func (c chatLauncher) StopChat(ctx context.Context, id domain.SessionID) error {
 	return c.svc.StopChat(ctx, id)
+}
+
+// globalOrchestratorRules narrows the settings service handed in as the session
+// defaults to the global-rules reader; nil when it does not provide one.
+func globalOrchestratorRules(defaults sessionmanager.SessionModeDefaults) sessionmanager.GlobalOrchestratorRulesReader {
+	reader, _ := defaults.(sessionmanager.GlobalOrchestratorRulesReader)
+	return reader
 }

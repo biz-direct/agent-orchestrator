@@ -26,6 +26,7 @@ export type GlobalSettingsSection =
 	| "general"
 	| "harness"
 	| "agents"
+	| "prompts"
 	| "remoteHosts"
 	| "coder11x"
 	| "mobile"
@@ -177,7 +178,7 @@ export type UiState = {
 	openUpdateInstallPrompt: () => void;
 	closeUpdateInstallPrompt: () => void;
 	openGlobalSettings: (section?: GlobalSettingsSection, options?: { focusAgentId?: string; hostId?: string; harnessView?: "local" | "cloud"; preserveProject?: boolean }) => void;
-	openProjectSettings: (projectId: string, options?: string | { section?: ProjectSettingsSection }) => void;
+	openProjectSettings: (projectId: string, options?: string | { section?: ProjectSettingsSection; hostId?: string }) => void;
 	closeSettings: () => void;
 	/** Refresh resolvedTheme from OS without writing light/dark to storage. */
 	syncSystemTheme: () => void;
@@ -371,6 +372,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 			scope: "project",
 			projectId,
 			...(typeof options === "string" && options !== "local" ? { hostId: options } : {}),
+			...(typeof options === "object" && options?.hostId && options.hostId !== "local" ? { hostId: options.hostId } : {}),
 			...(typeof options === "object" && options?.section ? { section: options.section } : {}),
 		},
 	}),

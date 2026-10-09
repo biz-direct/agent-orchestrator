@@ -405,6 +405,7 @@ type Manager struct {
 	// that names no mode. Nil falls back to the compatibility default, so a build
 	// without it behaves exactly as before.
 	defaults     SessionModeDefaults
+	globalRules  GlobalOrchestratorRulesReader
 	chat         ChatLauncher
 	pipelineGate ports.PipelineExecutionGate
 	modelCatalog interface {
@@ -749,6 +750,8 @@ type Deps struct {
 	// Defaults supplies the daemon-owned default session interface for spawns that
 	// name no mode. Nil means always use the compatibility default.
 	Defaults SessionModeDefaults
+	// GlobalRules supplies the daemon-wide orchestrator rules. Nil means none.
+	GlobalRules GlobalOrchestratorRulesReader
 	// Chat launches the structured controller for a chat-mode session. Nil means
 	// chat mode is unavailable. Explicit Chat requests are refused; an inherited
 	// Chat preference falls back to TUI.
@@ -800,6 +803,7 @@ func New(d Deps) *Manager {
 		agentSwitchReporting:           d.ReportingPolicy,
 		daemonRunID:                    strings.TrimSpace(d.DaemonRunID),
 		defaults:                       d.Defaults,
+		globalRules:                    d.GlobalRules,
 		chat:                           d.Chat,
 		lcm:                            d.Lifecycle,
 		preview:                        d.Preview,
@@ -4947,6 +4951,13 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	switch kind {
 	case domain.KindOrchestrator:
 		cfg.OrchestratorRules = project.Config.OrchestratorRules
+		if !project.Config.SkipGlobalOrchestratorRules && m.globalRules != nil {
+			global, err := m.globalRules.GlobalOrchestratorRules(ctx)
+			if err != nil {
+				return "", fmt.Errorf("read global orchestrator rules: %w", err)
+			}
+			cfg.GlobalOrchestratorRules = global
+		}
 	case domain.KindWorker:
 		if projectID != "" {
 			orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)

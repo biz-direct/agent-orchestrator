@@ -75,6 +75,15 @@ Model, reasoning effort, permissions, and provider execution modes depend on the
 
 Use `agentRules` and `agentRulesFile` for worker instructions. Use `orchestratorRules` for supervision-specific guidance. These are stored in the typed project config and injected into the appropriate session role.
 
+### Orchestrator prompts
+
+Orchestrators get two optional layers of your own instructions on top of AO's built-in orchestrator prompt:
+
+1. **Global orchestrator prompt** (**Settings → Prompts**): applies to every project's orchestrator on this computer. A project can opt out with **Skip global orchestrator prompt**.
+2. **Project orchestrator prompt** (project **Settings → Prompts**, stored as `orchestratorRules`): applies to that project only and comes after the global layer.
+
+The layers only add; they cannot remove AO's built-in instructions. Each value is plain text up to 32 KiB. Edits reach an orchestrator the next time it is spawned or restored, not while it is running. The global prompt is stored per AO daemon, so remote hosts keep their own, and AO Cloud and Coder sessions do not use it yet.
+
 <Callout type="info">
 	AO uses the provider CLI already installed and authenticated on your machine. Run `ao doctor` if a configured harness fails preflight.
 </Callout>

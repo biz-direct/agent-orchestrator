@@ -9,3 +9,6 @@ UPDATE app_settings SET default_session_mode = ?, updated_at = ? WHERE id = 1;
 
 -- name: SetCloudOffering :exec
 UPDATE app_settings SET cloud_offering = ?, updated_at = ? WHERE id = 1;
+
+-- name: SetGlobalOrchestratorRules :exec
+UPDATE app_settings SET global_orchestrator_rules = ?, updated_at = ? WHERE id = 1;

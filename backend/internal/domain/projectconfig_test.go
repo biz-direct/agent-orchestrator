@@ -1,6 +1,10 @@
 package domain
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestProjectConfigValidate(t *testing.T) {
 	tests := []struct {
@@ -212,5 +216,16 @@ func TestProjectConfigIsZero(t *testing.T) {
 	}
 	if (ProjectConfig{AutoReview: true}).IsZero() {
 		t.Fatal("config with autoReview enabled should not be zero")
+	}
+}
+
+func TestValidateOrchestratorRulesSize(t *testing.T) {
+	exact := strings.Repeat("a", MaxOrchestratorRulesBytes)
+	if err := (ProjectConfig{OrchestratorRules: "  " + exact + "\n"}).Validate(); err != nil {
+		t.Fatalf("exactly the limit after trimming must be allowed: %v", err)
+	}
+	err := (ProjectConfig{OrchestratorRules: exact + "a"}).Validate()
+	if !errors.Is(err, ErrOrchestratorRulesTooLarge) {
+		t.Fatalf("err = %v, want ErrOrchestratorRulesTooLarge", err)
 	}
 }
