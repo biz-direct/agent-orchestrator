@@ -80,7 +80,7 @@ Use `agentRules` and `agentRulesFile` for worker instructions. Use `orchestrator
 Orchestrators get two optional layers of your own instructions on top of AO's built-in orchestrator prompt:
 
 1. **Global orchestrator prompt** (**Settings → Prompts**): applies to every project's orchestrator on this computer. A project can opt out with **Skip global orchestrator prompt**.
-2. **Project orchestrator prompt** (project **Settings → Prompts**, stored as `orchestratorRules`): applies to that project only and comes after the global layer.
+2. **Project orchestrator prompt** (project **Settings → Prompts**, stored as `orchestratorRules`): applies to that project only and comes after the global layer. It can also point at a repository-relative rules file (`orchestratorRulesFile`), whose contents follow the inline text.
 
 The layers only add; they cannot remove AO's built-in instructions. Each value is plain text up to 32 KiB. Edits reach an orchestrator the next time it is spawned or restored, not while it is running. The global prompt is stored per AO daemon, so remote hosts keep their own, and AO Cloud and Coder sessions do not use it yet.
 

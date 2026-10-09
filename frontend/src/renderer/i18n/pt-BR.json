@@ -1110,6 +1110,8 @@
 	"settings.prompts.project.globalPreview": "Aplicado antes do prompt deste projeto",
 	"settings.prompts.project.skipped": "Ignorado",
 	"settings.prompts.project.globalEmpty": "Nenhum prompt global do orquestrador definido neste host.",
+	"settings.prompts.project.rulesFile": "Arquivo de regras",
+	"settings.prompts.project.rulesFileEmpty": "O arquivo está vazio.",
 	"settings.prompts.project.globalLoadFailed": "Não foi possível carregar o prompt global deste host.",
 	"settings.prompts.project.skipGlobal": "Ignorar o prompt global do orquestrador",
 	"settings.prompts.project.label": "Prompt do orquestrador do projeto",

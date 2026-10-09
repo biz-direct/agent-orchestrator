@@ -2170,4 +2170,40 @@ describe("ProjectSettingsForm", () => {
 		await screen.findByText("Saved");
 		expect(postMock).toHaveBeenCalledTimes(1);
 	});
+
+	it("validates the orchestrator rules file before autosaving and blocks a bad path", async () => {
+		const project = {
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" } },
+		};
+		mockProject(project);
+		const base = getMock.getMockImplementation()!;
+		getMock.mockImplementation(async (path: string, init: { params?: { query?: { path?: string } } }) => {
+			if (path === "/api/v1/projects/{id}/orchestrator-rules-file") {
+				return init.params?.query?.path === "docs/good.md"
+					? { data: { path: "docs/good.md", content: "Be careful." }, error: undefined }
+					: { data: undefined, error: { message: "orchestratorRulesFile: not_found" } };
+			}
+			return base(path);
+		});
+
+		renderSettings("proj-1", undefined, "prompts");
+		const input = await screen.findByLabelText("Rules file");
+		await userEvent.type(input, "docs/missing.md");
+		expect(await screen.findByText(/not_found/)).toBeInTheDocument();
+		await new Promise((resolve) => setTimeout(resolve, 900));
+		expect(putMock).not.toHaveBeenCalled();
+
+		await userEvent.clear(input);
+		await userEvent.type(input, "docs/good.md");
+		expect(await screen.findByText("Be careful.")).toBeInTheDocument();
+		await waitFor(() => expect(putMock).toHaveBeenCalled(), { timeout: 3000 });
+		expect(putMock.mock.calls.at(-1)?.[1].body.config.orchestratorRulesFile).toBe("docs/good.md");
+		expect(postMock).not.toHaveBeenCalled();
+	});
 });
