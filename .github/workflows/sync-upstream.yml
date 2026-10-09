@@ -131,14 +131,17 @@ jobs:
           $files"
             { echo "### Upstream sync conflicts"; echo "$files"; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # REST, not `gh issue create`: the GraphQL createIssue mutation is
+          # refused for SYNC_PAT ("Resource not accessible by personal access token").
           existing="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$existing/comments" -f body="$body" >/dev/null
           else
-            # Create without --label, then add it: gh issue create --label fails
-            # here with "label not found" even though the label exists.
-            url="$(gh issue create --title "Upstream sync conflict: $UPSTREAM@$SHA" --body "$body")"
-            gh issue edit "$url" --add-label "$label" || echo "::warning::Could not add label $label to $url."
+            number="$(gh api "repos/$GITHUB_REPOSITORY/issues" \
+              -f title="Upstream sync conflict: $UPSTREAM@$SHA" -f body="$body" --jq .number)"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$number/labels" -f "labels[]=$label" >/dev/null \
+              || echo "::warning::Could not add label $label to #$number."
+            echo "Opened issue #$number"
           fi
           echo "::error::Merge conflicts with upstream; issue opened for manual resolution."
           exit 1
