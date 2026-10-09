@@ -133,7 +133,10 @@ jobs:
           fi
           # REST, not `gh issue create`: the GraphQL createIssue mutation is
           # refused for SYNC_PAT ("Resource not accessible by personal access token").
-          existing="$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')"
+          # Match on the title, not the label: a label that failed to attach must
+          # not let a retry open a duplicate conflict issue.
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" \
+            --jq '[.[] | select(.pull_request | not) | select(.title | startswith("Upstream sync conflict:"))][0].number // empty')"
           if [ -n "$existing" ]; then
             gh api "repos/$GITHUB_REPOSITORY/issues/$existing/comments" -f body="$body" >/dev/null
           else
