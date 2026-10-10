@@ -769,6 +769,18 @@ describe("plain-text workspace file links", () => {
 		expect(screen.getByText("Not /etc/App.tsx, docs/manual.pdf, notes.txt, or e.g. Node.js.")).toBeInTheDocument();
 	});
 
+	it("keeps a reference-style link's own target over a path in its text", async () => {
+		const { onFileOpen, onLinkOpen } = renderProse("See [README.md][docs].\n\n[docs]: https://example.com/docs");
+
+		const link = screen.getByRole("link", { name: "README.md" });
+		expect(link).toHaveAttribute("href", "https://example.com/docs");
+		expect(link.querySelector("a")).toBeNull();
+		await userEvent.click(link);
+
+		expect(onLinkOpen).toHaveBeenCalledWith("https://example.com/docs");
+		expect(onFileOpen).not.toHaveBeenCalled();
+	});
+
 	it("does not open an unsupported markdown file link in Files", async () => {
 		const { onFileOpen } = renderProse("[manual](docs/manual.pdf)");
 

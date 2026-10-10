@@ -105,7 +105,8 @@ function remarkFileReferences() {
 }
 
 function visitFileReferences(node: MarkdownNode): void {
-	if (!node.children || node.type === "code" || node.type === "inlineCode" || node.type === "link") return;
+	// Explicit links (inline or reference-style) keep their own target.
+	if (!node.children || node.type === "code" || node.type === "inlineCode" || node.type === "link" || node.type === "linkReference") return;
 	for (let index = 0; index < node.children.length; index += 1) {
 		const child = node.children[index]!;
 		if (child.type !== "text" || !child.value) {
