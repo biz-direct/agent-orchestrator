@@ -119,7 +119,9 @@ function visitFileReferences(node: MarkdownNode): void {
 		let cursor = 0;
 		for (const reference of references) {
 			if (reference.start > cursor) replacement.push({ type: "text", value: child.value.slice(cursor, reference.start) });
-			const location = reference.line ? `:${reference.line}${reference.column ? `:${reference.column}` : ""}` : "";
+			// `#L12C3` rather than `:12:3`: a basename such as `README.md:42` reads as
+			// a URI scheme and the URL sanitizer would clear the href.
+			const location = reference.line ? `#L${reference.line}${reference.column ? `C${reference.column}` : ""}` : "";
 			replacement.push({
 				type: "link",
 				url: `${reference.path}${location}`,
@@ -343,6 +345,8 @@ function MarkdownLink({ href, children, ...props }: { href?: string; children?: 
 	const filePath = resolved?.workspacePath ?? (explicitPath && !fileCatalog.unviewable?.has(explicitPath) ? explicitPath : undefined);
 	const sessionLink = Boolean(href && isSessionLink(href));
 	const openInFiles = filePath && !workspaceFileOpensInBrowser(filePath) ? filePath : undefined;
+	// A resolved HTML file previews by its workspace path, without editor-location suffixes.
+	const targetHref = resolved && workspaceFileOpensInBrowser(resolved.workspacePath) ? resolved.workspacePath : href;
 	if (remoteHost && href && (isHostLocalWebLink(href) || (isPotentialWorkspaceFileLink(href) && !openInFiles))) {
 		return <span className="text-muted-foreground" title={REMOTE_PREVIEW_UNAVAILABLE}>
 			{children}<span className="sr-only"> (remote preview unavailable)</span>
@@ -351,7 +355,7 @@ function MarkdownLink({ href, children, ...props }: { href?: string; children?: 
 	const browserLink = href ? !sessionLink && (isWebLink(href) || (!remoteHost && (!!filePath || isPotentialWorkspaceFileLink(href)))) : false;
 	return (
 		<AppLink
-			href={href}
+			href={targetHref}
 			onBrowserOpen={onLinkOpen}
 			inAppLink={href ? () => browserLink : undefined}
 			filePath={filePath}
@@ -369,9 +373,9 @@ function MarkdownLink({ href, children, ...props }: { href?: string; children?: 
 					else onFileOpen(openInFiles, line);
 					return;
 				}
-				if (href && !browserLink) {
+				if (targetHref && !browserLink) {
 					event.preventDefault();
-					void openLinkInSystemBrowser(href);
+					void openLinkInSystemBrowser(targetHref);
 				}
 			}}
 			target="_blank"

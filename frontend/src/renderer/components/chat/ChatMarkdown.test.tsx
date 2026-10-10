@@ -731,7 +731,7 @@ describe("ActivityTitle", () => {
 
 describe("plain-text workspace file links", () => {
 	const fileCatalog = {
-		paths: ["frontend/src/App.tsx", "README.md", "docs/manual.pdf"],
+		paths: ["frontend/src/App.tsx", "README.md", "docs/manual.pdf", "reports/index.html"],
 		unviewable: new Set(["docs/manual.pdf"]),
 	};
 	function renderProse(text: string, onFileOpen = vi.fn(), onLinkOpen = vi.fn()) {
@@ -752,6 +752,26 @@ describe("plain-text workspace file links", () => {
 		expect(onFileOpen).toHaveBeenNthCalledWith(1, "frontend/src/App.tsx", 42);
 		expect(onFileOpen).toHaveBeenNthCalledWith(2, "README.md");
 		expect(onLinkOpen).not.toHaveBeenCalled();
+	});
+
+	it.each(["README.md:42", "README.md#L42"])("opens a basename with a line, %s, at that line", async (reference) => {
+		const { onFileOpen } = renderProse(`See ${reference} for details.`);
+
+		await userEvent.click(screen.getByRole("link", { name: reference }));
+
+		expect(onFileOpen).toHaveBeenCalledWith("README.md", 42);
+	});
+
+	it.each([
+		["reports/index.html:12", "reports/index.html"],
+		["/Users/me/.ao/worktrees/p/s-1/reports/index.html", "reports/index.html"],
+	])("previews the resolved HTML path for %s", async (reference, expected) => {
+		const { onFileOpen, onLinkOpen } = renderProse(`Open ${reference} now.`);
+
+		await userEvent.click(screen.getByRole("link", { name: reference }));
+
+		expect(onLinkOpen).toHaveBeenCalledWith(expected);
+		expect(onFileOpen).not.toHaveBeenCalled();
 	});
 
 	it("opens an absolute worktree path in Files", async () => {
