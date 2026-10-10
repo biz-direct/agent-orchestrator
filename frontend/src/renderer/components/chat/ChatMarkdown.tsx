@@ -51,11 +51,14 @@ import {
 	workspaceFilePath,
 } from "../../lib/external-link-policy";
 import { AppLink } from "../AppLink";
+import { explicitWorkspaceFilePath, workspaceFileReferenceLine } from "../../lib/workspace-file-path";
 import {
-	explicitWorkspaceFilePath,
-	findWorkspaceFilePath,
-	workspaceFileReferenceLine,
-} from "../../lib/workspace-file-path";
+	findFileReferences,
+	findWorkspaceFileLinks,
+	resolveWorkspaceFileReference,
+	workspaceFileOpensInBrowser,
+	type WorkspaceFileCatalog,
+} from "../../lib/workspace-file-links";
 import { HighlightedCode } from "./HighlightedCode";
 import { MermaidBlock } from "./MermaidBlock";
 import { CopyButton } from "./CopyButton";
@@ -78,7 +81,57 @@ export const ActivityTitle = memo(function ActivityTitle({ text }: { text: strin
 });
 
 /** GitHub-flavoured markdown: tables, strikethrough, task lists, autolinks. */
-const PLUGINS = [remarkGfm, remarkSessionLinks];
+const PLUGINS = [remarkGfm, remarkSessionLinks, remarkFileReferences];
+
+/** Marks a link the file-reference plugin made from plain text, not one the agent wrote. */
+const FILE_REFERENCE_ATTRIBUTE = "data-file-reference";
+
+type MarkdownNode = {
+	type: string;
+	value?: string;
+	url?: string;
+	children?: MarkdownNode[];
+	data?: { hProperties?: Record<string, string> };
+};
+
+/**
+ * remark plugin that turns path-shaped prose (`src/a.ts:12`, `README.md`) into
+ * candidate links. It cannot see the workspace — plugins stay module-level so
+ * react-markdown's memoization survives polling — so `MarkdownLink` drops any
+ * candidate that does not resolve to a viewer-openable file back to text.
+ */
+function remarkFileReferences() {
+	return (tree: MarkdownNode) => visitFileReferences(tree);
+}
+
+function visitFileReferences(node: MarkdownNode): void {
+	if (!node.children || node.type === "code" || node.type === "inlineCode" || node.type === "link") return;
+	for (let index = 0; index < node.children.length; index += 1) {
+		const child = node.children[index]!;
+		if (child.type !== "text" || !child.value) {
+			visitFileReferences(child);
+			continue;
+		}
+		const references = findFileReferences(child.value);
+		if (references.length === 0) continue;
+		const replacement: MarkdownNode[] = [];
+		let cursor = 0;
+		for (const reference of references) {
+			if (reference.start > cursor) replacement.push({ type: "text", value: child.value.slice(cursor, reference.start) });
+			const location = reference.line ? `:${reference.line}${reference.column ? `:${reference.column}` : ""}` : "";
+			replacement.push({
+				type: "link",
+				url: `${reference.path}${location}`,
+				children: [{ type: "text", value: reference.text }],
+				data: { hProperties: { [FILE_REFERENCE_ATTRIBUTE]: "" } },
+			});
+			cursor = reference.end;
+		}
+		if (cursor < child.value.length) replacement.push({ type: "text", value: child.value.slice(cursor) });
+		node.children.splice(index, 1, ...replacement);
+		index += replacement.length - 1;
+	}
+}
 
 /**
  * Whether the prose is still arriving, for the fences inside it.
@@ -96,7 +149,8 @@ const OpenChatLink = createContext<{
 	remoteHost?: boolean;
 	openSession?: (url: string) => void;
 	workspacePaths: string[];
-}>({ workspacePaths: [] });
+	fileCatalog: WorkspaceFileCatalog;
+}>({ workspacePaths: [], fileCatalog: { paths: [] } });
 const EMPTY_WORKSPACE_PATHS: string[] = [];
 
 export function ChatLinkProvider({
@@ -105,6 +159,7 @@ export function ChatLinkProvider({
 	remoteHost,
 	onSessionLinkOpen,
 	workspacePaths = EMPTY_WORKSPACE_PATHS,
+	fileCatalog,
 	children,
 }: {
 	onLinkOpen?: (url: string) => void;
@@ -112,11 +167,20 @@ export function ChatLinkProvider({
 	remoteHost?: boolean;
 	onSessionLinkOpen?: (url: string) => void;
 	workspacePaths?: string[];
+	/** Viewer-openable files; defaults to treating every workspace path as openable. */
+	fileCatalog?: WorkspaceFileCatalog;
 	children: ReactNode;
 }) {
 	const value = useMemo(
-		() => ({ open: onLinkOpen, openFile: onFileOpen, openSession: onSessionLinkOpen, remoteHost, workspacePaths }),
-		[onLinkOpen, onFileOpen, onSessionLinkOpen, remoteHost, workspacePaths],
+		() => ({
+			open: onLinkOpen,
+			openFile: onFileOpen,
+			openSession: onSessionLinkOpen,
+			remoteHost,
+			workspacePaths,
+			fileCatalog: fileCatalog ?? { paths: workspacePaths },
+		}),
+		[onLinkOpen, onFileOpen, onSessionLinkOpen, remoteHost, workspacePaths, fileCatalog],
 	);
 	return <OpenChatLink.Provider value={value}>{children}</OpenChatLink.Provider>;
 }
@@ -265,13 +329,19 @@ function compactEmoji(children: ReactNode): ReactNode {
 	return children;
 }
 
-function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
-	const { open: onLinkOpen, openFile: onFileOpen, openSession: onSessionLinkOpen, remoteHost, workspacePaths } = useContext(OpenChatLink);
-	const filePath = href && onFileOpen
-		? workspaceFilePath(href, workspacePaths) ?? findWorkspaceFilePath(href, workspacePaths) ?? explicitWorkspaceFilePath(href)
+function MarkdownLink({ href, children, ...props }: { href?: string; children?: ReactNode; [FILE_REFERENCE_ATTRIBUTE]?: string }) {
+	const { open: onLinkOpen, openFile: onFileOpen, openSession: onSessionLinkOpen, remoteHost, workspacePaths, fileCatalog } = useContext(OpenChatLink);
+	const fileReference = props[FILE_REFERENCE_ATTRIBUTE] !== undefined;
+	const resolved = href && onFileOpen ? resolveWorkspaceFileReference(href, fileCatalog) : undefined;
+	// Prose that only looks like a path stays prose.
+	if (fileReference && !resolved) return <>{children}</>;
+	const explicitPath = href && onFileOpen && !resolved
+		? workspaceFilePath(href, workspacePaths) ?? explicitWorkspaceFilePath(href)
 		: undefined;
+	// A catalogued file the viewer cannot render keeps its existing link handling.
+	const filePath = resolved?.workspacePath ?? (explicitPath && !fileCatalog.unviewable?.has(explicitPath) ? explicitPath : undefined);
 	const sessionLink = Boolean(href && isSessionLink(href));
-	const openInFiles = filePath && !/\.html?$/i.test(filePath) ? filePath : undefined;
+	const openInFiles = filePath && !workspaceFileOpensInBrowser(filePath) ? filePath : undefined;
 	if (remoteHost && href && (isHostLocalWebLink(href) || (isPotentialWorkspaceFileLink(href) && !openInFiles))) {
 		return <span className="text-muted-foreground" title={REMOTE_PREVIEW_UNAVAILABLE}>
 			{children}<span className="sr-only"> (remote preview unavailable)</span>
@@ -342,6 +412,43 @@ export const SessionLinkedText = memo(function SessionLinkedText({ text }: { tex
 });
 
 /**
+ * Link viewer-openable workspace files inside plain text such as command output.
+ * Text that names no catalogued file renders unchanged.
+ */
+export const WorkspaceFileLinkedText = memo(function WorkspaceFileLinkedText({ text }: { text: string }) {
+	const { openFile: onFileOpen, fileCatalog } = useContext(OpenChatLink);
+	const links = useMemo(
+		() => (onFileOpen
+			? findWorkspaceFileLinks(text, fileCatalog).filter((link) => !workspaceFileOpensInBrowser(link.workspacePath))
+			: []),
+		[fileCatalog, onFileOpen, text],
+	);
+	if (!onFileOpen || links.length === 0) return text;
+	const content: ReactNode[] = [];
+	let cursor = 0;
+	for (const link of links) {
+		if (link.start > cursor) content.push(text.slice(cursor, link.start));
+		content.push(
+			<button
+				key={`${link.start}:${link.text}`}
+				type="button"
+				onClick={() => {
+					if (link.line == null) onFileOpen(link.workspacePath);
+					else onFileOpen(link.workspacePath, link.line);
+				}}
+				aria-label={`Open ${link.workspacePath} in Files`}
+				className="inline text-left text-markdown-link underline decoration-markdown-link/45 underline-offset-2 transition-colors hover:text-markdown-link-hover hover:decoration-markdown-link-hover/75"
+			>
+				{link.text}
+			</button>,
+		);
+		cursor = link.end;
+	}
+	if (cursor < text.length) content.push(text.slice(cursor));
+	return <>{content}</>;
+});
+
+/**
  * A mermaid fence with the streaming state it was rendered under.
  *
  * A separate component rather than a hook call in the `pre` override because
@@ -364,10 +471,10 @@ function MermaidFence({ code }: { code: string }) {
 }
 
 function InlineCode({ children }: { children?: ReactNode }) {
-	const { openFile: onFileOpen, workspacePaths } = useContext(OpenChatLink);
+	const { openFile: onFileOpen, fileCatalog } = useContext(OpenChatLink);
 	const insideLink = useContext(InsideMarkdownLink);
 	const text = typeof children === "string" ? children : undefined;
-	const filePath = text && onFileOpen ? findWorkspaceFilePath(text, workspacePaths) : undefined;
+	const filePath = text && onFileOpen ? resolveWorkspaceFileReference(text, fileCatalog)?.workspacePath : undefined;
 	const code = (
 		<code className="rounded bg-surface px-[5px] py-[2px] font-mono text-[11.5px] text-markdown-code">
 			{children}

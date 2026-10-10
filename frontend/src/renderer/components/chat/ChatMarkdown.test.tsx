@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { aoBridge } from "../../lib/bridge";
 import { setApiBaseUrl } from "../../lib/api-client";
 import { renderMermaidDiagram } from "../../lib/mermaid-diagram";
-import { ActivityTitle, ChatLinkProvider, ChatMarkdown } from "./ChatMarkdown";
+import { ActivityTitle, ChatLinkProvider, ChatMarkdown, WorkspaceFileLinkedText } from "./ChatMarkdown";
 import { ChatImageSourceProvider } from "./chat-image-source";
 
 // Mermaid needs real SVG layout APIs jsdom lacks; pin the routing boundary and
@@ -726,5 +726,70 @@ describe("ActivityTitle", () => {
 		expect(screen.getByRole("button")).toHaveTextContent("Edit file path.ts");
 		expect(container.querySelector("strong")).toHaveTextContent("Edit");
 		expect(container.querySelector("a, img, input, p, h1, pre")).toBeNull();
+	});
+});
+
+describe("plain-text workspace file links", () => {
+	const fileCatalog = {
+		paths: ["frontend/src/App.tsx", "README.md", "docs/manual.pdf"],
+		unviewable: new Set(["docs/manual.pdf"]),
+	};
+	function renderProse(text: string, onFileOpen = vi.fn(), onLinkOpen = vi.fn()) {
+		render(
+			<ChatLinkProvider onFileOpen={onFileOpen} onLinkOpen={onLinkOpen} workspacePaths={fileCatalog.paths} fileCatalog={fileCatalog}>
+				<ChatMarkdown text={text} />
+			</ChatLinkProvider>,
+		);
+		return { onFileOpen, onLinkOpen };
+	}
+
+	it("opens a path:line written in agent prose at that line", async () => {
+		const { onFileOpen, onLinkOpen } = renderProse("The bug is in src/App.tsx:42:7, see README.md.");
+
+		await userEvent.click(screen.getByRole("link", { name: "src/App.tsx:42:7" }));
+		await userEvent.click(screen.getByRole("link", { name: "README.md" }));
+
+		expect(onFileOpen).toHaveBeenNthCalledWith(1, "frontend/src/App.tsx", 42);
+		expect(onFileOpen).toHaveBeenNthCalledWith(2, "README.md");
+		expect(onLinkOpen).not.toHaveBeenCalled();
+	});
+
+	it("opens an absolute worktree path in Files", async () => {
+		const { onFileOpen } = renderProse("Edited /Users/me/.ao/worktrees/p/s-1/frontend/src/App.tsx");
+
+		await userEvent.click(screen.getByRole("link", { name: /frontend\/src\/App\.tsx$/ }));
+
+		expect(onFileOpen).toHaveBeenCalledWith("frontend/src/App.tsx");
+	});
+
+	it("leaves unknown, outside, unsupported, and prose tokens as plain text", () => {
+		renderProse("Not /etc/App.tsx, docs/manual.pdf, notes.txt, or e.g. Node.js.");
+
+		expect(screen.queryByRole("link")).toBeNull();
+		expect(screen.getByText("Not /etc/App.tsx, docs/manual.pdf, notes.txt, or e.g. Node.js.")).toBeInTheDocument();
+	});
+
+	it("does not open an unsupported markdown file link in Files", async () => {
+		const { onFileOpen } = renderProse("[manual](docs/manual.pdf)");
+
+		await userEvent.click(screen.getByRole("link", { name: "manual" }));
+
+		expect(onFileOpen).not.toHaveBeenCalled();
+	});
+
+	it("links paths in tool-call output", async () => {
+		const onFileOpen = vi.fn();
+		render(
+			<ChatLinkProvider onFileOpen={onFileOpen} fileCatalog={fileCatalog}>
+				<pre>
+					<WorkspaceFileLinkedText text={"frontend/src/App.tsx(12,5): error TS2322\n/tmp/other.ts:1"} />
+				</pre>
+			</ChatLinkProvider>,
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: "Open frontend/src/App.tsx in Files" }));
+
+		expect(onFileOpen).toHaveBeenCalledWith("frontend/src/App.tsx", 12);
+		expect(screen.getAllByRole("button")).toHaveLength(1);
 	});
 });

@@ -61,7 +61,7 @@ import { cn } from "../../lib/utils";
 import { caretNotation, stripAnsi } from "../../lib/ansi";
 import { getApiBaseUrl } from "../../lib/api-client";
 import { isWebLink, openLinkInSystemBrowser } from "../../lib/external-link-policy";
-import { ActivityTitle, ChatMarkdown, SessionLinkedText } from "./ChatMarkdown";
+import { ActivityTitle, ChatMarkdown, SessionLinkedText, WorkspaceFileLinkedText } from "./ChatMarkdown";
 import { HighlightedCode } from "./HighlightedCode";
 import { CopyButton } from "./CopyButton";
 import { HumanMessageEditor } from "./HumanMessageEditor";
@@ -1234,7 +1234,7 @@ function CommandOutput({
 						: "border border-border bg-background px-2.5 py-2 text-[10.5px]",
 				)}
 			>
-				{output}
+				<WorkspaceFileLinkedText text={output} />
 			</pre>
 			{detail?.outputTruncated ? (
 				<p className="text-[10px] leading-relaxed text-warning">

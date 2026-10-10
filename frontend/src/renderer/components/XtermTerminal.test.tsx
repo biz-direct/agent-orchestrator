@@ -8,11 +8,26 @@ import { useUiStore } from "../stores/ui-store";
 import { safeTerminalFind } from "./TerminalSearch";
 import { XtermTerminal } from "./XtermTerminal";
 
+type LinkProvider = null | {
+	provideLinks: (
+		line: number,
+		callback: (
+			links?: Array<{
+				text: string;
+				range: { start: { x: number; y: number }; end: { x: number; y: number } };
+				activate: (event: MouseEvent) => void;
+			}>,
+		) => void,
+	) => void;
+};
+
 const state = vi.hoisted(() => ({
 	fit: vi.fn(),
 	lifecycle: [] as string[],
 	linkHandler: null as null | ((event: MouseEvent, uri: string) => void),
 	queueViewportSyncOnOpen: false,
+	linkProviders: [] as Array<NonNullable<LinkProvider>>,
+	fileLinkProvider: null as LinkProvider,
 	sessionLinkProvider: null as null | {
 		provideLinks: (
 			line: number,
@@ -250,8 +265,12 @@ vi.mock("@xterm/xterm", () => ({
 		attachCustomWheelEventHandler(listener: (event: WheelEvent) => boolean) {
 			this.wheelHandler = listener;
 		}
-		registerLinkProvider(provider: typeof state.sessionLinkProvider) {
-			state.sessionLinkProvider = provider;
+		registerLinkProvider(provider: NonNullable<typeof state.sessionLinkProvider>) {
+			state.linkProviders.push(provider);
+			// Registration order is precedence: the session provider comes first,
+			// the workspace file provider last.
+			state.sessionLinkProvider = state.linkProviders[0]!;
+			state.fileLinkProvider = provider;
 			return { dispose: () => undefined };
 		}
 		unicode = { activeVersion: "" };
@@ -363,6 +382,8 @@ describe("XtermTerminal", () => {
 		state.linkHandler = null;
 		state.queueViewportSyncOnOpen = false;
 		state.sessionLinkProvider = null;
+		state.fileLinkProvider = null;
+		state.linkProviders = [];
 		state.searchAddon = null;
 		state.mouseMoveListener.mockClear();
 		setNavigatorPlatform("Linux x86_64");
@@ -2759,6 +2780,68 @@ describe("XtermTerminal", () => {
 				start: { x: 4, y: 1 },
 				end: { x: 10, y: 2 },
 			});
+		});
+	});
+
+	describe("workspace file links", () => {
+		const catalog = { paths: ["frontend/src/App.tsx", "docs/manual.pdf"], unviewable: new Set(["docs/manual.pdf"]) };
+		function renderWithRow(row: string, onOpen = vi.fn()) {
+			render(<XtermTerminal fileLinks={{ catalog, onOpen }} theme="dark" />);
+			state.lastTerminal!.modes.mouseTrackingMode = "none";
+			state.lastTerminal!.buffer.active.length = 1;
+			state.lastTerminal!.buffer.active.getLine = (line) => (line === 0 ? testBufferLine(asciiCells(row)) : undefined);
+			return onOpen;
+		}
+		function provide() {
+			let result: Parameters<Parameters<NonNullable<LinkProvider>["provideLinks"]>[1]>[0];
+			state.fileLinkProvider!.provideLinks(1, (links) => {
+				result = links;
+			});
+			return result;
+		}
+
+		it("is registered after the URL and session link providers", () => {
+			render(<XtermTerminal fileLinks={{ catalog, onOpen: vi.fn() }} theme="dark" />);
+			expect(state.linkProviders).toHaveLength(2);
+			expect(state.linkProviders.indexOf(state.fileLinkProvider!)).toBe(1);
+		});
+
+		it("opens a compiler-style path at its line on click", () => {
+			const onOpen = renderWithRow("error: src/App.tsx:42:7: unexpected token");
+			const links = provide();
+			expect(links?.map((link) => [link.text, link.range])).toEqual([
+				["src/App.tsx:42:7", { start: { x: 8, y: 1 }, end: { x: 23, y: 1 } }],
+			]);
+			links![0]!.activate({} as MouseEvent);
+			expect(onOpen).toHaveBeenCalledWith("frontend/src/App.tsx", 42);
+		});
+
+		it("opens an absolute worktree path without a line", () => {
+			const onOpen = renderWithRow("M /Users/me/.ao/worktrees/p/s-1/frontend/src/App.tsx");
+			provide()![0]!.activate({} as MouseEvent);
+			expect(onOpen).toHaveBeenCalledWith("frontend/src/App.tsx", undefined);
+		});
+
+		it("does not link unknown, outside, unsupported, or URL paths", () => {
+			renderWithRow("/etc/App.tsx docs/manual.pdf ../frontend/src/App.tsx https://x.dev/src/App.tsx");
+			expect(provide()).toBeUndefined();
+		});
+
+		it("links nothing until the catalog has loaded", () => {
+			render(<XtermTerminal theme="dark" />);
+			state.lastTerminal!.buffer.active.length = 1;
+			state.lastTerminal!.buffer.active.getLine = () => testBufferLine(asciiCells("frontend/src/App.tsx"));
+			expect(provide()).toBeUndefined();
+		});
+
+		it("requires Ctrl while an application captures mouse input", () => {
+			const onOpen = renderWithRow("frontend/src/App.tsx");
+			state.lastTerminal!.modes.mouseTrackingMode = "any";
+			const link = provide()![0]!;
+			link.activate({ ctrlKey: false } as MouseEvent);
+			expect(onOpen).not.toHaveBeenCalled();
+			link.activate({ ctrlKey: true } as MouseEvent);
+			expect(onOpen).toHaveBeenCalledWith("frontend/src/App.tsx", undefined);
 		});
 	});
 

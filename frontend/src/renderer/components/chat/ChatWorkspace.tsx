@@ -109,6 +109,7 @@ import {
 } from "./ChatTimelineItems";
 import { HumanMessageEditor } from "./HumanMessageEditor";
 import { ChatLinkProvider } from "./ChatMarkdown";
+import type { WorkspaceFileCatalog } from "../../lib/workspace-file-links";
 import { ChatImageSourceProvider } from "./chat-image-source";
 import { ChatComposer, type ChatComposerHandle, type StoredComposerAttachment } from "./ChatComposer";
 import { ContextMeter } from "./ContextMeter";
@@ -405,6 +406,8 @@ export interface ChatWorkspaceProps {
 	skills?: ChatSkill[];
 	/** Worktree paths offered for `@`. */
 	filePaths?: string[];
+	/** Viewer-openable worktree files that chat links resolve against. */
+	fileCatalog?: WorkspaceFileCatalog;
 	/** The path list was capped by the daemon rather than being all of them. */
 	filePathsTruncated?: boolean;
 	/** Renderer-only human messages awaiting their exact durable counterpart. */
@@ -612,6 +615,7 @@ function ChatWorkspaceContent({
 	activateBranchError,
 	skills,
 	filePaths,
+	fileCatalog,
 	filePathsTruncated,
 	localEchos,
 	onStageAttachments,
@@ -1424,7 +1428,7 @@ function ChatWorkspaceContent({
 						className={cn("flex min-h-0 flex-1 flex-col", conversationEmpty && "justify-center")}
 						data-composer-placement={conversationEmpty ? "center" : "dock"}
 					>
-						<ChatLinkProvider onLinkOpen={onLinkOpen} onFileOpen={onOpenFile} onSessionLinkOpen={onSessionLinkOpen} remoteHost={Boolean(activeRemoteHostId)} workspacePaths={filePaths}>
+						<ChatLinkProvider onLinkOpen={onLinkOpen} onFileOpen={onOpenFile} onSessionLinkOpen={onSessionLinkOpen} remoteHost={Boolean(activeRemoteHostId)} workspacePaths={filePaths} fileCatalog={fileCatalog}>
 							<ChatImageSourceProvider sessionId={snapshot.sessionId} assetBaseUrl={assetBaseUrl} remoteHost={Boolean(activeRemoteHostId)}>
 								<Timeline
 									key={draftScopeKey}

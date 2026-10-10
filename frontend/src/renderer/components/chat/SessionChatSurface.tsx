@@ -351,7 +351,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 		Boolean(controllerCatalogsEnabled && catalogsEnabled && snapshot),
 		hostId,
 	);
-	const { paths, truncated } = useWorkspaceFilePaths(session.id, Boolean(snapshot), hostId);
+	const { paths, catalog: fileCatalog, truncated } = useWorkspaceFilePaths(session.id, Boolean(snapshot), hostId);
 	const stageAttachments = useStageAttachments(session.id, hostId);
 	const openLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths);
 	const openSessionLink = useSessionLinkNavigation(hostId);
@@ -578,6 +578,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				activateBranchError={commands.activateBranchError}
 				skills={skills}
 				filePaths={paths}
+				fileCatalog={fileCatalog}
 				filePathsTruncated={truncated}
 				localEchos={localEchos}
 				onStageAttachments={stageAttachments}

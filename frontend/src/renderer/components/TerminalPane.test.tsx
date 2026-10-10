@@ -66,6 +66,12 @@ const {
 	}),
 );
 let terminalLinkHandler: ((uri: string) => void) | undefined;
+let terminalFileLinks: { catalog: { paths: readonly string[] }; onOpen: (path: string, line?: number) => void } | undefined;
+const workspaceFilePathsMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../hooks/useConversation", () => ({
+	useWorkspaceFilePaths: (...args: unknown[]) => workspaceFilePathsMock(...args),
+}));
 
 vi.mock("../hooks/useCloudCp", () => ({
 	useCloudCp: () => ({
@@ -100,10 +106,12 @@ vi.mock("./XtermTerminal", () => ({
 		isVisible?: boolean;
 		onVisibleContent?: () => void;
 		onLinkOpen?: (uri: string) => void;
+		fileLinks?: typeof terminalFileLinks;
 		onReady?: (terminal: AttachableTerminal) => void;
 		supportsCursorColorScheme?: boolean;
 	}) => {
 		terminalLinkHandler = props.onLinkOpen;
+		terminalFileLinks = props.fileLinks;
 		visibleContentCallback.value = props.onVisibleContent;
 		const instance = useRef(0);
 		if (instance.current === 0) {
@@ -181,6 +189,7 @@ const orchestrator = {
 } satisfies WorkspaceSession;
 
 beforeEach(() => {
+	workspaceFilePathsMock.mockReturnValue({ catalog: { paths: [] } });
 	getMock.mockClear();
 	postMock.mockReset();
 	postMock.mockResolvedValue({ data: {} });
@@ -1196,6 +1205,53 @@ describe("providerScrollsByKeyboard", () => {
 
 	it("is false when the provider is unknown", () => {
 		expect(providerScrollsByKeyboard(undefined)).toBe(false);
+	});
+});
+
+describe("terminal workspace file links", () => {
+	beforeEach(() => {
+		workspaceFilePathsMock.mockReturnValue({ catalog: { paths: ["src/App.tsx", "report/index.html"] } });
+		useUiStore.setState({ workspaceFileOpenRequest: null });
+	});
+
+	it("loads the session's file catalog while visible and passes it to xterm", () => {
+		const view = renderPane(worker);
+		try {
+			expect(workspaceFilePathsMock).toHaveBeenCalledWith("sess-1", true, undefined);
+			expect(terminalFileLinks?.catalog.paths).toEqual(["src/App.tsx", "report/index.html"]);
+		} finally {
+			view.restore();
+		}
+	});
+
+	it("asks the session view to open a clicked path at its line", () => {
+		const view = renderPane(worker);
+		try {
+			act(() => terminalFileLinks?.onOpen("src/App.tsx", 42));
+			expect(useUiStore.getState().workspaceFileOpenRequest).toMatchObject({
+				sessionId: "sess-1",
+				path: "src/App.tsx",
+				line: 42,
+			});
+		} finally {
+			view.restore();
+		}
+	});
+
+	it("keeps HTML on the Browser preview path", async () => {
+		const view = renderPane(worker);
+		try {
+			act(() => terminalFileLinks?.onOpen("report/index.html"));
+			expect(useUiStore.getState().workspaceFileOpenRequest).toBeNull();
+			await waitFor(() =>
+				expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/preview", {
+					params: { path: { sessionId: "sess-1" } },
+					body: { url: "report/index.html", requireWorkspaceFile: true },
+				}),
+			);
+		} finally {
+			view.restore();
+		}
 	});
 });
 
