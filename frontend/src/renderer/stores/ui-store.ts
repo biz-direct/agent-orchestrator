@@ -100,6 +100,7 @@ export type WorkspaceFileOpenRequest = {
 	sessionId: string;
 	hostId?: string;
 	path: string;
+	line?: number;
 	nonce: number;
 };
 
@@ -208,7 +209,7 @@ export type UiState = {
 	dismissGlobalToast: (nonce: number) => void;
 	clearGlobalToast: () => void;
 	requestNewTask: (projectId: string, hostId?: string) => void;
-	requestWorkspaceFileOpen: (sessionId: string, path: string, hostId?: string) => void;
+	requestWorkspaceFileOpen: (sessionId: string, path: string, hostId?: string, line?: number) => void;
 	clearWorkspaceFileOpenRequest: (nonce: number) => void;
 	requestCreateProject: () => void;
 	requestCreateProjectFromPath: (path: string) => void;
@@ -581,12 +582,13 @@ export const useUiStore = create<UiState>((set, get) => ({
 		}
 		set((state) => ({ newTaskRequest: { projectId, hostId, nonce: (state.newTaskRequest?.nonce ?? 0) + 1 } }));
 	},
-	requestWorkspaceFileOpen: (sessionId, path, hostId) =>
+	requestWorkspaceFileOpen: (sessionId, path, hostId, line) =>
 		set((state) => ({
 			workspaceFileOpenRequest: {
 				sessionId,
 				path,
 				...(hostId ? { hostId } : {}),
+				...(line != null ? { line } : {}),
 				nonce: (state.workspaceFileOpenRequest?.nonce ?? 0) + 1,
 			},
 		})),

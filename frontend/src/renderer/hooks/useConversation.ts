@@ -19,12 +19,13 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { components } from "../../api/schema";
 import { apiErrorCode, apiErrorMessage } from "../lib/api-client";
 import { clientForSessionHost } from "../lib/host-clients";
 import { sessionUiKey } from "../lib/hosts";
 import { subscribeWorkspaceFileChanges } from "../lib/workspace-file-events";
+import { isViewerSupportedWorkspaceFile, type WorkspaceFileCatalog } from "../lib/workspace-file-links";
 import { workspaceQueryKeyForHost } from "./useWorkspaceQuery";
 import { recordDirectWorkerInteraction } from "../lib/session-management-telemetry";
 import type {
@@ -1418,26 +1419,37 @@ export function useWorkspaceFilePaths(sessionId: string | undefined, enabled: bo
 				params: { path: { sessionId: sessionId as string } },
 			});
 			if (error) throw error;
+			// A deleted path cannot be read, so offering it would insert a
+			// reference the agent then fails to resolve.
+			const files = (data?.files ?? []).filter((file) => file.status !== "deleted");
 			return {
-				// A deleted path cannot be read, so offering it would insert a
-				// reference the agent then fails to resolve.
-				paths: (data?.files ?? [])
-					.filter((file) => file.status !== "deleted")
-					.map((file) => file.path),
+				paths: files.map((file) => file.path),
+				unviewable: files.filter((file) => !isViewerSupportedWorkspaceFile(file)).map((file) => file.path),
 				truncated: Boolean(data?.truncated),
 			};
 		},
 	});
+	const paths = query.data?.paths ?? EMPTY_PATHS;
+	const unviewable = query.data?.unviewable;
+	// File links in chat and the terminal resolve against this catalog, so it is
+	// rebuilt only when the file list itself changes.
+	const catalog = useMemo<WorkspaceFileCatalog>(
+		() => ({ paths, unviewable: new Set(unviewable) }),
+		[paths, unviewable],
+	);
 	useEffect(() => {
 		if (!sessionId || !enabled || hostId) return;
 		return subscribeWorkspaceFileChanges(sessionId, queryClient);
 	}, [enabled, hostId, queryClient, sessionId]);
 	return {
-		paths: query.data?.paths ?? [],
+		paths,
+		catalog,
 		truncated: query.data?.truncated ?? false,
 		isLoading: query.isLoading,
 	};
 }
+
+const EMPTY_PATHS: string[] = [];
 
 /**
  * Write staged images into the session worktree.

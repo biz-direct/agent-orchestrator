@@ -38,6 +38,7 @@ import { isDialogOrMenuOpen } from "../lib/dom-selectors";
 import { TERMINAL_FONT_SIZE_DEFAULT } from "../lib/design-tokens";
 import { isWebLink, openLinkInSystemBrowser } from "../lib/external-link-policy";
 import { findSessionLinks } from "../lib/session-links";
+import { findWorkspaceFileLinks, type WorkspaceFileCatalog, type WorkspaceFileLink } from "../lib/workspace-file-links";
 import { isMacPlatform } from "../lib/platform";
 import { applyDocumentTheme, applyDocumentThemeStyle } from "../lib/theme";
 import {
@@ -89,6 +90,14 @@ export type XtermTerminalProps = {
 	onLinkOpen?: (uri: string) => void;
 	/** Navigate a canonical ao:// session link inside the current AO window. */
 	onSessionLinkOpen?: (uri: string) => void;
+	/**
+	 * Workspace files that plain-text paths in the output open in the file
+	 * viewer. URL and ao:// links take precedence over a path they contain.
+	 */
+	fileLinks?: {
+		catalog: WorkspaceFileCatalog;
+		onOpen: (path: string, line?: number) => void;
+	};
 	/** Publish the positive grid after a retained terminal becomes visible. */
 	onVisibleSize?: (cols: number, rows: number) => void;
 	/** Hidden retained terminals keep parsing output but expose no UI overlays. */
@@ -426,9 +435,15 @@ function mapStringOffsetToBuffer(
 	return [lineIndex, startColumn];
 }
 
-export function sessionLinkProvider(
+/**
+ * Link every match `find` reports in a (possibly wrapped) buffer line. Offsets
+ * index the line's joined text and are mapped back to cells, so wide and
+ * combining characters before a match keep its range on the right columns.
+ */
+function textLinkProvider<T extends { start: number; text: string }>(
 	term: Terminal,
-	activate: (event: MouseEvent, uri: string) => void,
+	find: (text: string) => T[],
+	activate: (event: MouseEvent, match: T) => void,
 ): ILinkProvider {
 	return {
 		provideLinks(lineNumber, callback) {
@@ -441,7 +456,7 @@ export function sessionLinkProvider(
 				lines.push(buffer.getLine(line)?.translateToString(false) ?? "");
 			}
 			const text = lines.join("");
-			const links: ILink[] = findSessionLinks(text).flatMap((match) => {
+			const links: ILink[] = find(text).flatMap((match) => {
 				const start = mapStringOffsetToBuffer(term, firstLine, 0, match.start);
 				if (!start) return [];
 				const end = mapStringOffsetToBuffer(term, start[0], start[1], match.text.length);
@@ -460,13 +475,40 @@ export function sessionLinkProvider(
 							start: { x: startColumn + 1, y: startLine + 1 },
 							end: { x: endColumn, y: endLine + 1 },
 						},
-						activate: (event) => activate(event, match.text),
+						activate: (event) => activate(event, match),
 					},
 				];
 			});
 			callback(links.length > 0 ? links : undefined);
 		},
 	};
+}
+
+export function sessionLinkProvider(
+	term: Terminal,
+	activate: (event: MouseEvent, uri: string) => void,
+): ILinkProvider {
+	return textLinkProvider(term, findSessionLinks, (event, match) => activate(event, match.text));
+}
+
+/**
+ * Link plain-text workspace paths (`src/a.ts:12:4`, absolute worktree paths)
+ * that the viewer can open. The catalog is read per hover, so a refreshed file
+ * list applies without re-registering, and an absent catalog links nothing.
+ */
+export function workspaceFileLinkProvider(
+	term: Terminal,
+	catalog: () => WorkspaceFileCatalog | undefined,
+	activate: (event: MouseEvent, link: WorkspaceFileLink) => void,
+): ILinkProvider {
+	return textLinkProvider(
+		term,
+		(text) => {
+			const current = catalog();
+			return current ? findWorkspaceFileLinks(text, current) : [];
+		},
+		activate,
+	);
 }
 
 export function XtermTerminal(props: XtermTerminalProps) {
@@ -764,6 +806,19 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		// window.open directly so the main process routes it to shell.openExternal.
 		term.loadAddon(new WebLinksAddon(activateLink, { hover: trackHover, leave: clearHover }));
 		term.registerLinkProvider(sessionLinkProvider(term, activateLink));
+		// Registered last: xterm prefers the earliest provider with a link under
+		// the pointer, so web and session links win over a path inside them.
+		term.registerLinkProvider(
+			workspaceFileLinkProvider(
+				term,
+				() => callbacksRef.current.fileLinks?.catalog,
+				(event, link) => {
+					const modifierPressed = isMacPlatform() ? event.metaKey : event.ctrlKey;
+					if (term.modes.mouseTrackingMode !== "none" && !modifierPressed) return;
+					callbacksRef.current.fileLinks?.onOpen(link.workspacePath, link.line);
+				},
+			),
+		);
 		const searchAddon = new SearchAddon();
 		searchAddonRef.current = searchAddon;
 		term.loadAddon(searchAddon);

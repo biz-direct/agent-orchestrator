@@ -1351,12 +1351,12 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	useEffect(() => {
 		if (!workspaceFileOpenRequest || !session) return;
 		if (sessionUiKey(workspaceFileOpenRequest.sessionId, workspaceFileOpenRequest.hostId) !== uiSessionId) return;
-		const { nonce, path } = workspaceFileOpenRequest;
+		const { line, nonce, path } = workspaceFileOpenRequest;
 		if (session.cloud) {
 			prepareFilesInspector();
-			openCenterFile(path, { mode: "file" });
+			openCenterFile(path, { line, mode: "file" });
 		} else {
-			handleOpenFile(path);
+			handleOpenFile(path, line);
 		}
 		clearWorkspaceFileOpenRequest(nonce);
 	}, [

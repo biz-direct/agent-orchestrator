@@ -17,13 +17,15 @@ import type { TFunction } from "i18next";
 import { terminalTargetBelongsToSession, type TerminalTarget } from "../types/terminal";
 import { sessionAgentExited, sessionIsActive, type WorkspaceSession } from "../types/workspace";
 import { ResumeAgentControl } from "./ResumeAgentControl";
-import type { Theme } from "../stores/ui-store";
+import { useUiStore, type Theme } from "../stores/ui-store";
 import {
 	useTerminalSession,
 	type AttachableTerminal,
 	type TerminalSessionState,
 } from "../hooks/useTerminalSession";
 import { useSessionBrowserLink } from "../hooks/useSessionBrowserLink";
+import { useWorkspaceFilePaths } from "../hooks/useConversation";
+import { workspaceFileOpensInBrowser } from "../lib/workspace-file-links";
 import { useSessionLinkNavigation } from "../lib/use-session-link-navigation";
 import { getApiBaseUrl } from "../lib/api-client";
 import {
@@ -1133,6 +1135,27 @@ function AttachedTerminal({
 	}, [initFailed, onFatal, onTerminalStateChange]);
 	const handleLinkOpen = useSessionBrowserLink(session);
 	const handleSessionLinkOpen = useSessionLinkNavigation(session?.hostId);
+	// The same cached catalog chat resolves file links against. Fetched once the
+	// terminal is on screen; cloud sessions have no local worktree catalog.
+	const { catalog: fileCatalog } = useWorkspaceFilePaths(
+		session?.id,
+		Boolean(session && !session.cloud && isVisible),
+		session?.hostId,
+	);
+	const sessionId = session?.id;
+	const sessionHostId = session?.hostId;
+	const fileLinks = useMemo(
+		() => sessionId
+			? {
+				catalog: fileCatalog,
+				onOpen: (path: string, line?: number) => {
+					if (workspaceFileOpensInBrowser(path)) handleLinkOpen(path);
+					else useUiStore.getState().requestWorkspaceFileOpen(sessionId, path, sessionHostId, line);
+				},
+			}
+			: undefined,
+		[fileCatalog, handleLinkOpen, sessionHostId, sessionId],
+	);
 	const restoreSession = useCallback(async () => {
 		if (!session?.id || !canRestoreSession || isRestoring) return;
 		setIsRestoring(true);
@@ -1289,6 +1312,7 @@ function AttachedTerminal({
 					onError={handleInitError}
 					onLinkOpen={handleLinkOpen}
 					onSessionLinkOpen={handleSessionLinkOpen}
+					fileLinks={fileLinks}
 					onReady={handleReady}
 					onVisibleContent={attachSession?.cloud ? () => setHasVisibleContent(true) : undefined}
 					onToggleFullscreen={onToggleFullscreen}
