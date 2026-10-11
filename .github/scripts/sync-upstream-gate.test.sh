@@ -84,7 +84,7 @@ expect() { # <name> <condition: merge|nomerge|issue>
     echo "ok   - $1"
   else
     echo "FAIL - $1 (expected $2)"
-    sed 's/^/       /' <<<"$out"
+    echo "       ${out//$'\n'/$'\n       '}"
     fails=$((fails + 1))
   fi
 }
