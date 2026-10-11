@@ -20,6 +20,9 @@ func (*hibernationSettingsStore) SetDefaultSessionMode(context.Context, domain.S
 	return nil
 }
 func (*hibernationSettingsStore) SetCloudOffering(context.Context, bool, time.Time) error { return nil }
+func (*hibernationSettingsStore) SetGlobalOrchestratorRules(context.Context, string, time.Time) error {
+	return nil
+}
 
 func TestChatHibernationGateResetsOnDaemonBoot(t *testing.T) {
 	ctx := context.Background()

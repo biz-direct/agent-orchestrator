@@ -841,18 +841,18 @@ func TestAutoTriggerRespectsPipelineGuard(t *testing.T) {
 	}
 
 	eng, launcher := build(suppressGuard(true))
-	res, err := eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, "")
+	res, err := triggerWithSourceAndMode(context.Background(), eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, "")
 	if err != nil || res.SkipReason != "pipeline_active" || launcher.spawned {
 		t.Fatalf("auto review must be skipped: res=%+v err=%v spawned=%v", res, err, launcher.spawned)
 	}
 
 	eng, launcher = build(suppressGuard(false))
-	if res, err = eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, ""); err != nil || !res.Created || !launcher.spawned {
+	if res, err = triggerWithSourceAndMode(context.Background(), eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, ""); err != nil || !res.Created || !launcher.spawned {
 		t.Fatalf("a finished pipeline lets auto review run: res=%+v err=%v", res, err)
 	}
 
 	eng, launcher = build(suppressGuard(true))
-	if res, err = eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, ""); err != nil || !res.Created || !launcher.spawned {
+	if res, err = triggerWithSourceAndMode(context.Background(), eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, ""); err != nil || !res.Created || !launcher.spawned {
 		t.Fatalf("a guard without a review decision never blocks a manual pass: res=%+v err=%v", res, err)
 	}
 }
@@ -885,23 +885,23 @@ func TestManualTriggerRespectsPipelineReviewStage(t *testing.T) {
 	}
 
 	eng, launcher := build(reviewStageGuard{suppress: true, allowed: false})
-	_, err := eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, "")
+	_, err := triggerWithSourceAndMode(context.Background(), eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, "")
 	if !errors.Is(err, ports.ErrPipelineReviewNotReady) || launcher.spawned {
 		t.Fatalf("a premature manual review must be refused: err=%v spawned=%v", err, launcher.spawned)
 	}
-	res, err := eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, "")
+	res, err := triggerWithSourceAndMode(context.Background(), eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, "")
 	if err != nil || res.SkipReason != "pipeline_active" || launcher.spawned {
 		t.Fatalf("an idle-worker automatic review must stay suppressed: res=%+v err=%v", res, err)
 	}
 
 	eng, launcher = build(reviewStageGuard{suppress: true, allowed: true})
-	if res, err = eng.TriggerWithSourceAndMode(context.Background(), worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, ""); err != nil || !res.Created || !launcher.spawned {
+	if res, err = triggerWithSourceAndMode(context.Background(), eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerManual, ""); err != nil || !res.Created || !launcher.spawned {
 		t.Fatalf("at the Review stage a manual pass runs: res=%+v err=%v", res, err)
 	}
 
 	eng, launcher = build(reviewStageGuard{suppress: true, allowed: false})
 	bypass := ports.WithPipelineBypass(context.Background())
-	if res, err = eng.TriggerWithSourceAndMode(bypass, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, ""); err != nil || !res.Created || !launcher.spawned {
+	if res, err = triggerWithSourceAndMode(bypass, eng, worker.ID, "", domain.AgentConfig{}, domain.ReviewTriggerAuto, ""); err != nil || !res.Created || !launcher.spawned {
 		t.Fatalf("the pipeline's own review trigger must pass the guard: res=%+v err=%v", res, err)
 	}
 }
