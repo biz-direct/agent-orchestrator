@@ -129,6 +129,33 @@ describe("Settings recovery modal integration", () => {
 		expect(useUiStore.getState().settingsModal).toEqual({ scope: "project", projectId: "proj-1" });
 	});
 
+	it.each([
+		["a missing worker agent", { worker: {}, orchestrator: { agent: "claude-code" } }, "Renamed project"],
+		["an emptied project name", { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" } }, ""],
+	])("lets an invalid draft with %s move to another section to repair it", async (_label, config, nextName) => {
+		const invalid = { ...project, config };
+		vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
+			if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project: invalid } } as never;
+			if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "tui", chatHarnesses: [], cloudEnabled: false, localEnabled: true, trackerIntakeEnabled: true } } as never;
+			throw new Error(`Unexpected GET ${path}`);
+		});
+		const put = vi.spyOn(apiClient, "PUT");
+		useUiStore.getState().openProjectSettings("proj-1");
+		renderDialogs();
+		await userEvent.click(await screen.findByRole("button", { name: "Edit Project name" }));
+		const name = screen.getByRole("textbox", { name: "Project name" });
+		await userEvent.clear(name);
+		if (nextName) await userEvent.type(name, nextName);
+
+		const agents = within(screen.getByRole("navigation")).getByRole("button", { name: /agents/i });
+		await userEvent.click(agents);
+
+		await waitFor(() => expect(agents).toHaveAttribute("aria-current", "page"));
+		expect(put).not.toHaveBeenCalled();
+	});
+
 	it("leaves focus on the targeted Harness action when readiness is already cached", async () => {
 		requireCodexLogin();
 		const client = renderDialogs();

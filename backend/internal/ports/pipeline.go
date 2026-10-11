@@ -36,6 +36,15 @@ type PipelineExecutionGate interface {
 	AdmitSessionExecution(ctx context.Context, id domain.SessionID) (admitted bool, reason string)
 }
 
+// PipelineExecutionOwner is implemented by execution gates that can say whether
+// a session still belongs to an unfinished pipeline run, as its executor or as
+// an attached specialist. Automatic Chat hibernation uses it: waking a
+// hibernated Chat allocates a new controller generation, which would make the
+// pipeline reject the stage result and pause with controller_changed.
+type PipelineExecutionOwner interface {
+	SessionOwnsPipelineExecution(ctx context.Context, id domain.SessionID) (bool, error)
+}
+
 type pipelineBypassKey struct{}
 
 // WithPipelineBypass marks ctx as carrying the pipeline coordinator's own

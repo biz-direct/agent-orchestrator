@@ -158,9 +158,13 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 		const timeout = window.setTimeout(() => setShowSaving(true), 200);
 		return () => window.clearTimeout(timeout);
 	}, [mutation.isPending]);
+	// A dirty draft that fails validation cannot be saved as it stands. Reporting it
+	// lets the dialog switch sections (to the one holding the invalid field) instead
+	// of waiting forever for a save that validation refuses.
+	const unsaveable = dirty && !intakeIncomplete && validate() !== undefined;
 	useEffect(() => {
-		onSaveState?.({ phase: error ? "failed" : mutation.isPending ? showSaving ? "saving" : "pending" : dirty && !intakeIncomplete ? "pending" : didSave ? "saved" : "idle", dirty: dirty && !intakeIncomplete, requestPending: mutation.isPending, error, replacementError });
-	}, [dirty, didSave, error, intakeIncomplete, mutation.isPending, onSaveState, replacementError, showSaving]);
+		onSaveState?.({ phase: error ? "failed" : mutation.isPending ? showSaving ? "saving" : "pending" : dirty && !intakeIncomplete ? "pending" : didSave ? "saved" : "idle", dirty: dirty && !intakeIncomplete, requestPending: mutation.isPending, error, replacementError, unsaveable });
+	}, [dirty, didSave, error, intakeIncomplete, mutation.isPending, onSaveState, replacementError, showSaving, unsaveable]);
 	useEffect(() => {
 		if (!didSave) return;
 		const timeout = window.setTimeout(() => setDidSave(false), 1800);

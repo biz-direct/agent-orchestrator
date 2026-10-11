@@ -247,6 +247,19 @@ func (s *Service) HibernateChat(ctx context.Context, id domain.SessionID) (bool,
 		controller.sendMu.Unlock()
 		return false, nil
 	}
+	// An unfinished pipeline run owns this Chat's controller generation; waking
+	// it later would fence out the stage result. Fail closed on a lookup error.
+	if owner, ok := s.executionGate.(ports.PipelineExecutionOwner); ok {
+		owned, err := owner.SessionOwnsPipelineExecution(ctx, id)
+		if err != nil {
+			controller.sendMu.Unlock()
+			return false, fmt.Errorf("check pipeline ownership: %w", err)
+		}
+		if owned {
+			controller.sendMu.Unlock()
+			return false, nil
+		}
+	}
 	settled, err := turns.LatestVisibleUserTurnSettled(ctx, controller.conversation.ID, id)
 	if err != nil {
 		controller.sendMu.Unlock()

@@ -1203,3 +1203,45 @@ func TestSendDuringHibernationAcceptsThenWakesNativeConversation(t *testing.T) {
 		t.Fatalf("session after wake = %+v, %v, %v", rec.HibernatedAt, found, err)
 	}
 }
+
+// ownerGate is an execution gate that also reports pipeline ownership.
+type ownerGate struct {
+	owned bool
+	err   error
+}
+
+func (ownerGate) AdmitSessionExecution(context.Context, domain.SessionID) (bool, string) {
+	return true, ""
+}
+
+func (g ownerGate) SessionOwnsPipelineExecution(context.Context, domain.SessionID) (bool, error) {
+	return g.owned, g.err
+}
+
+// Waking a hibernated Chat allocates a new controller generation, which makes
+// the pipeline reject the stage result; a session that owns an unfinished
+// pipeline run must therefore stay warm.
+func TestHibernateChatKeepsPipelineExecutorAwake(t *testing.T) {
+	for name, gate := range map[string]ownerGate{
+		"owns an unfinished run":      {owned: true},
+		"ownership cannot be decided": {err: errors.New("store unavailable")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, conv := settledHibernationHarness(t, domain.TurnStateCompleted)
+			h.svc.SetExecutionGate(gate)
+			ctx := context.Background()
+			slept, err := h.svc.HibernateChat(ctx, testSession)
+			if slept || conv.calls.Load() != 0 || !h.svc.HasLiveChatController(testSession) {
+				t.Fatalf("pipeline executor hibernated: slept=%v err=%v stops=%d", slept, err, conv.calls.Load())
+			}
+			if (gate.err != nil) != (err != nil) {
+				t.Fatalf("err = %v, want error only when ownership is undecidable", err)
+			}
+		})
+	}
+	h, conv := settledHibernationHarness(t, domain.TurnStateCompleted)
+	h.svc.SetExecutionGate(ownerGate{})
+	if slept, err := h.svc.HibernateChat(context.Background(), testSession); err != nil || !slept || conv.calls.Load() != 1 {
+		t.Fatalf("session without a pipeline: slept=%v err=%v stops=%d", slept, err, conv.calls.Load())
+	}
+}
