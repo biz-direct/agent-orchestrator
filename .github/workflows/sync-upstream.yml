@@ -38,6 +38,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.SYNC_PAT }}
+      # The job adds an `upstream` remote, which makes gh resolve the upstream
+      # repo as its target; pin it to this fork.
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Require SYNC_PAT
         run: |
