@@ -15,8 +15,8 @@ body="${3:?body}"
 repo="${GITHUB_REPOSITORY:?}"
 label="agent-review"
 
-existing="$(TITLE="$title" gh api "repos/$repo/issues?state=open&per_page=100" --paginate \
-  --jq '.[] | select(.pull_request | not) | select(.title == env.TITLE) | .number' | head -n1)"
+existing="$(gh api "repos/$repo/issues?state=open&per_page=100" --paginate |
+  jq -rs --arg t "$title" 'add // [] | map(select((.pull_request | not) and .title == $t)) | .[0].number // empty')"
 
 case "$action" in
   open)
