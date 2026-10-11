@@ -13,14 +13,15 @@
 # commit counts, so a push invalidates the verdict until Pullfrog re-reviews.
 #
 # Env: GH_TOKEN, GITHUB_REPOSITORY; optional PULLFROG_LOGIN (default
-# pullfrog[bot]), IGNORED_CHECKS (default CodeRabbit), DRY_RUN=1 to print
-# actions instead of taking them (and to skip the PR guards, for testing).
+# pullfrog[bot]), IGNORED_CHECKS (default CodeRabbit,sync-gate,sync-gate-failure),
+# WAIT_SECS/POLL_SECS to poll pending checks, DRY_RUN=1 to print actions instead
+# of taking them (and to skip the PR guards, for testing).
 set -euo pipefail
 
 pr="${1:?pr number}"
 repo="${GITHUB_REPOSITORY:?}"
 reviewer="${PULLFROG_LOGIN:-pullfrog[bot]}"
-ignored="${IGNORED_CHECKS:-CodeRabbit}"
+ignored="${IGNORED_CHECKS:-CodeRabbit,sync-gate,sync-gate-failure}"
 dry="${DRY_RUN:-}"
 here="$(cd "$(dirname "$0")" && pwd)"
 
@@ -48,13 +49,25 @@ if [ -n "$guard_failed" ]; then
 fi
 
 # CI: gh pr checks exits non-zero while checks are pending or failed but still
-# prints the JSON; "no checks reported" prints nothing.
-checks="$(gh pr checks "$pr" --json name,bucket 2>/dev/null || true)"
-[ -n "$checks" ] || checks="[]"
-checks="$(jq -c --arg ignored "$ignored" \
-  '($ignored | split(",")) as $skip | map(select(.name as $n | $skip | index($n) | not))' <<<"$checks")"
+# prints the JSON; "no checks reported" prints nothing. The gate's own jobs and
+# CodeRabbit are ignored so the gate never waits on itself. With WAIT_SECS set,
+# pending checks are polled for that long: Pullfrog's check can lag its
+# workflow run finishing, and nothing re-triggers the gate after that.
+deadline=$((SECONDS + ${WAIT_SECS:-0}))
+while :; do
+  checks="$(gh pr checks "$pr" --json name,bucket 2>/dev/null || true)"
+  [ -n "$checks" ] || checks="[]"
+  checks="$(jq -c --arg ignored "$ignored" \
+    '($ignored | split(",")) as $skip | map(select(.name as $n | $skip | index($n) | not))' <<<"$checks")"
+  pending="$(jq -r '[.[] | select(.bucket == "pending") | .name] | join(", ")' <<<"$checks")"
+  if [ -n "$pending" ] && [ "$SECONDS" -lt "$deadline" ]; then
+    echo "Waiting for checks: $pending"
+    sleep "${POLL_SECS:-15}"
+    continue
+  fi
+  break
+done
 failed="$(jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' <<<"$checks")"
-pending="$(jq -r '[.[] | select(.bucket == "pending") | .name] | join(", ")' <<<"$checks")"
 scan_ok="$(jq -r 'any(.[]; .name == "scan" and .bucket == "pass")' <<<"$checks")"
 
 # Pullfrog verdict on the current head commit.

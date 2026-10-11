@@ -35,7 +35,10 @@ concurrency:
 
 jobs:
   evaluate:
-    # A Pullfrog review of a sync PR, or a CI workflow finishing on one.
+    # A Pullfrog review of a sync PR, a CI workflow finishing on one, or a
+    # Pullfrog run finishing (its check can still be pending when the clean
+    # review lands, and nothing else would re-run the gate afterwards).
+    name: sync-gate
     if: >-
       github.repository != 'OrchestratorInc/agent-orchestrator' && (
         (github.event_name == 'pull_request_review'
@@ -46,6 +49,9 @@ jobs:
           && github.event.workflow_run.name != 'Pullfrog'
           && github.event.workflow_run.event == 'pull_request'
           && startsWith(github.event.workflow_run.head_branch, 'sync/upstream-'))
+        ||
+        (github.event_name == 'workflow_run'
+          && github.event.workflow_run.name == 'Pullfrog')
       )
     runs-on: ubuntu-latest
     env:
@@ -66,20 +72,31 @@ jobs:
         env:
           REVIEW_PR: ${{ github.event.pull_request.number }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          # After a Pullfrog run, wait for its check to settle (it can lag the run).
+          WAIT_SECS: ${{ github.event.workflow_run.name == 'Pullfrog' && '300' || '0' }}
         run: |
           set -euo pipefail
-          pr="$REVIEW_PR"
-          if [ -z "$pr" ]; then
-            pr="$(gh pr list --head "$HEAD_BRANCH" --base main --state open \
-              --json number --jq '.[0].number // empty')"
+          if [ -n "$REVIEW_PR" ]; then
+            prs="$REVIEW_PR"
+          elif [[ "$HEAD_BRANCH" == sync/upstream-* ]]; then
+            prs="$(gh pr list --head "$HEAD_BRANCH" --base main --state open \
+              --json number --jq '.[].number')"
+          else
+            # A Pullfrog run belongs to the default branch, not the PR, so
+            # evaluate every open sync PR; the script is idempotent.
+            prs="$(gh pr list --base main --state open --json number,headRefName \
+              --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | .number')"
           fi
-          if [ -z "$pr" ]; then
-            echo "No open PR for $HEAD_BRANCH; nothing to do."
+          if [ -z "$prs" ]; then
+            echo "No open sync PR; nothing to do."
             exit 0
           fi
-          bash .github/scripts/sync-upstream-gate.sh "$pr"
+          for pr in $prs; do
+            bash .github/scripts/sync-upstream-gate.sh "$pr"
+          done
 
   pullfrog-failed:
+    name: sync-gate-failure
     # Pullfrog could not prepare a conflicted sync (dispatched by sync-upstream.yml).
     if: >-
       github.repository != 'OrchestratorInc/agent-orchestrator'

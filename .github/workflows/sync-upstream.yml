@@ -6,10 +6,11 @@ name: Sync upstream
 #
 #   clean merge  -> push sync/upstream-<sha> and open a PR into main.
 #   conflicts    -> dispatch Pullfrog to resolve them on that branch and open the PR.
-#   in flight    -> a PR for this upstream commit is already open; re-evaluate it.
+#   in flight    -> a PR for this upstream commit is already open; leave it alone.
 #
 # Pullfrog reviews the PR; sync-upstream-gate.yml merges it when the review is
 # clean and CI is green, or opens an `agent-review` issue when a human is needed.
+# Every run also re-evaluates all open sync PRs as a safety net.
 #
 # Needs the SYNC_PAT secret (PAT with repo + workflow scope): GITHUB_TOKEN
 # cannot push changes to .github/workflows, and pushes made with it do not
@@ -155,9 +156,15 @@ jobs:
           bash .github/scripts/agent-review-issue.sh open \
             "Upstream sync needs review: hand-off to Pullfrog failed for $UPSTREAM@$SHA" \
             "Merging $UPSTREAM main ($SHA) into main conflicts and the Pullfrog dispatch failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-      - name: Re-evaluate the in-flight sync PR
-        if: steps.merge.outputs.status == 'inflight'
+      - name: Re-evaluate open sync PRs
+        # Safety net: a missed event must not strand a sync PR, including one for
+        # an older upstream commit.
+        if: success() || failure()
         shell: bash
-        env:
-          PR: ${{ steps.merge.outputs.pr }}
-        run: bash .github/scripts/sync-upstream-gate.sh "$PR"
+        run: |
+          set -euo pipefail
+          gh pr list --base main --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | .number' |
+            while read -r pr; do
+              bash .github/scripts/sync-upstream-gate.sh "$pr" || echo "::warning::Gate failed for #$pr"
+            done
