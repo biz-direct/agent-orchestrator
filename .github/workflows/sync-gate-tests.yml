@@ -1,0 +1,29 @@
+# .github/workflows/sync-gate-tests.yml
+name: sync-gate tests
+
+# Regression tests for the upstream-sync merge gate (fake gh, no network).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/sync-upstream.yml"
+      - ".github/workflows/sync-upstream-gate.yml"
+      - ".github/workflows/sync-gate-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  gate-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure PyYAML
+        run: python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y --no-install-recommends python3-yaml
+      - name: Gate decision tests
+        run: bash .github/scripts/sync-upstream-gate.test.sh
+      - name: shellcheck
+        run: shellcheck .github/scripts/*.sh
