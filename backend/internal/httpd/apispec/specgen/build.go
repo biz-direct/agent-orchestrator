@@ -159,6 +159,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersSettingsResponse":                          "SettingsResponse",
 	"ControllersDesktopWorkspaceLocationResponse":          "DesktopWorkspaceLocationResponse",
 	"ControllersUpdateSessionInterfaceRequest":             "UpdateSessionInterfaceRequest",
+	"ControllersUpdateChatHibernationRequest":              "UpdateChatHibernationRequest",
 	"ControllersConversationSnapshotResponse":              "ConversationSnapshotResponse",
 	"ControllersConversationTurnResponse":                  "ConversationTurnResponse",
 	"ControllersConversationTurnDiffResponse":              "ConversationTurnDiffResponse",
@@ -166,8 +167,10 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersConversationMessageResponse":               "ConversationMessageResponse",
 	"ControllersConversationActivityResponse":              "ConversationActivityResponse",
 	"ControllersSendConversationMessageRequest":            "SendConversationMessageRequest",
+	"ControllersSetChatViewRequest":                        "SetChatViewRequest",
 	"ControllersConversationImageContentRequest":           "ConversationImageContentRequest",
 	"ControllersConversationResourceContentRequest":        "ConversationResourceContentRequest",
+	"ControllersConversationExcerptReferenceRequest":       "ConversationExcerptReferenceRequest",
 	"ControllersSendConversationMessageResponse":           "SendConversationMessageResponse",
 	"ControllersEditConversationMessageRequest":            "EditConversationMessageRequest",
 	"ControllersEditQueuedConversationMessageRequest":      "EditQueuedConversationMessageRequest",
@@ -203,6 +206,14 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersSetConversationTitleRequest":               "SetConversationTitleRequest",
 	"ControllersSetConversationTitleResponse":              "SetConversationTitleResponse",
 	"ControllersSteerConversationRequest":                  "SteerConversationRequest",
+	"ControllersPublishRenderRequest":                      "PublishRenderRequest",
+	"ControllersPublishRenderResponse":                     "PublishRenderResponse",
+	"ControllersRenderCheckRequest":                        "RenderCheckRequest",
+	"ControllersRenderCheckResponse":                       "RenderCheckResponse",
+	"ControllersRenderCheckScreenshot":                     "RenderCheckScreenshot",
+	"ControllersRenderConsoleMessage":                      "RenderConsoleMessage",
+	"ControllersSaveRenderArtifactRequest":                 "SaveRenderArtifactRequest",
+	"ControllersSaveRenderArtifactResponse":                "SaveRenderArtifactResponse",
 	"ControllersSteerConversationResponse":                 "SteerConversationResponse",
 	"ControllersSteerOrSendConversationResponse":           "SteerOrSendConversationResponse",
 	"ControllersPromoteQueuedTurnResponse":                 "PromoteQueuedTurnResponse",
@@ -226,6 +237,8 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainSessionID":                 "SessionID",
 	"DomainIssueID":                   "IssueID",
 	"DomainSession":                   "Session",
+	"DomainSessionProvisionStep":      "SessionProvisionStep",
+	"DomainSessionBranchState":        "SessionBranchState",
 	"DomainProjectConfig":             "ProjectConfig",
 	"DomainPipelineSelection":         "PipelineSelection",
 	"PipelinerunsStageReport":         "PipelineStageReport",
@@ -280,6 +293,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersSpawnSessionRequest":                      "SpawnSessionRequest",
 	"ControllersSpawnSessionResponse":                     "SpawnSessionResponse",
 	"ControllersSessionResponse":                          "SessionResponse",
+	"ControllersSessionArtifactView":                      "SessionArtifact",
 	"ControllersSessionPreviewResponse":                   "SessionPreviewResponse",
 	"ControllersSetSessionPreviewRequest":                 "SetSessionPreviewRequest",
 	"ControllersStartPreviewServerRequest":                "StartPreviewServerRequest",
@@ -390,6 +404,8 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"ControllersListSessionPRsResponse":                   "ListSessionPRsResponse",
 	"ControllersSetActivityRequest":                       "SetActivityRequest",
 	"ControllersSetActivityResponse":                      "SetActivityResponse",
+	"ControllersCodewhaleLifecycleWebhookRequest":         "CodewhaleLifecycleWebhookRequest",
+	"ControllersCodewhaleLifecycleEvent":                  "CodewhaleLifecycleEvent",
 	"ControllersSetReviewActivityRequest":                 "SetReviewActivityRequest",
 	"ControllersSetReviewActivityResponse":                "SetReviewActivityResponse",
 	"ControllersSpawnOrchestratorRequest":                 "SpawnOrchestratorRequest",
@@ -848,6 +864,7 @@ func browserOperations() []operation {
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusServiceUnavailable, envelope.APIError{}},
+				{http.StatusGatewayTimeout, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
@@ -856,6 +873,10 @@ func browserOperations() []operation {
 
 type orchestratorRulesFileQuery struct {
 	Path string `query:"path,omitempty" description:"Repo-relative candidate path to read. Omit to read the project's saved orchestratorRulesFile."`
+}
+
+type renderSourceQuery struct {
+	Source *string `query:"source,omitempty" enum:"1" description:"Set to 1 to read the page as the agent wrote it: the stored bytes as text/plain, without the theme bootstrap."`
 }
 
 type conversationSnapshotQuery struct {
@@ -950,6 +971,31 @@ func shellTerminalOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.SettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPatch, path: "/api/v1/settings/chat-hibernation", id: "updateChatHibernation", tag: "settings",
+			summary: "Turn idle Chat hibernation on or off for this machine",
+			reqBody: controllers.UpdateChatHibernationRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/chat-view", id: "setSessionChatView", tag: "conversations",
+			summary:    "Keep a viewed chat awake or release its view lease",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetChatViewRequest{},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
@@ -1176,6 +1222,61 @@ func shellTerminalOperations() []operation {
 			reqBody:    controllers.SteerConversationRequest{},
 			resps: []respUnit{
 				{http.StatusAccepted, controllers.SteerConversationResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/renders", id: "publishSessionRender", tag: "conversations",
+			summary:    "Show an agent's self-contained HTML page inline in its chat thread",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.PublishRenderRequest{},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.PublishRenderResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/renders/check", id: "checkSessionRender", tag: "conversations",
+			summary:    "Screenshot an agent's HTML page in the desktop app before it is published",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.RenderCheckRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.RenderCheckResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusServiceUnavailable, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/renders/{renderId}", id: "getSessionRender", tag: "conversations",
+			summary:    "Serve a published render as a sandboxed HTML document",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.RenderIDParam{}, renderSourceQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, ""},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+			contentTypes: map[int]string{http.StatusOK: "text/html"},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/renders/{renderId}/artifact", id: "saveSessionRenderArtifact", tag: "conversations",
+			summary:    "Keep a published render as a session artifact",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.RenderIDParam{}},
+			reqBody:    controllers.SaveRenderArtifactRequest{},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.SaveRenderArtifactResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},
@@ -1648,6 +1749,14 @@ func agentOperations() []operation {
 func mobileOperations() []operation {
 	return []operation{
 		{
+			method: http.MethodPost, path: "/api/v1/remote-host/account-token", id: "issueRemoteHostAccountToken", tag: "mobile",
+			summary: "Issue a host-scoped account credential using the pairing password",
+			resps: []respUnit{
+				{http.StatusOK, controllers.RemoteHostAccountTokenResponse{}},
+				{http.StatusForbidden, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/mobile/status", id: "getMobileStatus", tag: "mobile",
 			summary: "Check whether Connect Mobile's LAN bridge is enabled",
 			resps: []respUnit{
@@ -2035,7 +2144,7 @@ func reviewOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/reviews/kill", id: "killReviewSession", tag: "reviews",
-			summary:    "Kill a worker's reviewer terminal session",
+			summary:    "Archive a worker's reviewer and hide its surface while retaining history",
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.KillReviewResponse{}},
@@ -2474,8 +2583,20 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/preview/files/*", id: "getSessionPreviewFile", tag: "sessions",
-			summary:    "Serve a static browser preview file from a session workspace",
-			pathParams: []any{controllers.SessionIDParam{}},
+			summary:    "Serve a static browser preview file from a session workspace or artifact directory",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.PreviewFileQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, ""},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+			contentTypes: map[int]string{http.StatusOK: "text/html"},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/artifact-files/*", id: "getSessionArtifactFile", tag: "sessions",
+			summary:    "Serve a session artifact file sandboxed, an HTML page with the render theme bootstrap",
+			pathParams: []any{controllers.SessionIDParam{}, renderSourceQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, ""},
 				{http.StatusNotFound, envelope.APIError{}},
@@ -3010,6 +3131,20 @@ func sessionOperations() []operation {
 				{http.StatusOK, controllers.SetActivityResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/activity/codewhale", id: "setCodewhaleSessionActivity", tag: "sessions",
+			summary:    "Record a Codewhale lifecycle outbox event",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.CodewhaleLifecycleWebhookRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SetActivityResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusServiceUnavailable, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

@@ -183,6 +183,22 @@ var shippedMigrations = map[int64]string{
 	177: "0177_review_run_rerun_same_head.sql",
 	178: "0178_pipeline_runs.sql",
 	179: "0179_app_settings_global_orchestrator_rules.sql",
+	180: "0180_session_provision_steps.sql",
+	181: "0181_session_artifacts.sql",
+	185: "0185_worktree_startup_cues.sql",
+	186: "0186_remove_cue_description.sql",
+	187: "0187_remove_cue_startup_options.sql",
+	// 188 removes the obsolete cue worktree-startup schema; project setup now
+	// owns automatic workspace initialization.
+	188: "0188_remove_worktree_startup_cues.sql",
+	189: "0189_session_interaction.sql",
+	190: "0190_session_hibernation.sql",
+	191: "0191_session_branch_state.sql",
+	192: "0192_allow_openhands_harness.sql",
+	193: "0193_allow_codewhale_harness.sql",
+	194: "0194_allow_command_code_harness.sql",
+	195: "0195_archive_reviewers.sql",
+	196: "0196_conversation_message_sender.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

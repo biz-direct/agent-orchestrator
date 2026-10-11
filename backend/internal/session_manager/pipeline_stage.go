@@ -51,11 +51,7 @@ func (m *Manager) releaseAttachedAttempt(ctx context.Context, id domain.SessionI
 // key when one is set, so redelivery after a crash cannot create a second turn.
 func (m *Manager) deliverStagePrompt(ctx context.Context, id domain.SessionID, prompt string) error {
 	bypass := ports.WithPipelineBypass(ctx)
-	if key := ports.PipelineDeliveryKey(ctx); key != "" {
-		_, err := m.chat.RelayChatTurnWithID(bypass, id, prompt, key)
-		return err
-	}
-	_, err := m.chat.RelayChatTurn(bypass, id, prompt)
+	_, err := m.chat.RelaySessionChatTurn(bypass, id, prompt, ports.PipelineDeliveryKey(ctx), ports.MessageDeliveryOptions{})
 	return err
 }
 

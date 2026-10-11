@@ -125,6 +125,7 @@ type projectConfig struct {
 	Orchestrator                roleOverride         `json:"orchestrator,omitempty"`
 	TrackerIntake               trackerIntakeConfig  `json:"trackerIntake,omitempty"`
 	AutoReview                  bool                 `json:"autoReview,omitempty"`
+	WorkersRequestReview        bool                 `json:"workersRequestReview,omitempty"`
 	Reviewers                   []reviewerConfig     `json:"reviewers,omitempty"`
 	// DefaultPipeline round-trips the daemon's default-pipeline reference so
 	// project get/set-config JSON does not drop it. Use `ao pipeline default`

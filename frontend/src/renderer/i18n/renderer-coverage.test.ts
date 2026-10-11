@@ -25,15 +25,13 @@ const approvedLiterals: Record<string, readonly string[]> = {
 		"https://github.com/owner/repo", "GitHub PAT",
 	],
 	"components/DaemonStartupLoader.tsx": ["Agent Orchestrator"],
-	"components/ProjectSettingsForm.tsx": [
-		"main", "ao",
-		"No workflow settings for scratch projects.",
-		"Tracker intake is not available for scratch projects.",
-	],
 	"components/ProjectPromptsSettings.tsx": ["docs/orchestrator-rules.md"],
+	// Technical branch/prefix examples moved with the common settings fields.
+	"components/ProjectSettingsEditor.tsx": ["auto", "ao"],
 	"components/RemoteDirectoryPicker.tsx": ["/home/you/code"],
 	"components/SessionInspector.tsx": ["PR #"],
-	"components/Sidebar.tsx": ["Agent Orchestrator", "daemon"],
+	"components/Sidebar.tsx": ["Orchestrator.inc", "daemon"],
+	"components/TitlebarNav.tsx": ["Orchestrator.inc"],
 	"components/WindowTitlebar.tsx": [
 		"Alt+F4",
 		"Ctrl+Z",
