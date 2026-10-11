@@ -43,16 +43,16 @@ esac
 EOF
 chmod +x "$work/bin/gh"
 
-# Fake git: fetching succeeds; git grep prints one line per conflict marker in
-# the tree being asked about (FETCH_HEAD = the PR head, otherwise main).
+# Fake git: fetching succeeds; `git grep -c` prints "<rev>:path:count" for the
+# marker files listed in main_markers / head_markers ("path:count" per line).
 cat >"$work/bin/git" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   fetch) exit 0 ;;
   grep)
-    f="$FAKE_DIR/main_markers"
-    for a in "$@"; do [ "$a" = FETCH_HEAD ] && f="$FAKE_DIR/head_markers"; done
-    cat "$f" 2>/dev/null
+    rev=origin/main; f="$FAKE_DIR/main_markers"
+    for a in "$@"; do [ "$a" = FETCH_HEAD ] && rev=FETCH_HEAD && f="$FAKE_DIR/head_markers"; done
+    [ -s "$f" ] && sed "s#^#$rev:#" "$f"
     exit 0
     ;;
 esac
@@ -88,7 +88,6 @@ gate() { # runs the gate as one trigger; output in $out
   out="$(PATH="$work/bin:$PATH" GITHUB_REPOSITORY=o/r bash "$gate" 7 2>&1)" || true
 }
 
-ready_marked() { grep -q '^gh pr ready 7' "$FAKE_DIR/calls.log"; }
 merged() { grep -q '^gh pr merge 7 --merge' "$FAKE_DIR/calls.log"; }
 issue_opened() { grep -q 'repos/o/r/issues' "$FAKE_DIR/calls.log" && grep -q -- '-f title=' "$FAKE_DIR/calls.log"; }
 
@@ -98,8 +97,7 @@ expect() { # <name> <condition: merge|nomerge|issue>
     merge) merged && ok=1 ;;
     nomerge) merged || ok=1 ;;
     issue) issue_opened && ! merged && ok=1 ;;
-    ready) ready_marked && ! merged && ! issue_opened && ok=1 ;;
-    hold) ! ready_marked && ! merged && ! issue_opened && ok=1 ;;
+    hold) ! merged && ! issue_opened && ok=1 ;;
   esac
   if [ "$ok" = 1 ]; then
     echo "ok   - $1"
@@ -185,32 +183,47 @@ review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
 gate; expect "head from an outside fork is never merged" nomerge
 
-# --- Draft sync PRs: Pullfrog resolves the conflict markers on the branch.
+# --- Draft sync PRs: Pullfrog resolves the conflicts on the branch and marks
+# the PR ready itself; the gate never promotes one.
 draft() { jq '.isDraft=true' "$FAKE_DIR/pr.json" >"$FAKE_DIR/pr.tmp" && mv "$FAKE_DIR/pr.tmp" "$FAKE_DIR/pr.json"; }
-markers() { printf '<<<<<<< HEAD\n>>>>>>> upstream\n' >"$FAKE_DIR/head_markers"; }
+head_markers() { printf '%s\n' "$@" >"$FAKE_DIR/head_markers"; }
+main_markers() { printf '%s\n' "$@" >"$FAKE_DIR/main_markers"; }
 
 reset
-draft; markers
+draft; head_markers "a.go:2"
 review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
-gate; expect "draft with conflict markers: held, no merge, no issue, not marked ready" hold
+gate; expect "draft with conflict markers: held, no merge, no issue" hold
 
 reset
 draft
+review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
-gate; expect "draft with markers resolved: marked ready, not merged" ready
+gate; expect "draft without markers is not promoted or merged by the gate" hold
 
 reset
-markers
+head_markers "a.go:2"
 review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
 gate; expect "ready PR that still has conflict markers: issue, no merge" issue
 
 reset
-printf '<<<<<<< x\n' >"$FAKE_DIR/main_markers"; printf '<<<<<<< x\n' >"$FAKE_DIR/head_markers"
+main_markers "docs/x.md:2"; head_markers "docs/x.md:2"
 review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
 gate; expect "markers already on main (docs, fixtures) do not block: merges" merge
+
+reset
+main_markers "docs/x.md:2"; head_markers "a.go:2"
+review "$SHA" "$CLEAN"
+checks 1 "[$PASS]"
+gate; expect "equal marker totals: removed fixture markers do not hide a new conflict" issue
+
+reset
+main_markers "docs/x.md:2"; head_markers "docs/x.md:4"
+review "$SHA" "$CLEAN"
+checks 1 "[$PASS]"
+gate; expect "more markers in a file that already had some: issue" issue
 
 # --- Event wiring: the gate only re-runs when a workflow listed under
 # workflow_run completes, so every pull_request workflow must be listed.

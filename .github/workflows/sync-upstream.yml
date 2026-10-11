@@ -89,7 +89,9 @@ jobs:
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
             # Keep the raw merge, markers included, as a commit on the branch.
-            git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
+            # Not every conflict leaves markers (modify/delete, binary, renames), so
+            # record each path with its status code; the PR body carries the list.
+            git status --porcelain | grep -E '^(DD|AU|UD|UA|DU|AA|UU) ' > "$RUNNER_TEMP/conflicts.txt" || true
             git add -A
             git commit --no-edit -m "Merge $UPSTREAM main ($sha) into fork (unresolved conflicts)"
             echo "status=conflict" >> "$GITHUB_OUTPUT"
@@ -120,7 +122,10 @@ jobs:
           if [ -z "$pr" ]; then
             if [ "$STATUS" = conflict ]; then
               draft=(--draft)
-              body="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. The merge conflicts; this branch holds the raw merge with conflict markers and Pullfrog is resolving them. The PR becomes ready for review once no markers remain; then Pullfrog reviews it and sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
+              inventory="$(sed 's/^/    /' "$RUNNER_TEMP/conflicts.txt")"
+              intro="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. The merge conflicts; this branch holds the raw merge and Pullfrog is resolving it. Pullfrog marks the PR ready when every conflict is resolved; then it reviews the PR and sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
+              legend="Git status codes (UU both modified, AA both added, DU/UD deleted by one side, AU/UA added by one side, DD both deleted) for every path that conflicted. Some of these have no conflict markers in the committed files, so resolve every path listed here, not just the files with markers."
+              body="$(printf '%s\n\n## Conflict inventory\n\n%s\n\n%s\n' "$intro" "$legend" "$inventory")"
             else
               draft=()
               body="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. Created by sync-upstream.yml. Pullfrog reviews it; sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
@@ -150,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f "$RUNNER_TEMP/conflicts.txt" ]; then
-            { echo "### Upstream sync conflicts handed to Pullfrog (PR #$PR)"; sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt"; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "### Upstream sync conflicts handed to Pullfrog (PR #$PR)"; sed 's/^/    /' "$RUNNER_TEMP/conflicts.txt"; } >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "$(gh pr view "$PR" --json isDraft --jq .isDraft)" != true ]; then
             echo "PR #$PR is ready for review; nothing for Pullfrog to resolve."
