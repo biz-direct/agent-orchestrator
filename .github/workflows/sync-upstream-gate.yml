@@ -1,0 +1,110 @@
+# .github/workflows/sync-upstream-gate.yml
+name: Sync upstream gate
+
+# FORK ONLY: decides what happens to the PRs opened by sync-upstream.yml.
+# Pullfrog reviews each sync PR; this gate merges it once Pullfrog's review of
+# the current head is clean and CI is green, and opens an `agent-review` issue
+# when a human is needed (CI failed, Pullfrog found issues, or Pullfrog could
+# not prepare the sync). Logic lives in .github/scripts/sync-upstream-gate.sh.
+#
+# Most CI workflows here are path-filtered, so they cannot be required checks
+# on main; the gate enforces "all reported checks pass" for sync PRs instead.
+# Needs the SYNC_PAT secret (a merge made with GITHUB_TOKEN would not trigger CI
+# on main).
+
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_run:
+    workflows:
+      - Frontend
+      - Go
+      - gitleaks
+      - CLI E2E
+      - Mobile
+      - e2e-gate tests
+      - Pullfrog
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream-gate
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    # A Pullfrog review of a sync PR, or a CI workflow finishing on one.
+    if: >-
+      github.repository != 'OrchestratorInc/agent-orchestrator' && (
+        (github.event_name == 'pull_request_review'
+          && github.event.review.user.login == 'pullfrog[bot]'
+          && startsWith(github.event.pull_request.head.ref, 'sync/upstream-'))
+        ||
+        (github.event_name == 'workflow_run'
+          && github.event.workflow_run.name != 'Pullfrog'
+          && github.event.workflow_run.event == 'pull_request'
+          && startsWith(github.event.workflow_run.head_branch, 'sync/upstream-'))
+      )
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.SYNC_PAT }}
+    steps:
+      - name: Require SYNC_PAT
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Repository secret SYNC_PAT is required."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Evaluate sync PR
+        shell: bash
+        env:
+          REVIEW_PR: ${{ github.event.pull_request.number }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          pr="$REVIEW_PR"
+          if [ -z "$pr" ]; then
+            pr="$(gh pr list --head "$HEAD_BRANCH" --base main --state open \
+              --json number --jq '.[0].number // empty')"
+          fi
+          if [ -z "$pr" ]; then
+            echo "No open PR for $HEAD_BRANCH; nothing to do."
+            exit 0
+          fi
+          bash .github/scripts/sync-upstream-gate.sh "$pr"
+
+  pullfrog-failed:
+    # Pullfrog could not prepare a conflicted sync (dispatched by sync-upstream.yml).
+    if: >-
+      github.repository != 'OrchestratorInc/agent-orchestrator'
+      && github.event_name == 'workflow_run'
+      && github.event.workflow_run.name == 'Pullfrog'
+      && github.event.workflow_run.conclusion != 'success'
+      && github.event.workflow_run.conclusion != 'skipped'
+      && startsWith(github.event.workflow_run.display_title, 'Sync upstream')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.SYNC_PAT }}
+      RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Open agent-review issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/agent-review-issue.sh open \
+            "Upstream sync needs review: $RUN_TITLE" \
+            "Pullfrog did not finish preparing the upstream sync ($RUN_CONCLUSION): $RUN_URL
+
+          Resolve the merge by hand, or re-run the Sync upstream workflow."
