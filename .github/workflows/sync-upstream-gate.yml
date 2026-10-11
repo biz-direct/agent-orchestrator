@@ -9,6 +9,9 @@ name: Sync upstream gate
 #
 # Most CI workflows here are path-filtered, so they cannot be required checks
 # on main; the gate enforces "all reported checks pass" for sync PRs instead.
+# Every workflow that runs on pull_request must be listed under workflow_run
+# below, or its finishing last would not re-run the gate; the tests enforce it.
+#
 # Needs the SYNC_PAT secret (a merge made with GITHUB_TOKEN would not trigger CI
 # on main).
 
@@ -23,6 +26,10 @@ on:
       - CLI E2E
       - Mobile
       - e2e-gate tests
+      - Optional private submodule
+      - Pricing catalog validation
+      - sync-gate tests
+      - Version Floor Guard
       - Pullfrog
     types: [completed]
 

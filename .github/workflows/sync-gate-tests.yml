@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure PyYAML
+        run: python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y --no-install-recommends python3-yaml
       - name: Gate decision tests
         run: bash .github/scripts/sync-upstream-gate.test.sh
       - name: shellcheck

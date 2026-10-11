@@ -164,6 +164,31 @@ review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
 gate; expect "head from an outside fork is never merged" nomerge
 
+# --- Event wiring: the gate only re-runs when a workflow listed under
+# workflow_run completes, so every pull_request workflow must be listed.
+wiring="$(python3 -I - "$here/../workflows" <<'PY'
+import glob, sys, yaml
+dirpath = sys.argv[1]
+gate = yaml.safe_load(open(f"{dirpath}/sync-upstream-gate.yml"))
+listed = set(gate[True]["workflow_run"]["workflows"])
+missing = []
+for path in sorted(glob.glob(f"{dirpath}/*.yml")):
+    wf = yaml.safe_load(open(path))
+    on = wf.get(True) or wf.get("on")
+    runs_on_pr = (on == "pull_request") or (isinstance(on, list) and "pull_request" in on) \
+        or (isinstance(on, dict) and "pull_request" in on)
+    if runs_on_pr and wf["name"] not in listed:
+        missing.append(wf["name"])
+print(", ".join(missing))
+PY
+)"
+if [ -z "$wiring" ]; then
+  echo "ok   - every pull_request workflow is listed in the gate's workflow_run trigger"
+else
+  echo "FAIL - workflows missing from sync-upstream-gate.yml workflow_run.workflows: $wiring"
+  fails=$((fails + 1))
+fi
+
 if [ "$fails" -ne 0 ]; then
   echo "$fails test(s) failed"
   exit 1
