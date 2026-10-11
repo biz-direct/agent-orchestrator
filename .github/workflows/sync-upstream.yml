@@ -139,9 +139,9 @@ jobs:
           1. Fetch that URL's main, create the branch sync/upstream-$SHA from origin/main, and merge FETCH_HEAD into it.
           2. The merge conflicts in these files:
           $files
-             Resolve every conflict. Keep this fork's own changes (fork CI workflows under .github/workflows, fork release and versioning) and keep upstream's intent for everything else. Regenerate generated files (sqlc output under backend/internal/storage/sqlite/gen, OpenAPI and API schema files) with the repository's generator commands instead of hand-merging them. Merge the i18n JSON files by keeping the union of keys. Follow AGENTS.md.
-          3. Verify as far as the environment allows: go build and go vet for the backend, and the frontend typecheck. Note anything you could not run.
-          4. Push the branch and open a pull request into main titled "chore: sync upstream $UPSTREAM@$SHA". Its description must list each conflicted file and how you resolved it, and anything you are unsure about. Close older open sync/upstream-* pull requests with a comment pointing to the new one. Do not merge the pull request.
+             Resolve every conflict. Keep this fork's own changes (fork CI workflows under .github/workflows, fork release and versioning) and keep upstream's intent for everything else. For generated files (sqlc output under backend/internal/storage/sqlite/gen, OpenAPI and API schema files) take upstream's version, or regenerate only if that takes one quick command. Merge the i18n JSON files by keeping the union of keys.
+          3. Do NOT run test suites, linters or any long validation; CI on the pull request does that. Only run "go build ./..." in backend and, if it is quick, the frontend typecheck. Note anything you skipped.
+          4. You have a hard one-hour limit and unpushed work is lost. Commit the merge, push the branch and open the pull request into main titled "chore: sync upstream $UPSTREAM@$SHA" as soon as every conflict is resolved, with the checks in step 3 done at most once. The description must list each conflicted file and how you resolved it, and anything you are unsure about. Close older open sync/upstream-* pull requests with a comment pointing to the new one. Do not merge the pull request.
 
           If a conflict cannot be resolved with confidence, still open the pull request and say exactly what needs a human.
           EOF
