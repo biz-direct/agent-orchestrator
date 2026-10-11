@@ -3,12 +3,12 @@ title: Per-role agents
 description: Configure separate harnesses and models for worker and orchestrator sessions.
 ---
 
-AO has two session roles:
+Orchestrator has two session roles:
 
 - A **worker** implements a focused task in an isolated workspace and may own pull requests.
 - An **orchestrator** supervises a project, monitors sessions, and delegates implementation to workers.
 
-AO can also run a dedicated reviewer against a worker's pull request. Reviewers run separately from worker and orchestrator sessions. See the [review loop](/guides/review-loop#ao-reviewer-agents) to choose a reviewer, start a run, and send findings to the worker.
+Orchestrator can also run a dedicated reviewer against a worker's pull request. Reviewers run separately from worker and orchestrator sessions. See the [review loop](/guides/review-loop#ao-reviewer-agents) to choose a reviewer, start a run, and send findings to the worker.
 
 Role and interface are separate choices. Either role can start in structured Chat or Terminal UI when its harness supports that interface.
 
@@ -65,7 +65,7 @@ ao spawn --project my-project --kind worker \
 - Use **Chat** for structured messages, provider activity, approvals, plans, changed files, usage, compaction, and rollback. Chat support depends on the harness and installed version; see the [agent capability catalog](/plugins/agents#chat-versus-terminal-ui).
 - Use **Terminal UI** when you want the agent's native interface or a harness without native Chat support.
 
-Compatible Claude Code and Codex sessions expose **Switch to chat UI** or **Switch to terminal UI**. Idle sessions switch directly. When work is active, AO asks whether to finish and drain it or stop and interrupt it before switching controllers.
+Compatible Claude Code and Codex sessions expose **Switch to chat UI** or **Switch to terminal UI**. Idle sessions switch directly. When work is active, Orchestrator asks whether to finish and drain it or stop and interrupt it before switching controllers.
 
 The default interface comes from **Settings → General**. Project `agentConfig.mode` does not set Chat or Terminal UI. A choice made for a task or with the CLI takes precedence.
 
@@ -85,5 +85,5 @@ Orchestrators get two optional layers of your own instructions on top of AO's bu
 The layers only add; they cannot remove AO's built-in instructions. Each value is plain text up to 32 KiB. Edits reach an orchestrator the next time it is spawned or restored, not while it is running. The global prompt is stored per AO daemon, so remote hosts keep their own, and AO Cloud and Coder sessions do not use it yet.
 
 <Callout type="info">
-	AO uses the provider CLI already installed and authenticated on your machine. Run `ao doctor` if a configured harness fails preflight.
+	Orchestrator uses the provider CLI already installed and authenticated on your machine. Run `ao doctor` if a configured harness fails preflight.
 </Callout>
