@@ -4,6 +4,10 @@
 #   - a check failed, or Pullfrog reported findings             -> open an
 #                                                                  agent-review issue
 #   - anything still running / not yet reviewed                 -> wait
+#   - a draft PR (Pullfrog still resolving conflicts)           -> wait; once no
+#                                                                  conflict marker
+#                                                                  is left, mark
+#                                                                  it ready
 #
 #   sync-upstream-gate.sh <pr-number>
 #
@@ -29,12 +33,13 @@ act() {
   if [ -n "$dry" ]; then echo "DRY_RUN: $*"; else "$@"; fi
 }
 
-pr_json="$(gh pr view "$pr" --json url,state,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner)"
+pr_json="$(gh pr view "$pr" --json url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner)"
 url="$(jq -r .url <<<"$pr_json")"
 state="$(jq -r .state <<<"$pr_json")"
 base="$(jq -r .baseRefName <<<"$pr_json")"
 head_ref="$(jq -r .headRefName <<<"$pr_json")"
 head_sha="$(jq -r .headRefOid <<<"$pr_json")"
+is_draft="$(jq -r '.isDraft // false' <<<"$pr_json")"
 head_repo="$(jq -r '.headRepositoryOwner.login + "/" + .headRepository.name' <<<"$pr_json")"
 
 guard_failed=""
@@ -46,6 +51,30 @@ if [ -n "$guard_failed" ]; then
   echo "$guard_failed; nothing to do."
   [ -n "$dry" ] || exit 0
   echo "(DRY_RUN: continuing anyway)"
+fi
+
+# Conflict markers: more marker lines in the PR head's tree than on main means
+# the merge is not resolved yet (a diff is no use: GitHub refuses diffs this large).
+# Checked on every run: a draft is held until they are gone, and nothing with a
+# marker is ever merged. Needs a checkout of main to compare against.
+count_markers() {
+  { git grep -hIE '^(<<<<<<<|>>>>>>>) ' "$1" -- 2>/dev/null || true; } | wc -l | tr -d ' '
+}
+if ! git fetch -q --depth=1 "https://x-access-token:${GH_TOKEN:-}@github.com/$repo.git" "pull/$pr/head" 2>/dev/null; then
+  echo "::warning::Could not fetch the head of PR #$pr to look for conflict markers; leaving it."
+  exit 0
+fi
+markers=false
+if [ "$(count_markers FETCH_HEAD)" -gt "$(count_markers origin/main)" ]; then markers=true; fi
+
+if [ "$is_draft" = true ]; then
+  if [ "$markers" = true ]; then
+    echo "PR #$pr is a draft with unresolved conflict markers; Pullfrog is still resolving."
+  else
+    echo "PR #$pr is a draft with no conflict markers left; marking it ready for review."
+    act gh pr ready "$pr"
+  fi
+  exit 0
 fi
 
 # CI: gh pr checks exits non-zero while checks are pending or failed but still
@@ -82,13 +111,14 @@ if [ -n "$review" ]; then
   if [[ "$first_line" == '> ✅'* ]]; then verdict=clean; else verdict=findings; fi
 fi
 
-echo "PR #$pr @ ${head_sha:0:12}: verdict=$verdict failed=[${failed}] pending=[${pending}] scan_ok=$scan_ok"
+echo "PR #$pr @ ${head_sha:0:12}: verdict=$verdict failed=[${failed}] pending=[${pending}] scan_ok=$scan_ok markers=$markers"
 
 title="Upstream sync needs review: PR #$pr"
 
-if [ -n "$failed" ] || [ "$verdict" = findings ]; then
+if [ -n "$failed" ] || [ "$verdict" = findings ] || [ "$markers" = true ]; then
   reasons=""
   [ -z "$failed" ] || reasons="$reasons- Failing checks: $failed"$'\n'
+  [ "$markers" != true ] || reasons="$reasons- Unresolved conflict markers remain in the diff"$'\n'
   [ "$verdict" != findings ] || reasons="$reasons- Pullfrog reported findings: $review_url"$'\n'
   body="The automatic merge of $url was stopped because a human is needed.
 

@@ -5,11 +5,15 @@ name: Sync upstream
 # through a reviewed PR. Never tags or publishes, never force-pushes.
 #
 #   clean merge  -> push sync/upstream-<sha> and open a PR into main.
-#   conflicts    -> dispatch Pullfrog to resolve them on that branch and open the PR.
-#   in flight    -> a PR for this upstream commit is already open; leave it alone.
+#   conflicts    -> commit the raw merge (conflict markers included) to that branch,
+#                   open a DRAFT PR, and dispatch Pullfrog to resolve the conflicts
+#                   on it. The branch is a repeatable state: if Pullfrog times out,
+#                   what it pushed is kept and a later run continues from it.
+#   in flight    -> a PR for this upstream commit is already open; a draft whose
+#                   Pullfrog run is gone is handed to Pullfrog again.
 #
-# Pullfrog reviews the PR; sync-upstream-gate.yml merges it when the review is
-# clean and CI is green, or opens an `agent-review` issue when a human is needed.
+# Pullfrog reviews the PR once it is ready; sync-upstream-gate.yml merges it when
+# the review is clean and CI is green, or opens an `agent-review` issue when a human is needed.
 # Every run also re-evaluates all open sync PRs as a safety net.
 #
 # Needs the SYNC_PAT secret (PAT with repo + workflow scope): GITHUB_TOKEN
@@ -84,16 +88,19 @@ jobs:
           if git merge --no-edit -m "Merge $UPSTREAM main ($sha) into fork" upstream/main; then
             echo "status=clean" >> "$GITHUB_OUTPUT"
           else
-            # Record the conflicted paths before the merge is aborted.
+            # Keep the raw merge, markers included, as a commit on the branch.
             git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicts.txt"
-            git merge --abort
+            git add -A
+            git commit --no-edit -m "Merge $UPSTREAM main ($sha) into fork (unresolved conflicts)"
             echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
-      - name: Open PR for a clean merge
-        if: steps.merge.outputs.status == 'clean'
+      - name: Open the sync PR
+        id: pr
+        if: steps.merge.outputs.status == 'clean' || steps.merge.outputs.status == 'conflict'
         shell: bash
         env:
           SHA: ${{ steps.merge.outputs.sha }}
+          STATUS: ${{ steps.merge.outputs.status }}
         run: |
           set -euo pipefail
           branch="sync/upstream-$SHA"
@@ -111,45 +118,55 @@ jobs:
             --json number,headRefOid,headRepository,headRepositoryOwner \
             --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefOid == "'"$head_sha"'") | .number' | head -n1)"
           if [ -z "$pr" ]; then
-            pr="$(gh pr create --base main --head "$branch" \
-              --title "chore: sync upstream $UPSTREAM@$SHA" \
-              --body "Automated merge of \`$UPSTREAM\` main at \`$SHA\`. Created by sync-upstream.yml. Pullfrog reviews it; sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened." \
+            if [ "$STATUS" = conflict ]; then
+              draft=(--draft)
+              body="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. The merge conflicts; this branch holds the raw merge with conflict markers and Pullfrog is resolving them. The PR becomes ready for review once no markers remain; then Pullfrog reviews it and sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
+            else
+              draft=()
+              body="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. Created by sync-upstream.yml. Pullfrog reviews it; sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
+            fi
+            pr="$(gh pr create --base main --head "$branch" "${draft[@]}" \
+              --title "chore: sync upstream $UPSTREAM@$SHA" --body "$body" \
               | grep -oE '[0-9]+$')"
           fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
           # Supersede older sync PRs.
           gh pr list --state open --base main --json number,headRefName,headRepository,headRepositoryOwner \
             --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefName | startswith("sync/upstream-")) | select(.headRefName != "'"$branch"'") | .number' |
             while read -r old; do
               gh pr close "$old" --delete-branch --comment "Superseded by #$pr."
             done
-          echo "Opened sync PR #$pr; waiting for Pullfrog and CI."
+          echo "Sync PR #$pr is open."
       - name: Hand conflicts to Pullfrog
-        if: steps.merge.outputs.status == 'conflict'
+        # A fresh conflicted merge, or an open draft sync PR that no Pullfrog run
+        # is working on any more (timed out, failed): continue from the branch.
+        if: steps.merge.outputs.status == 'conflict' || steps.merge.outputs.status == 'inflight'
+        id: handoff
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.merge.outputs.sha }}
+          PR: ${{ steps.pr.outputs.pr || steps.merge.outputs.pr }}
         run: |
           set -euo pipefail
-          files="$(sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt")"
-          { echo "### Upstream sync conflicts handed to Pullfrog"; echo "$files"; } >> "$GITHUB_STEP_SUMMARY"
-          prompt="$(cat <<EOF
-          Sync this fork with upstream. Upstream is https://github.com/$UPSTREAM.git (branch main, commit $SHA).
-
-          1. Fetch that URL's main, create the branch sync/upstream-$SHA from origin/main, and merge FETCH_HEAD into it.
-          2. The merge conflicts in these files:
-          $files
-             Resolve every conflict. Keep this fork's own changes (fork CI workflows under .github/workflows, fork release and versioning) and keep upstream's intent for everything else. For generated files (sqlc output under backend/internal/storage/sqlite/gen, OpenAPI and API schema files) take upstream's version, or regenerate only if that takes one quick command. Merge the i18n JSON files by keeping the union of keys.
-          3. Do NOT run test suites, linters or any long validation; CI on the pull request does that. Only run "go build ./..." in backend and, if it is quick, the frontend typecheck. Note anything you skipped.
-          4. You have a hard one-hour limit and unpushed work is lost. Commit the merge, push the branch and open the pull request into main titled "chore: sync upstream $UPSTREAM@$SHA" as soon as every conflict is resolved, with the checks in step 3 done at most once. The description must list each conflicted file and how you resolved it, and anything you are unsure about. Close older open sync/upstream-* pull requests with a comment pointing to the new one. Do not merge the pull request.
-
-          If a conflict cannot be resolved with confidence, still open the pull request and say exactly what needs a human.
-          EOF
-          )"
+          if [ -f "$RUNNER_TEMP/conflicts.txt" ]; then
+            { echo "### Upstream sync conflicts handed to Pullfrog (PR #$PR)"; sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$(gh pr view "$PR" --json isDraft --jq .isDraft)" != true ]; then
+            echo "PR #$PR is ready for review; nothing for Pullfrog to resolve."
+            exit 0
+          fi
+          active="$(gh run list --workflow pullfrog.yml --json status,displayTitle \
+            --jq '[.[] | select((.status == "queued" or .status == "in_progress") and (.displayTitle | startswith("Sync upstream")))] | length')"
+          if [ "$active" != 0 ]; then
+            echo "Pullfrog is already working on a sync; leaving it."
+            exit 0
+          fi
+          prompt="$(bash .github/scripts/sync-upstream-prompt.sh "$PR" "$SHA")"
           gh workflow run pullfrog.yml --ref main \
             -f name="Sync upstream $SHA" \
             -f prompt="$prompt"
-          echo "Dispatched Pullfrog for $UPSTREAM@$SHA."
+          echo "Dispatched Pullfrog for PR #$PR ($UPSTREAM@$SHA)."
       - name: Flag a failed Pullfrog hand-off
         if: failure() && steps.merge.outputs.status == 'conflict'
         shell: bash

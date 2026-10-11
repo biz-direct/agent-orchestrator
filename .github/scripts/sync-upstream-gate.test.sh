@@ -32,6 +32,7 @@ case "$1 $2" in
     cat "$f"
     ;;
   "pr merge") ;;
+  "pr ready") ;;
   api*)
     case "$2" in
       */reviews) cat "$FAKE_DIR/reviews.json" ;;
@@ -42,6 +43,23 @@ esac
 EOF
 chmod +x "$work/bin/gh"
 
+# Fake git: fetching succeeds; git grep prints one line per conflict marker in
+# the tree being asked about (FETCH_HEAD = the PR head, otherwise main).
+cat >"$work/bin/git" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  fetch) exit 0 ;;
+  grep)
+    f="$FAKE_DIR/main_markers"
+    for a in "$@"; do [ "$a" = FETCH_HEAD ] && f="$FAKE_DIR/head_markers"; done
+    cat "$f" 2>/dev/null
+    exit 0
+    ;;
+esac
+exit 1
+EOF
+chmod +x "$work/bin/git"
+
 fails=0
 SHA=abc123
 
@@ -51,7 +69,7 @@ reset() {
   mkdir -p "$FAKE_DIR"
   : >"$FAKE_DIR/calls.log"
   cat >"$FAKE_DIR/pr.json" <<JSON
-{"url":"https://x/pr/7","state":"OPEN","baseRefName":"main","headRefName":"sync/upstream-aaa","headRefOid":"$SHA","headRepository":{"name":"r"},"headRepositoryOwner":{"login":"o"}}
+{"url":"https://x/pr/7","state":"OPEN","isDraft":false,"baseRefName":"main","headRefName":"sync/upstream-aaa","headRefOid":"$SHA","headRepository":{"name":"r"},"headRepositoryOwner":{"login":"o"}}
 JSON
   echo "[]" >"$FAKE_DIR/reviews.json"
 }
@@ -70,6 +88,7 @@ gate() { # runs the gate as one trigger; output in $out
   out="$(PATH="$work/bin:$PATH" GITHUB_REPOSITORY=o/r bash "$gate" 7 2>&1)" || true
 }
 
+ready_marked() { grep -q '^gh pr ready 7' "$FAKE_DIR/calls.log"; }
 merged() { grep -q '^gh pr merge 7 --merge' "$FAKE_DIR/calls.log"; }
 issue_opened() { grep -q 'repos/o/r/issues' "$FAKE_DIR/calls.log" && grep -q -- '-f title=' "$FAKE_DIR/calls.log"; }
 
@@ -79,6 +98,8 @@ expect() { # <name> <condition: merge|nomerge|issue>
     merge) merged && ok=1 ;;
     nomerge) merged || ok=1 ;;
     issue) issue_opened && ! merged && ok=1 ;;
+    ready) ready_marked && ! merged && ! issue_opened && ok=1 ;;
+    hold) ! ready_marked && ! merged && ! issue_opened && ok=1 ;;
   esac
   if [ "$ok" = 1 ]; then
     echo "ok   - $1"
@@ -163,6 +184,33 @@ jq '.headRepositoryOwner.login="evil"' "$FAKE_DIR/pr.json" >"$FAKE_DIR/pr.tmp" &
 review "$SHA" "$CLEAN"
 checks 1 "[$PASS]"
 gate; expect "head from an outside fork is never merged" nomerge
+
+# --- Draft sync PRs: Pullfrog resolves the conflict markers on the branch.
+draft() { jq '.isDraft=true' "$FAKE_DIR/pr.json" >"$FAKE_DIR/pr.tmp" && mv "$FAKE_DIR/pr.tmp" "$FAKE_DIR/pr.json"; }
+markers() { printf '<<<<<<< HEAD\n>>>>>>> upstream\n' >"$FAKE_DIR/head_markers"; }
+
+reset
+draft; markers
+review "$SHA" "$CLEAN"
+checks 1 "[$PASS]"
+gate; expect "draft with conflict markers: held, no merge, no issue, not marked ready" hold
+
+reset
+draft
+checks 1 "[$PASS]"
+gate; expect "draft with markers resolved: marked ready, not merged" ready
+
+reset
+markers
+review "$SHA" "$CLEAN"
+checks 1 "[$PASS]"
+gate; expect "ready PR that still has conflict markers: issue, no merge" issue
+
+reset
+printf '<<<<<<< x\n' >"$FAKE_DIR/main_markers"; printf '<<<<<<< x\n' >"$FAKE_DIR/head_markers"
+review "$SHA" "$CLEAN"
+checks 1 "[$PASS]"
+gate; expect "markers already on main (docs, fixtures) do not block: merges" merge
 
 # --- Event wiring: the gate only re-runs when a workflow listed under
 # workflow_run completes, so every pull_request workflow must be listed.
