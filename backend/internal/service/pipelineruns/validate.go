@@ -9,6 +9,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/pipeline"
+	"github.com/aoagents/agent-orchestrator/backend/internal/workgate"
 )
 
 // Validation pause reasons. Operational ones never consume the repair budget
@@ -81,24 +82,8 @@ func (s *Service) beginValidation(ctx context.Context, run domain.PipelineRun, a
 // failure; everything that stops a command from giving a verdict is
 // operational and pauses instead of being read as a code defect.
 func classify(o CommandOutcome) (domain.PipelineCommandStatus, string) {
-	switch {
-	case o.LaunchErr != nil:
-		return domain.PipelineCommandOperational, fmt.Sprintf("the command could not be started: %v", o.LaunchErr)
-	case o.TimedOut:
-		return domain.PipelineCommandTimeout, "the command exceeded its timeout and its process group was killed"
-	case o.Cancelled:
-		return domain.PipelineCommandCancelled, "the command was cancelled and its process group was killed"
-	case o.ExitCode == 0:
-		return domain.PipelineCommandPassed, ""
-	case o.ExitCode == 126:
-		return domain.PipelineCommandOperational, "the command was found but is not executable (permission problem)"
-	case o.ExitCode == 127:
-		return domain.PipelineCommandOperational, "the command or its interpreter was not found (setup problem)"
-	case o.ExitCode < 0:
-		return domain.PipelineCommandOperational, "the command ended without an exit status"
-	default:
-		return domain.PipelineCommandFailed, fmt.Sprintf("the command exited with status %d", o.ExitCode)
-	}
+	status, detail := workgate.Classify(o)
+	return domain.PipelineCommandStatus(status), detail
 }
 
 // driveValidation runs the stage's snapshotted validation commands against the
@@ -245,16 +230,26 @@ func (s *Service) driveValidation(ctx context.Context, run domain.PipelineRun, a
 // them untracked build output is tolerated but tracked changes are not.
 func (s *Service) workspaceDrift(ctx context.Context, workspace string, run domain.PipelineRun, head string, requireFullyClean bool) string {
 	state, err := s.git.Inspect(ctx, workspace)
-	switch {
-	case err != nil:
+	if err != nil {
 		return fmt.Sprintf("The workspace could not be inspected: %v", err)
-	case state.Branch != run.ExpectedBranch:
+	}
+	clean := workgate.CleanTracked
+	if requireFullyClean {
+		clean = workgate.CleanAll
+	}
+	m := workgate.CheckState(state, workgate.Checkpoint{Branch: run.ExpectedBranch, Head: head, Clean: clean, HeadBeforeClean: true})
+	if m == nil {
+		return ""
+	}
+	switch m.Kind {
+	case workgate.MismatchBranch:
 		return fmt.Sprintf("The workspace is on %q, expected %q", branchLabel(state.Branch), run.ExpectedBranch)
-	case state.Head != head:
+	case workgate.MismatchHead:
 		return fmt.Sprintf("HEAD is %s but the checkpoint under validation is %s", shortCommit(state.Head), shortCommit(head))
-	case requireFullyClean && state.DirtyTotal > 0:
-		return fmt.Sprintf("The workspace has %d uncommitted path(s) before validation", state.DirtyTotal)
-	case !requireFullyClean && state.TrackedTotal > 0:
+	case workgate.MismatchDirty:
+		if requireFullyClean {
+			return fmt.Sprintf("The workspace has %d uncommitted path(s) before validation", state.DirtyTotal)
+		}
 		return fmt.Sprintf("Validation left %d tracked file(s) modified", state.TrackedTotal)
 	}
 	return ""
