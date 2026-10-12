@@ -64,6 +64,7 @@ beforeEach(() => {
 	vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
 		if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project } } as never;
 		if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
+		if (path === "/api/v1/projects/{id}/crew") return { data: { projectId: "proj-1", roles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", message: "" } } } as never;
 		if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
 		if (path === "/api/v1/agents/installers") return { data: { agents: [] } } as never;
 		if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
@@ -137,6 +138,7 @@ describe("Settings recovery modal integration", () => {
 		vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
 			if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project: invalid } } as never;
 			if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
+		if (path === "/api/v1/projects/{id}/crew") return { data: { projectId: "proj-1", roles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", message: "" } } } as never;
 			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
 			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "tui", chatHarnesses: [], cloudEnabled: false, localEnabled: true, trackerIntakeEnabled: true } } as never;
 			throw new Error(`Unexpected GET ${path}`);

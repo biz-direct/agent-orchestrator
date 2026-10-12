@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/presence"
+	crewssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crews"
 	pipelineruns "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
 	pipelinessvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelines"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
@@ -29,6 +30,7 @@ type APIDeps struct {
 	CodexAccounts      controllers.CodexAccountService
 	Projects           projectsvc.Manager
 	Pipelines          pipelinessvc.Manager
+	Crews              crewssvc.Manager
 	PipelineRuns       pipelineruns.Manager
 	Sessions           controllers.SessionService
 	Automations        controllers.AutomationService
@@ -125,6 +127,7 @@ type API struct {
 	codexAccounts *controllers.CodexAccountsController
 	projects      *controllers.ProjectsController
 	pipelines     *controllers.PipelinesController
+	crews         *controllers.CrewsController
 	pipelineRuns  *controllers.PipelineRunsController
 	sessions      *controllers.SessionsController
 	automations   *controllers.AutomationsController
@@ -174,6 +177,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			Mgr: deps.Projects,
 		},
 		pipelines:    &controllers.PipelinesController{Mgr: deps.Pipelines, Callers: pipelineCallers(deps)},
+		crews:        &controllers.CrewsController{Mgr: deps.Crews},
 		pipelineRuns: &controllers.PipelineRunsController{Mgr: deps.PipelineRuns, Callers: pipelineCallers(deps)},
 		sessions: &controllers.SessionsController{
 			Pipelines:                pipelineSelector(deps.PipelineRuns),
@@ -248,6 +252,7 @@ func (a *API) Register(root chi.Router) {
 			a.codexAccounts.Register(r)
 			a.projects.Register(r)
 			a.pipelines.Register(r)
+			a.crews.Register(r)
 			a.pipelineRuns.Register(r)
 			a.sessions.Register(r)
 			a.automations.Register(r)

@@ -55,6 +55,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/agentauth"
 	browsersvc "github.com/aoagents/agent-orchestrator/backend/internal/service/browser"
 	chatsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/chat"
+	crewssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crews"
 	cuesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/cue"
 	devimportsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/devimport"
 	fsbrowsersvc "github.com/aoagents/agent-orchestrator/backend/internal/service/fsbrowser"
@@ -944,6 +945,7 @@ func Run() error {
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectSvc,
 		Pipelines:          pipelinessvc.New(store),
+		Crews:              crewssvc.New(store),
 		PipelineRuns:       pipelineRunSvc,
 		HostID:             hostIdentity.HostID,
 		Endpoints:          bs,

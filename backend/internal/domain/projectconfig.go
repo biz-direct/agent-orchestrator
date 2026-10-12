@@ -101,6 +101,12 @@ type ProjectConfig struct {
 	// only ever set by the user (never read from a repository file) and is
 	// checked at execution time, so revoking it stops later commands.
 	TrustPipelineCommands bool `json:"trustPipelineCommands,omitempty"`
+
+	// DefaultCrew is the project's default crew workflow selection. Nil means
+	// the project never chose one; the explicit no-crew choice is distinct from
+	// unset. Definitions live in repository files (see package crew); this
+	// stores only the reference.
+	DefaultCrew *CrewSelection `json:"defaultCrew,omitempty"`
 }
 
 // PipelineMode is how a project (or task) chooses between a normal worker and a
@@ -137,6 +143,42 @@ func (s PipelineSelection) Validate() error {
 		}
 	default:
 		return fmt.Errorf("defaultPipeline.mode %q: want %q or %q", s.Mode, PipelineModeNormalWorker, PipelineModeWorkflow)
+	}
+	return nil
+}
+
+// CrewMode is how a project chooses between no crew and a repository-defined
+// crew workflow. The explicit no-crew choice is distinct from an unset
+// selection so a later change of default never overrides it.
+type CrewMode string
+
+const (
+	// CrewModeNoCrew explicitly selects tasks without a crew.
+	CrewModeNoCrew CrewMode = "no_crew"
+	// CrewModeWorkflow selects the repository crew workflow named by WorkflowID.
+	CrewModeWorkflow CrewMode = "workflow"
+)
+
+// CrewSelection is a persisted reference to a repository-defined crew workflow.
+type CrewSelection struct {
+	Mode       CrewMode `json:"mode" enum:"no_crew,workflow"`
+	WorkflowID string   `json:"workflowId,omitempty"`
+}
+
+// Validate rejects selections that name no workflow, name one with an invalid
+// id, or attach a workflow id to the no-crew choice.
+func (s CrewSelection) Validate() error {
+	switch s.Mode {
+	case CrewModeNoCrew:
+		if s.WorkflowID != "" {
+			return fmt.Errorf("defaultCrew: workflowId must be empty when mode is %q", s.Mode)
+		}
+	case CrewModeWorkflow:
+		if !pipelineWorkflowIDPattern.MatchString(s.WorkflowID) {
+			return fmt.Errorf("defaultCrew.workflowId %q must be 1-64 lowercase letters, digits, and hyphens", s.WorkflowID)
+		}
+	default:
+		return fmt.Errorf("defaultCrew.mode %q: want %q or %q", s.Mode, CrewModeNoCrew, CrewModeWorkflow)
 	}
 	return nil
 }
@@ -327,6 +369,11 @@ func (c ProjectConfig) Validate() error {
 	}
 	if c.DefaultPipeline != nil {
 		if err := c.DefaultPipeline.Validate(); err != nil {
+			return err
+		}
+	}
+	if c.DefaultCrew != nil {
+		if err := c.DefaultCrew.Validate(); err != nil {
 			return err
 		}
 	}

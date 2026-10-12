@@ -3011,6 +3011,118 @@ paths:
       summary: Replace a project's per-project config
       tags:
       - projects
+  /api/v1/projects/{id}/crew:
+    get:
+      operationId: getProjectCrew
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewsCatalogResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Discover and validate the project's repository-defined crew roles and
+        workflows
+      tags:
+      - projects
+  /api/v1/projects/{id}/crew/default:
+    get:
+      operationId: getProjectDefaultCrew
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewsDefaultStatus'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read the project-default crew workflow selection and its availability
+      tags:
+      - projects
+    put:
+      operationId: setProjectDefaultCrew
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrewsSetDefaultInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewsDefaultStatus'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Save or clear the project-default crew workflow without replacing other
+        project settings
+      tags:
+      - projects
   /api/v1/projects/{id}/orchestrator-rules-file:
     get:
       operationId: previewOrchestratorRulesFile
@@ -12673,6 +12785,222 @@ components:
       required:
       - id
       type: object
+    CrewDiagnostic:
+      properties:
+        field:
+          type: string
+        file:
+          type: string
+        message:
+          type: string
+      required:
+      - message
+      type: object
+    CrewReturn:
+      properties:
+        from:
+          type: string
+        to:
+          items:
+            type: string
+          type: array
+      required:
+      - from
+      - to
+      type: object
+    CrewRole:
+      properties:
+        allowedPaths:
+          items:
+            type: string
+          type: array
+        definitionSha256:
+          type: string
+        description:
+          type: string
+        harness:
+          type: string
+        id:
+          type: string
+        instructionsSha256:
+          type: string
+        instructionsSource:
+          type: string
+        model:
+          type: string
+        validation:
+          items:
+            $ref: '#/components/schemas/CrewValidationCommand'
+          type: array
+      required:
+      - id
+      - description
+      - instructionsSource
+      - instructionsSha256
+      - definitionSha256
+      - allowedPaths
+      - validation
+      type: object
+    CrewRoleEntry:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/CrewDiagnostic'
+          type: array
+        file:
+          type: string
+        id:
+          type: string
+        role:
+          $ref: '#/components/schemas/CrewRole'
+        valid:
+          type: boolean
+      required:
+      - id
+      - file
+      - valid
+      - diagnostics
+      type: object
+    CrewSelection:
+      properties:
+        mode:
+          enum:
+          - no_crew
+          - workflow
+          type: string
+        workflowId:
+          type: string
+      required:
+      - mode
+      type: object
+    CrewValidationCommand:
+      properties:
+        command:
+          type: string
+        id:
+          type: string
+        required:
+          type: boolean
+        timeoutSeconds:
+          type: integer
+      required:
+      - id
+      - command
+      - timeoutSeconds
+      - required
+      type: object
+    CrewWorkflow:
+      properties:
+        definitionSha256:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        instructionsSha256:
+          type: string
+        instructionsSource:
+          type: string
+        loopCap:
+          type: integer
+        order:
+          items:
+            type: string
+          type: array
+        returns:
+          items:
+            $ref: '#/components/schemas/CrewReturn'
+          type: array
+        roles:
+          items:
+            type: string
+          type: array
+      required:
+      - id
+      - description
+      - definitionSha256
+      - roles
+      - order
+      - returns
+      - loopCap
+      type: object
+    CrewWorkflowEntry:
+      properties:
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/CrewDiagnostic'
+          type: array
+        file:
+          type: string
+        id:
+          type: string
+        valid:
+          type: boolean
+        workflow:
+          $ref: '#/components/schemas/CrewWorkflow'
+      required:
+      - id
+      - file
+      - valid
+      - diagnostics
+      type: object
+    CrewsCatalogResponse:
+      properties:
+        default:
+          $ref: '#/components/schemas/CrewsDefaultStatus'
+        diagnostics:
+          items:
+            $ref: '#/components/schemas/CrewDiagnostic'
+          type: array
+        projectId:
+          type: string
+        roles:
+          items:
+            $ref: '#/components/schemas/CrewRoleEntry'
+          type: array
+        workflows:
+          items:
+            $ref: '#/components/schemas/CrewWorkflowEntry'
+          type: array
+      required:
+      - projectId
+      - roles
+      - workflows
+      - diagnostics
+      - default
+      type: object
+    CrewsDefaultStatus:
+      properties:
+        message:
+          type: string
+        selection:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/CrewSelection'
+            type: object
+        state:
+          enum:
+          - unset
+          - no_crew
+          - workflow_available
+          - workflow_invalid
+          - workflow_missing
+          type: string
+      required:
+      - selection
+      - state
+      - message
+      type: object
+    CrewsSetDefaultInput:
+      properties:
+        selection:
+          anyOf:
+          - type: "null"
+          - $ref: '#/components/schemas/CrewSelection'
+            type: object
+      required:
+      - selection
+      type: object
     CueDefinitionRequest:
       properties:
         command:
@@ -15327,6 +15655,8 @@ components:
           $ref: '#/components/schemas/ContainerReapConfig'
         defaultBranch:
           type: string
+        defaultCrew:
+          $ref: '#/components/schemas/CrewSelection'
         defaultPipeline:
           $ref: '#/components/schemas/PipelineSelection'
         env:
