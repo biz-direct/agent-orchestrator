@@ -88,7 +88,12 @@ func TestRunnerTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	pid := strings.TrimSpace(string(raw))
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := runCmd(context.Background(), t, "kill -0 "+pid, 5*time.Second, nil).ExitCode; err != 0 {
+		// kill -0 cannot tell a terminated, unreaped zombie from a running
+		// process (an init that does not reap leaves one behind), so ask for the
+		// process state: gone or zombie means the descendant is no longer executing.
+		out := runCmd(context.Background(), t, "ps -o stat= -p "+pid, 5*time.Second, os.Environ())
+		state := strings.TrimSpace(out.Output)
+		if out.ExitCode != 0 || state == "" || strings.HasPrefix(state, "Z") {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
