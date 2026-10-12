@@ -63,11 +63,11 @@ const (
 	CIUnknown         = workgate.CIUnknown
 )
 
-// ReviewFacts are the read-only facts the Review gate decides on, and
-// ReviewGateway is the pipeline's view of AO's built-in review subsystem. Both
-// are pipeline-independent and live in workgate.
+// The review gate's inputs are pipeline-independent and live in workgate.
 type (
-	ReviewFacts   = workgate.ReviewFacts
+	// ReviewFacts are the read-only facts the Review gate decides on.
+	ReviewFacts = workgate.ReviewFacts
+	// ReviewGateway is the view of AO's built-in review subsystem.
 	ReviewGateway = workgate.ReviewGateway
 )
 

@@ -37,17 +37,17 @@ type Checkpoint struct {
 type MismatchKind string
 
 const (
-	// MismatchUnreadable: git could not be queried (see Mismatch.Err).
+	// MismatchUnreadable means git could not be queried (see Mismatch.Err).
 	MismatchUnreadable MismatchKind = "unreadable"
-	// MismatchHistoryUnreadable: ancestry could not be verified (see Mismatch.Err).
+	// MismatchHistoryUnreadable means ancestry could not be verified (see Mismatch.Err).
 	MismatchHistoryUnreadable MismatchKind = "history_unreadable"
-	// MismatchBranch: the workspace is on another branch or a detached HEAD.
+	// MismatchBranch means the workspace is on another branch or a detached HEAD.
 	MismatchBranch MismatchKind = "branch"
-	// MismatchDirty: uncommitted paths exist where none are allowed.
+	// MismatchDirty means uncommitted paths exist where none are allowed.
 	MismatchDirty MismatchKind = "dirty"
-	// MismatchHead: HEAD is not the expected commit.
+	// MismatchHead means HEAD is not the expected commit.
 	MismatchHead MismatchKind = "head"
-	// MismatchNonLinear: HEAD does not descend from the input commit.
+	// MismatchNonLinear means HEAD does not descend from the input commit.
 	MismatchNonLinear MismatchKind = "non_linear"
 )
 

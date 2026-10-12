@@ -18,7 +18,7 @@ func skipWindows(t *testing.T) {
 	}
 }
 
-func runCmd(t *testing.T, ctx context.Context, command string, timeout time.Duration, env []string) CommandOutcome {
+func runCmd(ctx context.Context, t *testing.T, command string, timeout time.Duration, env []string) CommandOutcome {
 	t.Helper()
 	return ExecRunner{}.Run(ctx, CommandSpec{Dir: t.TempDir(), Command: command, Timeout: timeout, Env: env})
 }
@@ -52,13 +52,13 @@ func TestClassifySeparatesGenuineFailureFromOperationalProblems(t *testing.T) {
 func TestRunnerReportsPassFailAndLaunchFailure(t *testing.T) {
 	skipWindows(t)
 	ctx := context.Background()
-	if o := runCmd(t, ctx, "echo ok", 10*time.Second, nil); o.ExitCode != 0 || !strings.Contains(o.Output, "ok") {
+	if o := runCmd(ctx, t, "echo ok", 10*time.Second, nil); o.ExitCode != 0 || !strings.Contains(o.Output, "ok") {
 		t.Fatalf("pass: %+v", o)
 	}
-	if o := runCmd(t, ctx, "echo bad >&2; exit 3", 10*time.Second, nil); o.ExitCode != 3 || !strings.Contains(o.Output, "bad") {
+	if o := runCmd(ctx, t, "echo bad >&2; exit 3", 10*time.Second, nil); o.ExitCode != 3 || !strings.Contains(o.Output, "bad") {
 		t.Fatalf("a genuine failure carries its stderr: %+v", o)
 	}
-	if st, _ := Classify(runCmd(t, ctx, "exit 127", 10*time.Second, nil)); st != CommandOperational {
+	if st, _ := Classify(runCmd(ctx, t, "exit 127", 10*time.Second, nil)); st != CommandOperational {
 		t.Fatalf("exit 127 = %s", st)
 	}
 	missing := ExecRunner{}.Run(ctx, CommandSpec{Dir: filepath.Join(t.TempDir(), "gone"), Command: "true", Timeout: 5 * time.Second})
@@ -74,7 +74,7 @@ func TestRunnerTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	skipWindows(t)
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	start := time.Now()
-	o := runCmd(t, context.Background(), "sleep 60 & echo $! > "+pidFile+"; wait", 500*time.Millisecond, nil)
+	o := runCmd(context.Background(), t, "sleep 60 & echo $! > "+pidFile+"; wait", 500*time.Millisecond, nil)
 	if !o.TimedOut || o.Cancelled || o.LaunchErr != nil {
 		t.Fatalf("want a timeout: %+v", o)
 	}
@@ -88,7 +88,7 @@ func TestRunnerTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	pid := strings.TrimSpace(string(raw))
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := runCmd(t, context.Background(), "kill -0 "+pid, 5*time.Second, nil).ExitCode; err != 0 {
+		if err := runCmd(context.Background(), t, "kill -0 "+pid, 5*time.Second, nil).ExitCode; err != 0 {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -100,7 +100,7 @@ func TestRunnerCancellationIsNotATimeout(t *testing.T) {
 	skipWindows(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
-	o := runCmd(t, ctx, "sleep 60", 30*time.Second, nil)
+	o := runCmd(ctx, t, "sleep 60", 30*time.Second, nil)
 	if !o.Cancelled || o.TimedOut {
 		t.Fatalf("want cancelled: %+v", o)
 	}
@@ -110,7 +110,7 @@ func TestRunnerBoundsAndRedactsLogs(t *testing.T) {
 	skipWindows(t)
 	token := "ghp_" + strings.Repeat("a", 30)
 	cmd := "echo start; echo " + token + "; echo $MY_SECRET_TOKEN; printf '\\033[31mred\\033[0m\\n'; i=0; while [ $i -lt 6000 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; echo the-verdict"
-	o := runCmd(t, context.Background(), cmd, 30*time.Second, []string{"PATH=" + os.Getenv("PATH"), "MY_SECRET_TOKEN=supersecretvalue"})
+	o := runCmd(context.Background(), t, cmd, 30*time.Second, []string{"PATH=" + os.Getenv("PATH"), "MY_SECRET_TOKEN=supersecretvalue"})
 	if !o.Truncated || len(o.Output) > logHeadBytes+logTailBytes+200 {
 		t.Fatalf("log not bounded: truncated=%v len=%d", o.Truncated, len(o.Output))
 	}

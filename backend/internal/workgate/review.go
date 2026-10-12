@@ -90,8 +90,11 @@ type ReviewGateway interface {
 	TriggerAuto(ctx context.Context, id domain.SessionID) (skipReason string, err error)
 }
 
+// ReviewKind is what a review evaluation asks its caller to do.
 type ReviewKind int
 
+// Review decisions: wait for a missing fact, start the built-in review, pause
+// for a person, or complete because approval and CI hold for the head.
 const (
 	ReviewWait ReviewKind = iota
 	ReviewTrigger
