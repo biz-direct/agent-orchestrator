@@ -367,10 +367,11 @@ func migrate(db *sql.DB) error {
 	return reconcileSchema(db)
 }
 
-// repairForkMigrationCollisions preserves both shipped meanings of 0178/0179.
-// The fork keeps pipelines/global rules at those versions; upstream's archive
-// and sender columns move unchanged to 0195/0196. Physical schema, not the
-// ambiguous old ledger entries, determines which migrations already ran.
+// repairForkMigrationCollisions preserves both shipped meanings of 0178/0179/0195.
+// The fork keeps pipelines/global rules at 0178/0179; upstream's archive
+// and sender columns move unchanged to 0195/0196, and upstream's requested-output
+// column moves from 0195 to 0197. Physical schema, not the ambiguous old ledger
+// entries, determines which migrations already ran.
 func repairForkMigrationCollisions(db *sql.DB) error {
 	var gooseTable int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'`).Scan(&gooseTable); err != nil || gooseTable == 0 {
@@ -388,6 +389,7 @@ func repairForkMigrationCollisions(db *sql.DB) error {
 	}{
 		{195, "review", []string{"is_archived"}},
 		{196, "conversation_messages", []string{"sender_session_id", "sender_project_id", "sender_display_name"}},
+		{197, "sessions", []string{"requested_output"}},
 	} {
 		complete := true
 		for _, column := range migration.columns {
@@ -416,6 +418,13 @@ DELETE FROM goose_db_version WHERE version_id = 178
 	if _, err := tx.Exec(`
 DELETE FROM goose_db_version WHERE version_id = 179
   AND NOT EXISTS (SELECT 1 FROM pragma_table_info('app_settings') WHERE name = 'global_orchestrator_rules')`); err != nil {
+		return err
+	}
+	// Upstream recorded requested-output at 0195; that entry must not suppress
+	// the fork's archive migration when its physical schema is still absent.
+	if _, err := tx.Exec(`
+DELETE FROM goose_db_version WHERE version_id = 195
+  AND NOT EXISTS (SELECT 1 FROM pragma_table_info('review') WHERE name = 'is_archived')`); err != nil {
 		return err
 	}
 	return tx.Commit()

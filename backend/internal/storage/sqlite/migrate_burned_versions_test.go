@@ -199,6 +199,7 @@ var shippedMigrations = map[int64]string{
 	194: "0194_allow_command_code_harness.sql",
 	195: "0195_archive_reviewers.sql",
 	196: "0196_conversation_message_sender.sql",
+	197: "0197_session_requested_output.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they
