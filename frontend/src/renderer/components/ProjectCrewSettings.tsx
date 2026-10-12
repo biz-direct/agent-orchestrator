@@ -74,6 +74,13 @@ export function ProjectCrewSettings({ projectId, hostId }: { projectId: string; 
 		},
 		onSuccess: (status) => {
 			queryClient.setQueryData<Catalog>(queryKey, (current) => (current ? { ...current, default: status } : current));
+			// The enclosing settings form saves a full replacement config from the
+			// cached project; keep its defaultCrew current so a later save of
+			// another setting does not clear the choice that just saved.
+			const projectKey = hostId ? (["project", hostId, projectId] as const) : (["project", projectId] as const);
+			queryClient.setQueryData<components["schemas"]["Project"]>(projectKey, (current) =>
+				current ? { ...current, config: { ...current.config, defaultCrew: status.selection ?? undefined } } : current,
+			);
 		},
 	});
 

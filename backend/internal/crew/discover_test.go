@@ -338,3 +338,67 @@ func TestWorkflowReferencingInvalidRole(t *testing.T) {
 		t.Fatalf("got %s", diagText(w.Diagnostics))
 	}
 }
+
+func TestRejectsMergeKeysAndAnchoredKeysInOtherwiseValidRoles(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"merge key": {
+			"<<: {version: 1, id: builder, description: Builder, instructions: Build}\n",
+			"YAML merge keys are not supported",
+		},
+		"anchored key": {
+			"version: 1\n&key id: builder\ndescription: Builder\ninstructions: Build\n",
+			"YAML anchors and aliases are not supported",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, RolesDir+"/builder.yaml", tc.body)
+			e := Discover(root).Roles[0]
+			if e.Valid || !strings.Contains(diagText(e.Diagnostics), tc.want) {
+				t.Fatalf("want %q, got valid=%v %s", tc.want, e.Valid, diagText(e.Diagnostics))
+			}
+		})
+	}
+}
+
+func TestRejectsInRepositorySymlinkedDirectories(t *testing.T) {
+	// Definitions directory is a symlink to another directory in the repo.
+	root := t.TempDir()
+	writeFile(t, root, "profiles/builder.yaml", role("builder"))
+	if err := os.MkdirAll(filepath.Join(root, DefinitionDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "profiles"), filepath.Join(root, RolesDir)); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	cat := Discover(root)
+	if len(cat.Roles) != 0 || !strings.Contains(diagText(cat.Diagnostics), "symlink") {
+		t.Fatalf("in-repo symlinked roles dir must be rejected: %+v", cat)
+	}
+
+	// Instruction file reached through an in-repository symlinked parent.
+	root = t.TempDir()
+	writeFile(t, root, "real/builder.md", "Be the builder.\n")
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, RolesDir+"/builder.yaml", "version: 1\nid: builder\ndescription: d\ninstructionsFile: docs/builder.md\n")
+	e := Discover(root).Roles[0]
+	if e.Valid || !strings.Contains(diagText(e.Diagnostics), "symlink") {
+		t.Fatalf("instruction path through symlinked parent must be rejected: %s", diagText(e.Diagnostics))
+	}
+}
+
+func TestSymlinkedRegisteredRootIsStillSupported(t *testing.T) {
+	target := t.TempDir()
+	writeFile(t, target, RolesDir+"/builder.yaml", role("builder"))
+	link := filepath.Join(t.TempDir(), "repo-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	cat := Discover(link)
+	if len(cat.Roles) != 1 || !cat.Roles[0].Valid {
+		t.Fatalf("a symlinked registered root should still work: %+v", cat)
+	}
+}

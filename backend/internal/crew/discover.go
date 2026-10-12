@@ -127,6 +127,20 @@ func (d *discoverer) safePath(rel string) (string, error) {
 		return "", err
 	}
 	abs := filepath.Join(d.root, filepath.FromSlash(rel))
+	// Reject symlinks at every component below the registered root, even when
+	// the target stays inside the repository. A symlinked registered root is
+	// intentional and handled separately through resolvedRoot.
+	cur := d.root
+	for _, seg := range strings.Split(rel, "/") {
+		cur = filepath.Join(cur, seg)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return "", fmt.Errorf("%s passes through a symlink (%s); symlinked definition and instruction paths are not supported", rel, seg)
+		}
+	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", err
@@ -261,6 +275,7 @@ func walkNode(n *yaml.Node, field, file string, diags *[]Diagnostic) {
 		topLevel := field == ""
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i]
+			walkNode(key, field, file, diags)
 			sub := key.Value
 			if field != "" {
 				sub = field + "." + key.Value
