@@ -45,6 +45,8 @@ export function useCreateArtifactSession() {
 					body: {
 						kind: "worker",
 						requestedOutput: "artifact",
+						// An artifact session has no commit/PR contract; do not start the project's default workflow.
+						pipeline: { mode: "normal_worker" },
 						displayName: t("artifacts.newSessionName"),
 						...(projectId ? { projectId } : {}),
 						...(harness ? { harness: harness as Harness } : {}),

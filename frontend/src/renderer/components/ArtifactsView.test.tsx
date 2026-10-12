@@ -196,7 +196,7 @@ describe("ArtifactsView", () => {
 
 		await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: "/sessions/$sessionId", params: { sessionId: "standalone-7" } }));
 		expect(mocks.post).toHaveBeenCalledWith("/api/v1/sessions", {
-			body: { kind: "worker", requestedOutput: "artifact", displayName: "New artifact", harness: "codex" },
+			body: { kind: "worker", requestedOutput: "artifact", pipeline: { mode: "normal_worker" }, displayName: "New artifact", harness: "codex" },
 		});
 	});
 
@@ -231,7 +231,7 @@ describe("ArtifactsView", () => {
 
 		await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: "/sessions/$sessionId", params: { sessionId: "standalone-9" } }));
 		expect(mocks.post).toHaveBeenCalledWith("/api/v1/sessions", {
-			body: { kind: "worker", requestedOutput: "artifact", displayName: "New artifact", harness: "codex" },
+			body: { kind: "worker", requestedOutput: "artifact", pipeline: { mode: "normal_worker" }, displayName: "New artifact", harness: "codex" },
 		});
 		expect(mocks.capture).toHaveBeenCalledWith("ao.renderer.artifact_create_requested", { scope: "standalone" });
 		expect(mocks.capture).toHaveBeenCalledWith("ao.renderer.artifact_create_succeeded", { scope: "standalone" });
@@ -249,7 +249,7 @@ describe("ArtifactsView", () => {
 
 		await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith({ to: "/projects/$projectId/sessions/$sessionId", params: { projectId: "px0", sessionId: "px0-3" } }));
 		expect(mocks.post).toHaveBeenCalledWith("/api/v1/sessions", {
-			body: { kind: "worker", requestedOutput: "artifact", displayName: "New artifact", projectId: "px0", harness: "claude-code" },
+			body: { kind: "worker", requestedOutput: "artifact", pipeline: { mode: "normal_worker" }, displayName: "New artifact", projectId: "px0", harness: "claude-code" },
 		});
 		expect(mocks.capture).toHaveBeenCalledWith("ao.renderer.artifact_create_succeeded", { scope: "project" });
 	});
