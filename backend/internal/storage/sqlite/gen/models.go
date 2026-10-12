@@ -327,6 +327,9 @@ type ConversationMessage struct {
 	DeliveryContentJson string
 	BranchID            string
 	ClientPayloadHash   sql.NullString
+	SenderSessionID     string
+	SenderProjectID     string
+	SenderDisplayName   string
 }
 
 type ConversationProviderEvent struct {
@@ -383,15 +386,14 @@ type ConversationTurn struct {
 }
 
 type Cue struct {
-	ID          domain.CueID
-	ProjectID   domain.ProjectID
-	Name        string
-	Description string
-	Type        domain.CueType
-	Command     string
-	Prompt      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID        domain.CueID
+	ProjectID domain.ProjectID
+	Name      string
+	Type      domain.CueType
+	Command   string
+	Prompt    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type ModelUsageEvent struct {
@@ -702,6 +704,7 @@ type Review struct {
 	ProviderConversationID string
 	ControllerGeneration   string
 	ControllerError        string
+	IsArchived             bool
 }
 
 type ReviewRun struct {
@@ -789,6 +792,12 @@ type Session struct {
 	ClaudeActivityFacts              string
 	AttachedToSessionID              string
 	AttachedForAttemptID             string
+	ProvisionSteps                   string
+	ArtifactDir                      string
+	SessionOutputType                string
+	LatestInteractionAt              sql.NullTime
+	HibernatedAt                     sql.NullTime
+	BranchState                      string
 }
 
 type SessionCleanupFact struct {
@@ -826,6 +835,8 @@ type SessionInterfaceTransitionMessage struct {
 	CreatedAt       time.Time
 	DeliveredAt     sql.NullTime
 	ClientMessageID string
+	SenderSessionID string
+	AuthoredByUser  bool
 }
 
 type SessionPipelineIntent struct {

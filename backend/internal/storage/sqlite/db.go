@@ -303,6 +303,9 @@ func migrate(db *sql.DB) error {
 	if err := repairRenumberedChatMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair renumbered chat migration history: %w", err)
 	}
+	if err := repairForkMigrationCollisions(db); err != nil {
+		return fmt.Errorf("repair fork migration collisions: %w", err)
+	}
 	if err := repairRenumberedCueMigrationHistory(db); err != nil {
 		return fmt.Errorf("repair renumbered cue migration history: %w", err)
 	}
@@ -362,6 +365,60 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	return reconcileSchema(db)
+}
+
+// repairForkMigrationCollisions preserves both shipped meanings of 0178/0179.
+// The fork keeps pipelines/global rules at those versions; upstream's archive
+// and sender columns move unchanged to 0195/0196. Physical schema, not the
+// ambiguous old ledger entries, determines which migrations already ran.
+func repairForkMigrationCollisions(db *sql.DB) error {
+	var gooseTable int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'goose_db_version'`).Scan(&gooseTable); err != nil || gooseTable == 0 {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, migration := range []struct {
+		version int
+		table   string
+		columns []string
+	}{
+		{195, "review", []string{"is_archived"}},
+		{196, "conversation_messages", []string{"sender_session_id", "sender_project_id", "sender_display_name"}},
+	} {
+		complete := true
+		for _, column := range migration.columns {
+			var present int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, migration.table, column).Scan(&present); err != nil {
+				return err
+			}
+			complete = complete && present != 0
+		}
+		if complete {
+			if _, err := tx.Exec(`
+INSERT INTO goose_db_version (version_id, is_applied)
+SELECT ?, 1 WHERE COALESCE((
+    SELECT is_applied FROM goose_db_version WHERE version_id = ? ORDER BY id DESC LIMIT 1
+), 0) = 0`, migration.version, migration.version); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.Exec(`
+DELETE FROM goose_db_version WHERE version_id = 178
+  AND NOT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'pipeline_runs')
+  AND NOT EXISTS (SELECT 1 FROM pragma_table_info('sessions') WHERE name IN ('attached_to_session_id', 'attached_for_attempt_id'))`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+DELETE FROM goose_db_version WHERE version_id = 179
+  AND NOT EXISTS (SELECT 1 FROM pragma_table_info('app_settings') WHERE name = 'global_orchestrator_rules')`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // repairRenumberedCueMigrationHistory preserves preview Cue databases that
@@ -1246,6 +1303,20 @@ func repairRenumberedChatMigrationHistory(db *sql.DB) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Earlier dev builds used 0179-0181 for hibernation. Move that physical
+	// schema to 0190 so global rules, startup steps, and artifacts apply. Version
+	// 0179 now belongs to fork global rules, not upstream sender metadata.
+	if _, err := tx.Exec(`
+UPDATE goose_db_version SET version_id = 190
+WHERE is_applied = 1
+  AND EXISTS (SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'hibernated_at')
+  AND ((version_id = 179 AND NOT EXISTS (SELECT 1 FROM pragma_table_info('app_settings') WHERE name = 'global_orchestrator_rules'))
+    OR (version_id = 180 AND NOT EXISTS (SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'provision_steps'))
+    OR (version_id = 181 AND NOT EXISTS (SELECT 1 FROM pragma_table_info('sessions') WHERE name IN ('artifact_dir', 'startup_cue_json'))))
+  AND NOT EXISTS (SELECT 1 FROM goose_db_version WHERE version_id = 190)`); err != nil {
+		return err
+	}
+
 	legacyApplied := false
 	for oldVersion := int64(52); oldVersion <= 65; oldVersion++ {
 		var applied int
@@ -2090,9 +2161,12 @@ func reconcileHarnessConstraint(db *sql.DB) error {
 	needsOMP := !strings.Contains(schema, "'omp'")
 	needsGemini := !strings.Contains(schema, "'gemini'")
 	needsUnreal := !strings.Contains(schema, "'unreal-agent'")
+	needsCodewhale := !strings.Contains(schema, "'codewhale'")
 	needsMiMo := !strings.Contains(schema, "'mimo-code'")
 	needsDeepSeek := !strings.Contains(schema, "'deepseek-harness'")
-	if !needsMuse && !needsKimchi && !needsPrimeAgent && !needsOMP && !needsGemini && !needsUnreal && !needsMiMo && !needsDeepSeek {
+	needsOpenHands := !strings.Contains(schema, "'openhands'")
+	needsCommandCode := !strings.Contains(schema, "'command-code'")
+	if !needsMuse && !needsKimchi && !needsPrimeAgent && !needsOMP && !needsGemini && !needsUnreal && !needsCodewhale && !needsMiMo && !needsDeepSeek && !needsOpenHands && !needsCommandCode {
 		return nil
 	}
 	if _, err := db.Exec(`PRAGMA writable_schema = ON`); err != nil {
@@ -2185,6 +2259,27 @@ func reconcileHarnessConstraint(db *sql.DB) error {
 		// instead of enumerating the shapes repaired above.
 		repairs = append(repairs, replacement{"'fake'))", "'deepseek-harness', 'fake'))"})
 	}
+	if needsOpenHands {
+		// Migration 0192 rewrites the current constraint variants by exact
+		// string. A database that skipped an earlier harness migration matches
+		// none of them, so it reaches this repair with the harness list still
+		// missing entries; goose has already run, so nothing else adds this
+		// harness. Every variant ends with the retained 'fake' fixture harness,
+		// so anchor there instead of enumerating the shapes repaired above.
+		// This runs after the DeepSeek repair, so a database missing both gets
+		// 'deepseek-harness', 'openhands', 'fake' in that order.
+		repairs = append(repairs, replacement{"'fake'))", "'openhands', 'fake'))"})
+	}
+	if needsCodewhale {
+		repairs = append(repairs, replacement{"'fake'))", "'codewhale', 'fake'))"})
+	}
+	if needsCommandCode {
+		// Migration 0194 rewrites the constraint by anchoring on the retained
+		// 'fake' fixture harness, for the same reason as DeepSeek above. A
+		// database that skipped an earlier harness migration reaches this repair
+		// without Command Code, so anchor there instead of enumerating shapes.
+		repairs = append(repairs, replacement{"'fake'))", "'command-code', 'fake'))"})
+	}
 	for _, r := range repairs {
 		if _, err := db.Exec(
 			`UPDATE sqlite_master
@@ -2227,6 +2322,15 @@ WHERE type = 'table' AND name = 'sessions'`,
 	}
 	if !strings.Contains(schema, "'deepseek-harness'") {
 		return fmt.Errorf("schema repair: sessions harness constraint is missing DeepSeek Harness and did not match known pre-DeepSeek schema")
+	}
+	if !strings.Contains(schema, "'codewhale'") {
+		return fmt.Errorf("schema repair: sessions harness constraint is missing Codewhale")
+	}
+	if !strings.Contains(schema, "'openhands'") {
+		return fmt.Errorf("schema repair: sessions harness constraint is missing OpenHands and did not match known pre-OpenHands schema")
+	}
+	if !strings.Contains(schema, "'command-code'") {
+		return fmt.Errorf("schema repair: sessions harness constraint is missing Command Code and did not match known pre-Command-Code schema")
 	}
 	return nil
 }

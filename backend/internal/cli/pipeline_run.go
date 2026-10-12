@@ -10,11 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
 
 // These DTOs mirror the daemon's pipeline run API without importing service types.
@@ -520,7 +521,7 @@ func newPipelineSubmitCommand(ctx *commandContext) *cobra.Command {
 			}
 			output := ""
 			if outcome != "failed" {
-				out, gitErr := exec.CommandContext(cmd.Context(), "git", "rev-parse", "HEAD").Output()
+				out, gitErr := process.CommandContext(cmd.Context(), "git", "rev-parse", "HEAD").Output()
 				if gitErr != nil {
 					return fmt.Errorf("could not read HEAD of the current worktree: %w", gitErr)
 				}

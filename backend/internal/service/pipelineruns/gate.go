@@ -36,6 +36,25 @@ func NewStoreGate(store GateStore, logger *slog.Logger) *StoreGate {
 	return &StoreGate{store: store, logger: logger}
 }
 
+var _ ports.PipelineExecutionOwner = (*StoreGate)(nil)
+
+// SessionOwnsPipelineExecution implements ports.PipelineExecutionOwner: true
+// while the session, or the session it is attached to, has an unfinished run.
+func (g *StoreGate) SessionOwnsPipelineExecution(ctx context.Context, id domain.SessionID) (bool, error) {
+	owner, err := g.store.GetSessionAttachedTo(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("resolve pipeline owner: %w", err)
+	}
+	if owner == "" {
+		owner = id
+	}
+	_, ok, err := g.store.GetActivePipelineRunBySession(ctx, owner)
+	if err != nil {
+		return false, fmt.Errorf("load pipeline run: %w", err)
+	}
+	return ok, nil
+}
+
 // AdmitSessionExecution implements ports.PipelineExecutionGate. It fails
 // closed: an undeterminable answer refuses rather than risking a second writer.
 func (g *StoreGate) AdmitSessionExecution(ctx context.Context, id domain.SessionID) (bool, string) {
