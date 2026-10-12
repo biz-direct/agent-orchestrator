@@ -176,6 +176,7 @@ func newCrewDefaultCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
+//nolint:dupl // Mirrors the pipeline default command on purpose; the pipeline copy is removed with pipelines (#50).
 func newCrewDefaultGetCommand(ctx *commandContext) *cobra.Command {
 	var project string
 	var jsonOutput bool
