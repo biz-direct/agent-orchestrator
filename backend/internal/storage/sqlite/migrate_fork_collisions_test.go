@@ -7,16 +7,22 @@ import (
 
 func TestMigrateForkAndUpstreamVersionCollisions(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		base     int64
-		upstream int
+		name            string
+		base            int64
+		upstream        int
+		requestedOutput bool
 	}{
 		{name: "early install", base: 1},
 		{name: "fork pipelines", base: 178},
 		{name: "fork global rules", base: 179},
+		{name: "fork archive", base: 195},
+		{name: "fork sender", base: 196},
 		{name: "upstream archive", base: 177, upstream: 1},
 		{name: "upstream sender", base: 177, upstream: 2},
+		{name: "upstream requested output", base: 177, upstream: 2, requestedOutput: true},
+		{name: "requested output without archive", base: 194, requestedOutput: true},
 		{name: "both physical schemas", base: 179, upstream: 2},
+		{name: "merged requested output", base: 197},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openMigratedDatabaseCopy(t, tc.base)
@@ -42,19 +48,37 @@ func TestMigrateForkAndUpstreamVersionCollisions(t *testing.T) {
 					}
 				}
 			}
+			if tc.requestedOutput {
+				body, err := migrationsFS.ReadFile("migrations/0197_session_requested_output.sql")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(strings.Split(string(body), "-- +goose Down")[0]); err != nil {
+					t.Fatal(err)
+				}
+				// Upstream shipped this column under 0195, not the fork's 0197.
+				if _, err := db.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (195, 1)`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`
+INSERT INTO sessions (id, num, kind, activity_last_at, created_at, updated_at, requested_output)
+VALUES ('artifact-session', 1, 'worker', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'artifact')`); err != nil {
+					t.Fatal(err)
+				}
+			}
 			for range 2 {
 				if err := migrate(db); err != nil {
 					t.Fatal(err)
 				}
 			}
-			for _, version := range []int{178, 179, 195, 196} {
+			for _, version := range []int{178, 179, 195, 196, 197} {
 				var count int
 				if err := db.QueryRow(`SELECT COUNT(*) FROM goose_db_version WHERE version_id = ? AND is_applied = 1`, version).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("version %d: applied rows = %d, err = %v", version, count, err)
 				}
 			}
 			for table, columns := range map[string][]string{
-				"sessions":              {"attached_to_session_id", "attached_for_attempt_id"},
+				"sessions":              {"attached_to_session_id", "attached_for_attempt_id", "requested_output"},
 				"pipeline_runs":         {"id", "snapshot"},
 				"app_settings":          {"global_orchestrator_rules"},
 				"review":                {"is_archived"},
@@ -65,6 +89,12 @@ func TestMigrateForkAndUpstreamVersionCollisions(t *testing.T) {
 					if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&count); err != nil || count != 1 {
 						t.Fatalf("%s.%s: count = %d, err = %v", table, column, count, err)
 					}
+				}
+			}
+			if tc.requestedOutput {
+				var output string
+				if err := db.QueryRow(`SELECT requested_output FROM sessions WHERE id = 'artifact-session'`).Scan(&output); err != nil || output != "artifact" {
+					t.Fatalf("requested output = %q, err = %v", output, err)
 				}
 			}
 			if tc.base == 179 {

@@ -4,6 +4,8 @@
 #   - a check failed, or Pullfrog reported findings             -> open an
 #                                                                  agent-review issue
 #   - anything still running / not yet reviewed                 -> wait
+#   - a draft PR (Pullfrog still resolving conflicts)           -> wait for Pullfrog
+#                                                                  to mark it ready
 #
 #   sync-upstream-gate.sh <pr-number>
 #
@@ -29,12 +31,13 @@ act() {
   if [ -n "$dry" ]; then echo "DRY_RUN: $*"; else "$@"; fi
 }
 
-pr_json="$(gh pr view "$pr" --json url,state,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner)"
+pr_json="$(gh pr view "$pr" --json url,state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner)"
 url="$(jq -r .url <<<"$pr_json")"
 state="$(jq -r .state <<<"$pr_json")"
 base="$(jq -r .baseRefName <<<"$pr_json")"
 head_ref="$(jq -r .headRefName <<<"$pr_json")"
 head_sha="$(jq -r .headRefOid <<<"$pr_json")"
+is_draft="$(jq -r '.isDraft // false' <<<"$pr_json")"
 head_repo="$(jq -r '.headRepositoryOwner.login + "/" + .headRepository.name' <<<"$pr_json")"
 
 guard_failed=""
@@ -46,6 +49,38 @@ if [ -n "$guard_failed" ]; then
   echo "$guard_failed; nothing to do."
   [ -n "$dry" ] || exit 0
   echo "(DRY_RUN: continuing anyway)"
+fi
+
+# Conflict markers: paths where the PR head has more marker lines than main
+# (per path, so markers removed elsewhere cannot offset a new conflict, and
+# markers that already exist on main, in docs or fixtures, are ignored). A diff
+# is no use: GitHub refuses diffs this large. Needs a checkout of main to
+# compare against. Held PRs and merges both depend on this.
+marker_counts() { # <rev>: "path count" per file with marker lines
+  { git grep -cIE '^(<<<<<<<|>>>>>>>) ' "$1" -- 2>/dev/null || true; } |
+    awk -F: '{ print substr($0, length($1) + 2) }' | awk -F: '{ print $1 "\t" $2 }'
+}
+if ! git fetch -q --depth=1 "https://x-access-token:${GH_TOKEN:-}@github.com/$repo.git" "pull/$pr/head" 2>/dev/null; then
+  echo "::warning::Could not fetch the head of PR #$pr to look for conflict markers; leaving it."
+  exit 0
+fi
+new_marker_paths="$({
+  marker_counts origin/main | sed $'s/^/B\t/'
+  marker_counts FETCH_HEAD | sed $'s/^/H\t/'
+} | awk -F'\t' '$1 == "B" { base[$2] = $3; next } ($3 + 0) > (base[$2] + 0) { print $2 }')"
+markers=false
+[ -z "$new_marker_paths" ] || markers=true
+
+# A draft is Pullfrog's to finish: it resolves every conflict (including ones
+# that leave no markers, such as modify/delete or binary) and marks the PR
+# ready. Nothing is promoted here just because the markers are gone.
+if [ "$is_draft" = true ]; then
+  if [ "$markers" = true ]; then
+    echo "PR #$pr is a draft with unresolved conflict markers; Pullfrog is still resolving."
+  else
+    echo "PR #$pr is a draft; waiting for Pullfrog to mark it ready."
+  fi
+  exit 0
 fi
 
 # CI: gh pr checks exits non-zero while checks are pending or failed but still
@@ -82,13 +117,14 @@ if [ -n "$review" ]; then
   if [[ "$first_line" == '> ✅'* ]]; then verdict=clean; else verdict=findings; fi
 fi
 
-echo "PR #$pr @ ${head_sha:0:12}: verdict=$verdict failed=[${failed}] pending=[${pending}] scan_ok=$scan_ok"
+echo "PR #$pr @ ${head_sha:0:12}: verdict=$verdict failed=[${failed}] pending=[${pending}] scan_ok=$scan_ok markers=$markers"
 
 title="Upstream sync needs review: PR #$pr"
 
-if [ -n "$failed" ] || [ "$verdict" = findings ]; then
+if [ -n "$failed" ] || [ "$verdict" = findings ] || [ "$markers" = true ]; then
   reasons=""
   [ -z "$failed" ] || reasons="$reasons- Failing checks: $failed"$'\n'
+  [ "$markers" != true ] || reasons="$reasons- Unresolved conflict markers in: $(tr '\n' ' ' <<<"$new_marker_paths")"$'\n'
   [ "$verdict" != findings ] || reasons="$reasons- Pullfrog reported findings: $review_url"$'\n'
   body="The automatic merge of $url was stopped because a human is needed.
 
