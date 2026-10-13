@@ -1141,6 +1141,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/crew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover and validate the project's repository-defined crew roles and workflows */
+        get: operations["getProjectCrew"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/crew/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the project-default crew workflow selection and its availability */
+        get: operations["getProjectDefaultCrew"];
+        /** Save or clear the project-default crew workflow without replacing other project settings */
+        put: operations["setProjectDefaultCrew"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/orchestrator-rules-file": {
         parameters: {
             query?: never;
@@ -4571,6 +4606,78 @@ export interface components {
         CreateReportResponse: {
             id: string;
         };
+        CrewDiagnostic: {
+            field?: string;
+            file?: string;
+            message: string;
+        };
+        CrewReturn: {
+            from: string;
+            to: string[];
+        };
+        CrewRole: {
+            allowedPaths: string[];
+            definitionSha256: string;
+            description: string;
+            harness?: string;
+            id: string;
+            instructionsSha256: string;
+            instructionsSource: string;
+            model?: string;
+            validation: components["schemas"]["CrewValidationCommand"][];
+        };
+        CrewRoleEntry: {
+            diagnostics: components["schemas"]["CrewDiagnostic"][];
+            file: string;
+            id: string;
+            role?: components["schemas"]["CrewRole"];
+            valid: boolean;
+        };
+        CrewSelection: {
+            /** @enum {string} */
+            mode: "no_crew" | "workflow";
+            workflowId?: string;
+        };
+        CrewValidationCommand: {
+            command: string;
+            id: string;
+            required: boolean;
+            timeoutSeconds: number;
+        };
+        CrewWorkflow: {
+            definitionSha256: string;
+            description: string;
+            id: string;
+            instructionsSha256?: string;
+            instructionsSource?: string;
+            loopCap: number;
+            order: string[];
+            returns: components["schemas"]["CrewReturn"][];
+            roles: string[];
+        };
+        CrewWorkflowEntry: {
+            diagnostics: components["schemas"]["CrewDiagnostic"][];
+            file: string;
+            id: string;
+            valid: boolean;
+            workflow?: components["schemas"]["CrewWorkflow"];
+        };
+        CrewsCatalogResponse: {
+            default: components["schemas"]["CrewsDefaultStatus"];
+            diagnostics: components["schemas"]["CrewDiagnostic"][];
+            projectId: string;
+            roles: components["schemas"]["CrewRoleEntry"][];
+            workflows: components["schemas"]["CrewWorkflowEntry"][];
+        };
+        CrewsDefaultStatus: {
+            message: string;
+            selection: null | components["schemas"]["CrewSelection"];
+            /** @enum {string} */
+            state: "unset" | "no_crew" | "workflow_available" | "workflow_invalid" | "workflow_missing";
+        };
+        CrewsSetDefaultInput: {
+            selection: null | components["schemas"]["CrewSelection"];
+        };
         CueDefinitionRequest: {
             /** @description Shell command for a command cue. At most 4096 bytes; cleared when saving agent cues. */
             command?: string;
@@ -5554,6 +5661,7 @@ export interface components {
             canonicalRepoURL?: string;
             containerReap?: components["schemas"]["ContainerReapConfig"];
             defaultBranch?: string;
+            defaultCrew?: components["schemas"]["CrewSelection"];
             defaultPipeline?: components["schemas"]["PipelineSelection"];
             env?: {
                 [key: string]: string;
@@ -10881,6 +10989,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getProjectCrew: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrewsCatalogResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getProjectDefaultCrew: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrewsDefaultStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setProjectDefaultCrew: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrewsSetDefaultInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrewsDefaultStatus"];
                 };
             };
             /** @description Bad Request */

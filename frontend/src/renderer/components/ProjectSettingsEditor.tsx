@@ -41,6 +41,11 @@ export type ProjectSettingsDraft = {
 	skipGlobalOrchestratorRules?: boolean;
 };
 
+/** The prompt fields, which are saved only through the Prompts page's explicit Save. */
+export type ProjectPromptValues = Pick<ProjectSettingsDraft, "orchestratorRules" | "orchestratorRulesFile" | "skipGlobalOrchestratorRules">;
+export type CommitProjectPrompts = (values: ProjectPromptValues) => Promise<void>;
+const PROMPT_KEYS = ["orchestratorRules", "orchestratorRulesFile", "skipGlobalOrchestratorRules"] as const;
+
 const roles = ["worker", "orchestrator", "reviewer"] as const;
 export type ProjectSettingsRole = typeof roles[number];
 export type ProjectAgentPickerProps = {
@@ -88,7 +93,7 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 	workspaceRepos?: Array<{ name: string; relativePath: string; repo?: string }>;
 	repository?: string;
 	renderAgent: (props: ProjectAgentPickerProps) => ReactNode;
-	renderPrompts?: (draft: ProjectSettingsDraft, patch: (values: Partial<ProjectSettingsDraft>) => void) => ReactNode;
+	renderPrompts?: (draft: ProjectSettingsDraft, commit: CommitProjectPrompts) => ReactNode;
 	defaultReviewer?: (draft: ProjectSettingsDraft) => string;
 	modelScope: (agent: string) => string;
 	/** Self-hosted daemon whose model catalog the role pickers read. */
@@ -118,7 +123,10 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 			const normalized = result.values ?? values;
 			saved.current = JSON.stringify(normalized);
 			failedKey.current = undefined;
-			setDraft((current) => JSON.stringify(current) === JSON.stringify(values) ? normalized : current);
+			setDraft((current) => JSON.stringify(current) === JSON.stringify(values)
+					? normalized
+					// Prompt fields are committed from the Prompts page, never typed into the draft.
+					: { ...current, ...Object.fromEntries(PROMPT_KEYS.map((key) => [key, normalized[key]])) });
 			if (!result.keepReplacementState) setReplacementError(result.replacementError ?? undefined);
 			setDidSave(true);
 		},
@@ -147,6 +155,22 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 		if (problem) return;
 		setDidSave(false);
 		mutation.mutate(draft);
+	};
+	// Saves the Prompts page on demand. Other pending fields ride along; the
+	// prompt values never enter the draft (so autosave cannot persist them) until here.
+	const commitPrompts: CommitProjectPrompts = async (values) => {
+		if (disabled) throw new Error(t("remote.hostOffline"));
+		const problem = validate();
+		if (problem) throw new Error(problem);
+		setDidSave(false);
+		setError(undefined);
+		try {
+			await mutation.mutateAsync({ ...draft, ...values });
+		} catch (cause) {
+			// The Prompts page shows this inline; keep the dialog out of a failed state.
+			setError(undefined);
+			throw cause;
+		}
 	};
 	useEffect(() => {
 		if (disabled || !dirty || mutation.isPending || JSON.stringify(draft) === failedKey.current) return;
@@ -196,7 +220,7 @@ export function ProjectSettingsEditor({ initialValues, section, capabilities, de
 				{generalExtra}
 			</> : section === "prompts" ? (
 				<ProjectSettingsSection title={t("settings.prompts")} titleHidden grouped>
-					{renderPrompts?.(draft, patch)}
+					{renderPrompts?.(draft, commitPrompts)}
 				</ProjectSettingsSection>
 			) : <>
 				{visibleRoles.map((role) => {

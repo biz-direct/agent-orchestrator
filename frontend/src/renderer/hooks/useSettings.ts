@@ -126,7 +126,11 @@ export function useUpdateGlobalOrchestratorRules() {
 			if (error) throw error;
 			return data;
 		},
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsQueryKey }),
+		onSuccess: (_data, rules) => {
+			// Keep the acknowledged text even if the read-back below fails.
+			queryClient.setQueryData<Settings>(settingsQueryKey, (current) => current && { ...current, globalOrchestratorRules: rules });
+			void queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+		},
 	});
 
 	return {
