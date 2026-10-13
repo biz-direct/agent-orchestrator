@@ -144,9 +144,14 @@ const config: ForgeConfig = {
 			? {
 					identity: process.env.APPLE_SIGNING_IDENTITY,
 					optionsForFile: macSignOptionsForFile,
+					// electron-packager defaults this to true, which downgrades a
+					// signing failure (e.g. identity not found) to a warning that
+					// forge hides; the build then dies later in notarize with a
+					// misleading "code has no resources" error. Fail at the cause.
+					continueOnError: false,
 				}
 			: process.env.CSC_LINK
-				? { optionsForFile: macSignOptionsForFile }
+				? { optionsForFile: macSignOptionsForFile, continueOnError: false }
 				: undefined,
 		osxNotarize: process.env.AO_NOTARY_PROFILE
 			? { keychainProfile: process.env.AO_NOTARY_PROFILE }
