@@ -156,6 +156,7 @@ type AppSetting struct {
 	UpdatedAt               time.Time
 	CloudOffering           bool
 	GlobalOrchestratorRules string
+	GlobalWorkerRules       string
 }
 
 type Automation struct {

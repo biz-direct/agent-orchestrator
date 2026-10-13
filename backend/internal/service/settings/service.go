@@ -23,6 +23,7 @@ type Store interface {
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode, now time.Time) error
 	SetCloudOffering(ctx context.Context, enabled bool, now time.Time) error
 	SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error
+	SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error
 }
 
 // Snapshot is the current preference set.
@@ -34,7 +35,10 @@ type Snapshot struct {
 	// GlobalOrchestratorRules are standing instructions added to every
 	// project orchestrator prompt on this daemon.
 	GlobalOrchestratorRules string
-	UpdatedAt               time.Time
+	// GlobalWorkerRules are standing instructions added to every worker prompt
+	// on this daemon.
+	GlobalWorkerRules string
+	UpdatedAt         time.Time
 }
 
 // Offering reports which AO offerings this daemon exposes to clients. It is
@@ -189,6 +193,30 @@ func (s *Service) SetGlobalOrchestratorRules(ctx context.Context, rules string) 
 		return Snapshot{}, err
 	}
 	if err := s.store.SetGlobalOrchestratorRules(ctx, rules, s.now()); err != nil {
+		return Snapshot{}, err
+	}
+	return s.Get(ctx)
+}
+
+// GlobalWorkerRules returns the daemon-wide worker rules. A read failure is
+// returned rather than swallowed, for the same reason as the orchestrator layer.
+func (s *Service) GlobalWorkerRules(ctx context.Context) (string, error) {
+	snapshot, err := s.store.GetAppSettings(ctx)
+	if err != nil {
+		return "", err
+	}
+	return snapshot.GlobalWorkerRules, nil
+}
+
+// SetGlobalWorkerRules replaces the daemon-wide worker rules. The value is
+// stored trimmed and capped like the orchestrator rules. Running workers are
+// untouched: the rules apply the next time a worker prompt is built.
+func (s *Service) SetGlobalWorkerRules(ctx context.Context, rules string) (Snapshot, error) {
+	rules = strings.TrimSpace(rules)
+	if err := domain.ValidateWorkerRulesSize(rules); err != nil {
+		return Snapshot{}, err
+	}
+	if err := s.store.SetGlobalWorkerRules(ctx, rules, s.now()); err != nil {
 		return Snapshot{}, err
 	}
 	return s.Get(ctx)

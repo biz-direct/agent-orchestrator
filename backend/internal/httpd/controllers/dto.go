@@ -19,6 +19,7 @@ import (
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systemcheck"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/systeminstall"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
 // CreateReportRequest is the local caller-to-daemon report submission contract.
@@ -3215,6 +3216,9 @@ type SettingsResponse struct {
 	// GlobalOrchestratorRules are this daemon's standing instructions added to
 	// every project orchestrator prompt. Empty means none.
 	GlobalOrchestratorRules string `json:"globalOrchestratorRules"`
+	// GlobalWorkerRules are this daemon's standing instructions added to every
+	// worker prompt. Empty means none.
+	GlobalWorkerRules string `json:"globalWorkerRules"`
 }
 
 // AgentInstallerCatalogResponse is the body of GET /api/v1/agents/installers.
@@ -3232,6 +3236,38 @@ type UpdateSessionInterfaceRequest struct {
 type UpdateGlobalOrchestratorRulesRequest struct {
 	// GlobalOrchestratorRules is plain text, at most 32 KiB after trimming.
 	GlobalOrchestratorRules *string `json:"globalOrchestratorRules"`
+}
+
+// UpdateGlobalWorkerRulesRequest replaces this daemon's global worker rules.
+type UpdateGlobalWorkerRulesRequest struct {
+	// GlobalWorkerRules is plain text, at most 32 KiB after trimming.
+	GlobalWorkerRules *string `json:"globalWorkerRules"`
+}
+
+// BuiltinPromptsResponse is the body of GET /api/v1/prompts/builtin.
+type BuiltinPromptsResponse struct {
+	// Sample holds the stand-in project values the prompts are rendered with.
+	Sample sessionmanager.PromptSample `json:"sample"`
+	// Orchestrator is a project orchestrator's built-in prompt.
+	Orchestrator []sessionmanager.PromptSection `json:"orchestrator"`
+	// Worker is a project worker's built-in prompt, with an active orchestrator.
+	Worker []sessionmanager.PromptSection `json:"worker"`
+	// StandaloneWorker is the built-in prompt of a worker with no project.
+	StandaloneWorker []sessionmanager.PromptSection `json:"standaloneWorker"`
+}
+
+// EffectivePromptResponse is the body of GET /api/v1/projects/{id}/effective-prompt.
+type EffectivePromptResponse struct {
+	Role string `json:"role" enum:"orchestrator,worker"`
+	// Sections are the prompt's blocks in order, each labelled with its layer.
+	Sections []sessionmanager.PromptSection `json:"sections"`
+	// Text is the sections joined exactly as a new session receives them.
+	Text string `json:"text"`
+}
+
+// PromptSessionsResponse is the body of GET /api/v1/prompts/sessions.
+type PromptSessionsResponse struct {
+	Sessions []sessionmanager.PromptSession `json:"sessions"`
 }
 
 // UpdateCloudOfferingRequest flips the user's cloud toggle.

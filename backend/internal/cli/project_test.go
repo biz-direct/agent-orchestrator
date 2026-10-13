@@ -464,3 +464,13 @@ func TestBuildProjectConfigExplicitSkipGlobalFalseIsAFlag(t *testing.T) {
 		t.Fatal("skip must stay false")
 	}
 }
+
+func TestBuildProjectConfigSkipGlobalWorkerRules(t *testing.T) {
+	cfg, err := buildProjectConfig(projectSetConfigOptions{skipGlobalWorkerRules: true, skipGlobalWorkerRulesSet: true})
+	if err != nil || !cfg.SkipGlobalWorkerRules || cfg.SkipGlobalOrchestratorRules {
+		t.Fatalf("cfg = %+v, err = %v", cfg, err)
+	}
+	if _, err := buildProjectConfig(projectSetConfigOptions{skipGlobalWorkerRulesSet: true}); err != nil {
+		t.Fatalf("explicit --skip-global-worker-rules=false must be accepted: %v", err)
+	}
+}

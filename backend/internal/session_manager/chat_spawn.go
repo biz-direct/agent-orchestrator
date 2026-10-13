@@ -416,6 +416,13 @@ type GlobalOrchestratorRulesReader interface {
 	GlobalOrchestratorRules(ctx context.Context) (string, error)
 }
 
+// GlobalWorkerRulesReader supplies the daemon-wide worker rules added to every
+// worker prompt, standalone workers included. A read error fails the prompt
+// build instead of silently dropping the layer.
+type GlobalWorkerRulesReader interface {
+	GlobalWorkerRules(ctx context.Context) (string, error)
+}
+
 // resolveSessionMode applies the precedence for a spawn:
 //
 //  1. the mode the caller explicitly requested;

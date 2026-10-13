@@ -19,6 +19,7 @@ type SettingsService interface {
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode) (settingssvc.Snapshot, error)
 	SetCloudOffering(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	SetGlobalOrchestratorRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
+	SetGlobalWorkerRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
 	SetChatHibernationEnabled(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	ChatHarnesses(candidates []domain.AgentHarness) []domain.AgentHarness
 	Offering() settingssvc.Offering
@@ -39,6 +40,7 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Patch("/settings/session-interface", c.setSessionInterface)
 	r.Patch("/settings/cloud-offering", c.setCloudOffering)
 	r.Patch("/settings/global-orchestrator-rules", c.setGlobalOrchestratorRules)
+	r.Patch("/settings/global-worker-rules", c.setGlobalWorkerRules)
 	r.Patch("/settings/chat-hibernation", c.setChatHibernation)
 }
 
@@ -131,6 +133,33 @@ func (c *SettingsController) setGlobalOrchestratorRules(w http.ResponseWriter, r
 	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
 }
 
+func (c *SettingsController) setGlobalWorkerRules(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/global-worker-rules")
+		return
+	}
+	var req UpdateGlobalWorkerRulesRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	if req.GlobalWorkerRules == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"GLOBAL_WORKER_RULES_INVALID", "globalWorkerRules must be a string", nil)
+		return
+	}
+	snapshot, err := c.Svc.SetGlobalWorkerRules(r.Context(), *req.GlobalWorkerRules)
+	if errors.Is(err, domain.ErrWorkerRulesTooLarge) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"WORKER_RULES_TOO_LARGE", err.Error(), nil)
+		return
+	}
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+}
+
 func (c *SettingsController) setChatHibernation(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/chat-hibernation")
@@ -172,6 +201,7 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 		CloudControlPlaneURL:    offering.CloudControlPlaneURL,
 		TrackerIntakeEnabled:    offering.TrackerIntakeEnabled,
 		GlobalOrchestratorRules: snapshot.GlobalOrchestratorRules,
+		GlobalWorkerRules:       snapshot.GlobalWorkerRules,
 		ChatHibernationEnabled:  snapshot.ChatHibernationEnabled,
 	}
 }

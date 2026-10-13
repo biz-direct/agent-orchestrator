@@ -20,6 +20,9 @@ func (*hibernationSettingsStore) SetDefaultSessionMode(context.Context, domain.S
 	return nil
 }
 func (*hibernationSettingsStore) SetCloudOffering(context.Context, bool, time.Time) error { return nil }
+func (*hibernationSettingsStore) SetGlobalWorkerRules(context.Context, string, time.Time) error {
+	return nil
+}
 func (*hibernationSettingsStore) SetGlobalOrchestratorRules(context.Context, string, time.Time) error {
 	return nil
 }
@@ -119,6 +122,33 @@ func (s *rulesStore) GetAppSettings(context.Context) (Snapshot, error) { return 
 func (s *rulesStore) SetGlobalOrchestratorRules(_ context.Context, rules string, _ time.Time) error {
 	s.snap.GlobalOrchestratorRules = rules
 	return nil
+}
+func (s *rulesStore) SetGlobalWorkerRules(_ context.Context, rules string, _ time.Time) error {
+	s.snap.GlobalWorkerRules = rules
+	return nil
+}
+
+func TestSetGlobalWorkerRules(t *testing.T) {
+	store := &rulesStore{}
+	svc := New(store, nil, Offering{}, nil)
+	snap, err := svc.SetGlobalWorkerRules(context.Background(), "  be careful \n")
+	if err != nil || snap.GlobalWorkerRules != "be careful" {
+		t.Fatalf("got %q, %v; want trimmed value", snap.GlobalWorkerRules, err)
+	}
+	got, err := svc.GlobalWorkerRules(context.Background())
+	if err != nil || got != "be careful" {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+	if store.snap.GlobalOrchestratorRules != "" {
+		t.Fatal("worker rules must not touch the orchestrator rules")
+	}
+	_, err = svc.SetGlobalWorkerRules(context.Background(), strings.Repeat("x", domain.MaxWorkerRulesBytes+1))
+	if !errors.Is(err, domain.ErrWorkerRulesTooLarge) {
+		t.Fatalf("err = %v, want too large", err)
+	}
+	if domain.MaxWorkerRulesBytes != domain.MaxOrchestratorRulesBytes {
+		t.Fatal("worker and orchestrator global rules limits must match")
+	}
 }
 
 func TestSetGlobalOrchestratorRules(t *testing.T) {

@@ -200,6 +200,7 @@ var shippedMigrations = map[int64]string{
 	195: "0195_archive_reviewers.sql",
 	196: "0196_conversation_message_sender.sql",
 	197: "0197_session_requested_output.sql",
+	250: "0250_app_settings_global_worker_rules.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

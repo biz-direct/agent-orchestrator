@@ -977,6 +977,7 @@ func Run() error {
 		GitHub:             githubpat.New(cfg.DataDir),
 		Conversations:      chatSvc,
 		Settings:           settingsSvc,
+		Prompts:            promptService(sessMgr),
 		CDC:                store,
 		Events:             cdcPipe.Broadcaster,
 		Activity:           lcStack.LCM,
@@ -1299,4 +1300,11 @@ func stabilizeWorkingDirectory(dataDir string) error {
 		return fmt.Errorf("daemon working directory: chdir %s: %w", dataDir, err)
 	}
 	return nil
+}
+
+// promptService narrows the session manager to the prompt-preview surface; nil
+// when it does not provide one, so the routes answer 501 instead of panicking.
+func promptService(mgr sessionLifecycle) controllers.PromptService {
+	svc, _ := mgr.(controllers.PromptService)
+	return svc
 }

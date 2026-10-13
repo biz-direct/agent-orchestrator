@@ -26,6 +26,7 @@ func (s settingsStore) GetAppSettings(ctx context.Context) (settingssvc.Snapshot
 		DefaultSessionMode:      row.DefaultSessionMode,
 		CloudOffering:           row.CloudOffering,
 		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
+		GlobalWorkerRules:       row.GlobalWorkerRules,
 		UpdatedAt:               row.UpdatedAt,
 	}, nil
 }
@@ -44,4 +45,8 @@ func (s settingsStore) SetCloudOffering(ctx context.Context, enabled bool, now t
 
 func (s settingsStore) SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error {
 	return s.store.SetGlobalOrchestratorRules(ctx, rules, now)
+}
+
+func (s settingsStore) SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error {
+	return s.store.SetGlobalWorkerRules(ctx, rules, now)
 }
