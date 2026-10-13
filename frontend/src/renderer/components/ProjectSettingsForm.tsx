@@ -24,7 +24,7 @@ import { ProjectPromptsSettings } from "./ProjectPromptsSettings";
 import { ProjectCrewSettings } from "./ProjectCrewSettings";
 import { ProjectPipelineSettings } from "./ProjectPipelineSettings";
 import { ReviewerSelect, reviewerTrustWarning } from "./ReviewerSelect";
-import { ProjectSettingsEditor, type ProjectAgentPickerProps, type ProjectSettingsDraft } from "./ProjectSettingsEditor";
+import { ProjectSettingsEditor, type ProjectAgentPickerProps, type ProjectPromptValues, type ProjectSettingsDraft } from "./ProjectSettingsEditor";
 import { CloudProjectSettingsAdapter } from "./CloudProjectSettingsForm";
 
 type Project = components["schemas"]["Project"];
@@ -64,6 +64,9 @@ type ProjectSettingsFormProps = {
 	cloudOrgId?: string;
 	section?: ProjectSettingsSection;
 	onSaveState?: (state: ProjectSettingsSaveState) => void;
+	/** Unsaved Prompts-page edits owned by the dialog, so they outlive section switches. */
+	promptEdits?: ProjectPromptValues | null;
+	onPromptEditsChange?: (next: ProjectPromptValues | null) => void;
 };
 
 export function ProjectSettingsForm(props: ProjectSettingsFormProps) {
@@ -77,6 +80,8 @@ function LocalProjectSettingsAdapter({
 	hostId,
 	section = "general",
 	onSaveState,
+	promptEdits,
+	onPromptEditsChange,
 }: ProjectSettingsFormProps) {
 	const { t } = useTranslation();
 	const queryClient = useQueryClient();
@@ -121,6 +126,8 @@ function LocalProjectSettingsAdapter({
 					hostConnected={hostConnected}
 					section={section}
 					onSaveState={onSaveState}
+					promptEdits={promptEdits}
+					onPromptEditsChange={onPromptEditsChange}
 				/>
 				</div>
 			) : null}
@@ -128,7 +135,7 @@ function LocalProjectSettingsAdapter({
 	);
 }
 
-function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, section = "general", onSaveState }: {
+function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, section = "general", onSaveState, promptEdits: controlledEdits, onPromptEditsChange }: {
 	project: Project;
 	projectId: string;
 	hostId?: string;
@@ -136,6 +143,8 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 	onSaved: () => Promise<void>;
 	section?: ProjectSettingsSection;
 	onSaveState?: (state: ProjectSettingsSaveState) => void;
+	promptEdits?: ProjectPromptValues | null;
+	onPromptEditsChange?: (next: ProjectPromptValues | null) => void;
 }) {
 	const { t } = useTranslation();
 	const queryClient = useQueryClient();
@@ -179,6 +188,11 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 	};
 	const lastSavedRef = useRef(JSON.stringify(initialValues));
 	const [rulesFileError, setRulesFileError] = useState<string | null>(null);
+	// Unsaved Prompts-page edits live here so they survive section switches and
+	// background refetches; only the Prompts page's Save persists them.
+	const [localPromptEdits, setLocalPromptEdits] = useState<ProjectPromptValues | null>(null);
+	const promptEdits = onPromptEditsChange ? controlledEdits ?? null : localPromptEdits;
+	const setPromptEdits = onPromptEditsChange ?? setLocalPromptEdits;
 	const lastOrchestratorRef = useRef(config.orchestrator?.agent ?? "");
 	const replacementAttemptedRef = useRef(false);
 	const replacementFailedRef = useRef(false);
@@ -360,15 +374,17 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 		details={[{ label: t("settings.project.path"), value: project.path, href: hostId ? undefined : `file://${encodeURI(project.path)}` }, { label: t("settings.project.repo"), value: project.repo || "—", href: project.repo ? repositoryHref(project.repo) : undefined }]}
 		workspaceRepos={project.kind === "workspace" ? project.workspaceRepos ?? [] : undefined} repository={project.repo}
 		generalExtra={!isScratchProject ? <><ProjectPipelineSettings projectId={projectId} hostId={hostId} /><ProjectCrewSettings projectId={projectId} hostId={hostId} /></> : undefined}
-		renderPrompts={(draft, patch) => <ProjectPromptsSettings
+		renderPrompts={(draft, commit) => <ProjectPromptsSettings
 			projectId={projectId} hostId={hostId}
-			orchestratorRules={draft.orchestratorRules ?? ""}
-			orchestratorRulesFile={draft.orchestratorRulesFile ?? ""}
+			saved={{
+				orchestratorRules: draft.orchestratorRules ?? "",
+				orchestratorRulesFile: draft.orchestratorRulesFile ?? "",
+				skipGlobalOrchestratorRules: draft.skipGlobalOrchestratorRules ?? false,
+			}}
+			edits={promptEdits}
+			onEditsChange={(next) => { setRulesFileError(null); setPromptEdits(next); }}
+			onSave={commit}
 			rulesFileError={rulesFileError}
-			skipGlobal={draft.skipGlobalOrchestratorRules ?? false}
-			onOrchestratorRulesChange={(orchestratorRules) => patch({ orchestratorRules })}
-			onOrchestratorRulesFileChange={(orchestratorRulesFile) => { setRulesFileError(null); patch({ orchestratorRulesFile }); }}
-			onSkipGlobalChange={(skipGlobalOrchestratorRules) => patch({ skipGlobalOrchestratorRules })}
 		/>}
 		modelScope={() => projectId} defaultReviewer={(draft) => WORKER_DEFAULT_REVIEWERS[draft.workerAgent] ?? "claude-code"}
 		reviewerWarning={reviewerTrustWarning} save={save} saveUnchanged onSaveState={onSaveState}
