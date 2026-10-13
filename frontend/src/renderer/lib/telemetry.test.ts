@@ -807,24 +807,22 @@ describe("route view reservation", () => {
 });
 
 describe("transport guard", () => {
-	it("drops sends and late retries after revocation and reports a non-retryable outcome", async () => {
-		const { applyRendererTelemetryPolicy, installTransportGuard } = await import("./telemetry");
+	it("kills a client for good: sends and late retries from it never go out", async () => {
+		const { installTransportGuard } = await import("./telemetry");
 		const client = new PostHog();
 		const sent: unknown[] = [];
 		(client as unknown as { _send_request: (o: unknown) => void })._send_request = (o) => { sent.push(o); };
-		installTransportGuard(client);
+		const kill = installTransportGuard(client);
 		const send = (client as unknown as { _send_request: (o: Record<string, unknown>) => void })._send_request;
 
-		const inFlight: Record<string, unknown> = { url: "https://x.test/e" };
-		send(inFlight);
+		send({ url: "https://x.test/e" });
 		expect(sent).toHaveLength(1);
 
-		applyRendererTelemetryPolicy(false);
-		// The original request fails after revocation and the SDK retries the same options.
-		send(inFlight);
+		kill();
+		// A retry arrives as a fresh copy of the options, with no marker to inspect.
 		const statuses: number[] = [];
-		send({ url: "https://x.test/new", callback: (r: { statusCode: number }) => statuses.push(r.statusCode) });
+		send({ url: "https://x.test/e", callback: (r: { statusCode: number }) => statuses.push(r.statusCode) });
 		expect(sent).toHaveLength(1);
-		expect(statuses).toEqual([0]);
+		expect(statuses).toEqual([403]);
 	});
 });
