@@ -130,6 +130,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceTabActions,
 	workspaceActiveTabKey,
 	workspaceFileActive,
+	hideHeader,
 	auxiliaryTabOrder,
 	onAuxiliaryTabOrderChange,
 	controllerTransitioning,
@@ -180,6 +181,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceActiveTabKey?: string;
 	/** A file overlay hides the chat surface, so it must not acknowledge switch UI. */
 	workspaceFileActive?: boolean;
+	/** Drop the chat header and tab strip when another surface already provides them. */
+	hideHeader?: boolean;
 	/** Session-owned order shared with the terminal UI surface. */
 	auxiliaryTabOrder?: string[];
 	onAuxiliaryTabOrderChange?: (keys: string[]) => void;
@@ -612,6 +615,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				workspaceTabs={workspaceTabs}
 				workspaceTabActions={workspaceTabActions}
 				workspaceActiveTabKey={workspaceActiveTabKey}
+				hideHeader={hideHeader}
 				auxiliaryTabOrder={auxiliaryTabOrder}
 				onAuxiliaryTabOrderChange={onAuxiliaryTabOrderChange}
 				controllerTransitioning={controllerTransitioning}

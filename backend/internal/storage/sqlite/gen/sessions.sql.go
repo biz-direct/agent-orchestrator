@@ -340,6 +340,17 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (GetSessi
 	return i, err
 }
 
+const getSessionAttachedAttempt = `-- name: GetSessionAttachedAttempt :one
+SELECT attached_for_attempt_id FROM sessions WHERE id = ?
+`
+
+func (q *Queries) GetSessionAttachedAttempt(ctx context.Context, id domain.SessionID) (string, error) {
+	row := q.db.QueryRowContext(ctx, getSessionAttachedAttempt, id)
+	var attached_for_attempt_id string
+	err := row.Scan(&attached_for_attempt_id)
+	return attached_for_attempt_id, err
+}
+
 const getSessionAttachedTo = `-- name: GetSessionAttachedTo :one
 SELECT attached_to_session_id FROM sessions WHERE id = ?
 `

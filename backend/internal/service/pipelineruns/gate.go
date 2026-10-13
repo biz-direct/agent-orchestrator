@@ -16,6 +16,13 @@ type GateStore interface {
 	ListPipelineStageAttempts(ctx context.Context, runID string) ([]domain.PipelineStageAttempt, error)
 }
 
+// crewRoleLookup is the optional store capability that identifies crew role
+// sessions. Role sessions are not pipeline stages: the human converses with them
+// at any time, so the gate never refuses them on a pipeline's account.
+type crewRoleLookup interface {
+	GetSessionCrewRole(ctx context.Context, id domain.SessionID) (string, error)
+}
+
 // StoreGate implements ports.PipelineExecutionGate from durable run facts. It
 // is the single answer to "may this session execute right now?": only the
 // active stage's executor is admitted, so completion events, side messages,
@@ -67,6 +74,16 @@ func (g *StoreGate) AdmitSessionExecution(ctx context.Context, id domain.Session
 		return false, "pipeline execution state could not be determined"
 	}
 	attached := owner != ""
+	if lookup, ok := g.store.(crewRoleLookup); ok && attached {
+		role, rerr := lookup.GetSessionCrewRole(ctx, id)
+		if rerr != nil {
+			g.logger.Error("pipeline gate: cannot resolve crew role; refusing", "session_id", id, "err", rerr)
+			return false, "crew role state could not be determined"
+		}
+		if role != "" {
+			return true, ""
+		}
+	}
 	ownerID := owner
 	if !attached {
 		ownerID = id

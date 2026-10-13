@@ -5520,6 +5520,15 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	if kind == domain.KindWorker && requestedOutput == domain.RequestedOutputArtifact {
 		cfg.AdditionalSections = append(cfg.AdditionalSections, artifactOutputPrompt)
 	}
+	if kind == domain.KindWorker && sessionID != "" {
+		section, err := m.crewRolePrompt(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		if section != "" {
+			cfg.AdditionalSections = append(cfg.AdditionalSections, section)
+		}
+	}
 	return buildSystemPromptText(cfg), nil
 }
 

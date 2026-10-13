@@ -448,6 +448,9 @@ SELECT attached_to_session_id FROM sessions WHERE id = ?;
 -- name: SetSessionAttachedAttempt :exec
 UPDATE sessions SET attached_for_attempt_id = ? WHERE id = ?;
 
+-- name: GetSessionAttachedAttempt :one
+SELECT attached_for_attempt_id FROM sessions WHERE id = ?;
+
 -- name: GetAttachedSessionIDForAttempt :one
 SELECT id FROM sessions WHERE attached_for_attempt_id = ?;
 

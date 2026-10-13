@@ -86,6 +86,11 @@ func (m *Manager) terminateAttachedSession(ctx context.Context, id domain.Sessio
 		return fmt.Errorf("terminate attached stage session %s: %w", id, err)
 	}
 	m.cleanupSystemPromptDir(id)
+	// A crew role's claim is released with its conversation so the role can be
+	// added again; a pipeline stage's claim is left as it was.
+	if role, rerr := m.crewRoleOf(ctx, id); rerr == nil && role != "" {
+		m.releaseAttachedAttempt(ctx, id)
+	}
 	return nil
 }
 

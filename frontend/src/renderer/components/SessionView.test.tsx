@@ -62,6 +62,19 @@ const settingsState = vi.hoisted(() => ({
 	chatHarnesses: undefined as string[] | undefined,
 }));
 const reviewGetMock = vi.hoisted(() => vi.fn());
+// Answers the first non-crew GET with `value`. The task view also polls the crew
+// role list, which must not consume a response meant for the review lookup.
+function mockReviewOnce(value: unknown) {
+	let used = false;
+	const base = reviewGetMock.getMockImplementation();
+	reviewGetMock.mockImplementation(async (path: string, ...rest: unknown[]) => {
+		if (!used && !path.includes("/crew")) {
+			used = true;
+			return value;
+		}
+		return base?.(path, ...rest);
+	});
+}
 const chatViewPostMock = vi.hoisted(() => vi.fn());
 const inspectorVisibilityRenders = vi.hoisted(() => [] as boolean[]);
 const chatSurfaceRenders = vi.hoisted(() => [] as string[]);
@@ -2402,7 +2415,7 @@ describe("SessionView", () => {
 				createdAt: "2026-08-31T00:00:00Z",
 			},
 		];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [] },
 			error: undefined,
 		});
@@ -4184,7 +4197,7 @@ describe("SessionView", () => {
 				updatedAt: "2026-06-15T00:00:00Z",
 			},
 		];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [], runs: [] },
 			error: undefined,
 		});
@@ -4207,7 +4220,7 @@ describe("SessionView", () => {
 			reviewComments: false,
 			updatedAt: "2026-06-15T00:00:00Z",
 		}];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [], runs: [] },
 			error: undefined,
 		});
@@ -4363,7 +4376,7 @@ describe("SessionView", () => {
 				updatedAt: "2026-06-15T00:00:00Z",
 			},
 		];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [] },
 			error: undefined,
 		});
@@ -4398,7 +4411,7 @@ describe("SessionView", () => {
 					updatedAt: "2026-06-15T00:00:00Z",
 				},
 			];
-			reviewGetMock.mockResolvedValueOnce({
+			mockReviewOnce({
 				data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [] },
 				error: undefined,
 			});
