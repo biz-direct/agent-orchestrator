@@ -15,6 +15,7 @@ import { captureOrchestratorReplacementFailure } from "../lib/orchestrator-repla
 import { OrchestratorSpawnError, spawnOrchestrator } from "../lib/spawn-orchestrator";
 import { openRemoteOrchestrator } from "../lib/remote-orchestrator";
 import { fetchOrchestratorRulesFile } from "../hooks/useOrchestratorRulesFile";
+import { fetchAgentRulesFile } from "../hooks/usePromptViews";
 import { captureRendererEvent } from "../lib/telemetry";
 import { type OrchestratorReplacementFailure, useUiStore } from "../stores/ui-store";
 import { newestActiveOrchestrator } from "../types/workspace";
@@ -185,6 +186,9 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 		orchestratorRules: config.orchestratorRules ?? "",
 		orchestratorRulesFile: config.orchestratorRulesFile ?? "",
 		skipGlobalOrchestratorRules: config.skipGlobalOrchestratorRules ?? false,
+		agentRules: config.agentRules ?? "",
+		agentRulesFile: config.agentRulesFile ?? "",
+		skipGlobalWorkerRules: config.skipGlobalWorkerRules ?? false,
 	};
 	const lastSavedRef = useRef(JSON.stringify(initialValues));
 	const [rulesFileError, setRulesFileError] = useState<string | null>(null);
@@ -208,6 +212,15 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 		if (file && file !== (config.orchestratorRulesFile ?? "").trim()) {
 			try {
 				await fetchOrchestratorRulesFile(projectId, hostId, file);
+			} catch (error) {
+				setRulesFileError(error instanceof Error ? error.message : t("settings.project.saveFailed"));
+				throw error;
+			}
+		}
+		const agentFile = values.agentRulesFile?.trim() ?? "";
+		if (agentFile && agentFile !== (config.agentRulesFile ?? "").trim()) {
+			try {
+				await fetchAgentRulesFile(projectId, hostId, agentFile);
 			} catch (error) {
 				setRulesFileError(error instanceof Error ? error.message : t("settings.project.saveFailed"));
 				throw error;
@@ -244,6 +257,9 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 					orchestratorRules: values.orchestratorRules?.trim() || undefined,
 					orchestratorRulesFile: file || undefined,
 					skipGlobalOrchestratorRules: values.skipGlobalOrchestratorRules || undefined,
+					agentRules: values.agentRules?.trim() || undefined,
+					agentRulesFile: agentFile || undefined,
+					skipGlobalWorkerRules: values.skipGlobalWorkerRules || undefined,
 				}
 			: {
 					...config,
@@ -272,6 +288,9 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 					orchestratorRules: values.orchestratorRules?.trim() || undefined,
 					orchestratorRulesFile: file || undefined,
 					skipGlobalOrchestratorRules: values.skipGlobalOrchestratorRules || undefined,
+					agentRules: values.agentRules?.trim() || undefined,
+					agentRulesFile: agentFile || undefined,
+					skipGlobalWorkerRules: values.skipGlobalWorkerRules || undefined,
 					reviewers: values.reviewerHarness
 						? [
 								{
@@ -380,6 +399,9 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 				orchestratorRules: draft.orchestratorRules ?? "",
 				orchestratorRulesFile: draft.orchestratorRulesFile ?? "",
 				skipGlobalOrchestratorRules: draft.skipGlobalOrchestratorRules ?? false,
+				agentRules: draft.agentRules ?? "",
+				agentRulesFile: draft.agentRulesFile ?? "",
+				skipGlobalWorkerRules: draft.skipGlobalWorkerRules ?? false,
 			}}
 			edits={promptEdits}
 			onEditsChange={(next) => { setRulesFileError(null); setPromptEdits(next); }}
@@ -419,7 +441,7 @@ function repositoryHref(repository: string): string | undefined {
 	return undefined;
 }
 
-const PROMPT_FORM_KEYS = ["orchestratorRules", "orchestratorRulesFile", "skipGlobalOrchestratorRules"] as const;
+const PROMPT_FORM_KEYS = ["orchestratorRules", "orchestratorRulesFile", "skipGlobalOrchestratorRules", "agentRules", "agentRulesFile", "skipGlobalWorkerRules"] as const;
 
 /** True when the only differences from the last saved form are prompt fields. */
 function isPromptOnlyChange(values: Record<string, unknown>, lastSavedKey: string): boolean {

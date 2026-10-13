@@ -39,12 +39,16 @@ export type ProjectSettingsDraft = {
 	orchestratorRules?: string;
 	orchestratorRulesFile?: string;
 	skipGlobalOrchestratorRules?: boolean;
+	/** Self-hosted worker prompt settings, on the same Prompts page. */
+	agentRules?: string;
+	agentRulesFile?: string;
+	skipGlobalWorkerRules?: boolean;
 };
 
 /** The prompt fields, which are saved only through the Prompts page's explicit Save. */
-export type ProjectPromptValues = Pick<ProjectSettingsDraft, "orchestratorRules" | "orchestratorRulesFile" | "skipGlobalOrchestratorRules">;
+export type ProjectPromptValues = Pick<ProjectSettingsDraft, "orchestratorRules" | "orchestratorRulesFile" | "skipGlobalOrchestratorRules" | "agentRules" | "agentRulesFile" | "skipGlobalWorkerRules">;
 export type CommitProjectPrompts = (values: ProjectPromptValues) => Promise<void>;
-const PROMPT_KEYS = ["orchestratorRules", "orchestratorRulesFile", "skipGlobalOrchestratorRules"] as const;
+const PROMPT_KEYS = ["orchestratorRules", "orchestratorRulesFile", "skipGlobalOrchestratorRules", "agentRules", "agentRulesFile", "skipGlobalWorkerRules"] as const;
 
 const roles = ["worker", "orchestrator", "reviewer"] as const;
 export type ProjectSettingsRole = typeof roles[number];
