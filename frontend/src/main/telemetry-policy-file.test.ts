@@ -2,7 +2,7 @@ import { chmod, lstat, mkdtemp, readFile, symlink, writeFile } from "node:fs/pro
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TelemetryPolicyAuthority, nodeTelemetryPolicyFileSystem, resolveDesktopDataDir } from "./telemetry-policy-file";
+import { TelemetryPolicyAuthority, nodeTelemetryPolicyFileSystem, readTelemetryOptInSync, resolveDesktopDataDir } from "./telemetry-policy-file";
 
 const dirs: string[] = [];
 const makeDir = async () => {
@@ -17,18 +17,18 @@ afterEach(async () => {
 });
 
 describe("TelemetryPolicyAuthority", () => {
-	it("materializes the packaged default as an owner-only durable record", async () => {
+	it("materializes the off default as an owner-only durable record, even for packaged builds", async () => {
 		const dataDir = await makeDir();
 		const authority = new TelemetryPolicyAuthority({ dataDir, packagedDefault: true, platform: "linux" });
 		const snapshot = await authority.load();
 		const policyPath = path.join(dataDir, "telemetry_policy.json");
 		const mode = (await lstat(policyPath)).mode & 0o777;
-		expect(snapshot.eventsEnabled).toBe(true);
+		expect(snapshot.eventsEnabled).toBe(false);
 		expect(snapshot.acknowledged).toBe(true);
 		expect(mode).toBe(0o600);
 		expect(JSON.parse(await readFile(policyPath, "utf8"))).toEqual({
-			schema_version: 2,
-			events_enabled: true,
+			schema_version: 3,
+			events_enabled: false,
 			consent_generation: snapshot.consentGeneration,
 			consent_production_enabled: false,
 			updated_at: snapshot.updatedAt,
@@ -49,6 +49,35 @@ describe("TelemetryPolicyAuthority", () => {
 		expect(JSON.parse(await readFile(policyPath, "utf8"))).toMatchObject({ events_enabled: true, consent_production_enabled: true });
 	});
 
+	it("treats a legacy version 2 record as off (it may only reflect the old default) and leaves the file alone", async () => {
+		const dataDir = await makeDir();
+		const policyPath = path.join(dataDir, "telemetry_policy.json");
+		const raw = JSON.stringify({
+			schema_version: 2,
+			events_enabled: true,
+			consent_generation: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca",
+			consent_production_enabled: false,
+			updated_at: "2026-08-28T10:15:30.000Z",
+		});
+		await writeFile(policyPath, raw, { mode: 0o600 });
+		const snapshot = await new TelemetryPolicyAuthority({ dataDir, platform: "linux" }).load();
+		expect(snapshot).toMatchObject({ eventsEnabled: false, acknowledged: true });
+		expect(readTelemetryOptInSync(dataDir)).toBe(false);
+		expect(await readFile(policyPath, "utf8")).toBe(raw);
+	});
+
+	it("readTelemetryOptInSync is true only for an explicit v3 opt-in", async () => {
+		const dataDir = await makeDir();
+		expect(readTelemetryOptInSync(dataDir)).toBe(false);
+		const authority = new TelemetryPolicyAuthority({ dataDir, platform: "linux" });
+		await authority.load();
+		expect(readTelemetryOptInSync(dataDir)).toBe(false);
+		await authority.setEventsEnabled(true);
+		expect(readTelemetryOptInSync(dataDir)).toBe(true);
+		await authority.setEventsEnabled(false);
+		expect(readTelemetryOptInSync(dataDir)).toBe(false);
+	});
+
 	it("does not resume a version 1 opt-in once the release gate opens, and leaves the file alone", async () => {
 		const dataDir = await makeDir();
 		const policyPath = path.join(dataDir, "telemetry_policy.json");
@@ -61,7 +90,7 @@ describe("TelemetryPolicyAuthority", () => {
 		await writeFile(policyPath, raw, { mode: 0o600 });
 
 		const closed = await new TelemetryPolicyAuthority({ dataDir, packagedDefault: true, platform: "linux", productionEnabled: false }).load();
-		expect(closed).toMatchObject({ eventsEnabled: true, acknowledged: true });
+		expect(closed).toMatchObject({ eventsEnabled: false, acknowledged: true });
 
 		const opened = await new TelemetryPolicyAuthority({ dataDir, packagedDefault: true, platform: "linux", productionEnabled: true }).load();
 		expect(opened).toMatchObject({ eventsEnabled: false, acknowledged: true, consentGeneration: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca" });

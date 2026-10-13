@@ -10,6 +10,9 @@ const posthogStub = {
 	capture: vi.fn(() => ({})),
 	captureException: vi.fn(),
 	addExceptionStep: vi.fn(),
+	opt_in_capturing: vi.fn(),
+	opt_out_capturing: vi.fn(),
+	reset: vi.fn(),
 };
 
 function mockPosthog() {
@@ -23,6 +26,8 @@ describe("initTelemetry recovery", () => {
 	beforeEach(() => {
 		vi.resetModules();
 		vi.clearAllMocks();
+		// The fork bakes in no key, so init tests supply one like a self-hoster would.
+		vi.stubEnv("VITE_AO_POSTHOG_KEY", "phc_test_key");
 	});
 
 	it("retries init after a transient thrown failure instead of caching it", async () => {
@@ -68,7 +73,7 @@ describe("initTelemetry recovery", () => {
 		expect(getBootstrap).toHaveBeenCalledTimes(1);
 	});
 
-	it("initializes PostHog when failure reporting is disabled", async () => {
+	it("initializes PostHog once main supplies a bootstrap (explicit opt-in)", async () => {
 		mockPosthog();
 		vi.doMock("./bridge", () => ({
 			aoBridge: {
@@ -87,5 +92,42 @@ describe("initTelemetry recovery", () => {
 		expect(posthogStub.init).toHaveBeenCalledOnce();
 		expect(() => clearRendererTelemetryQueues()).not.toThrow();
 		expect(() => applyRendererTelemetryPolicy(false)).not.toThrow();
+	});
+
+	it("never constructs the SDK when main withholds the bootstrap (no opt-in)", async () => {
+		mockPosthog();
+		vi.doMock("./bridge", () => ({
+			aoBridge: { telemetry: { getBootstrap: vi.fn(async () => null) }, updateSettings: { get: vi.fn(async () => ({})) } },
+		}));
+		const { captureRendererEvent, initTelemetry } = await import("./telemetry");
+		expect(await initTelemetry()).toBe(false);
+		await captureRendererEvent("ao.renderer.loaded");
+		expect(posthogStub.init).not.toHaveBeenCalled();
+		expect(posthogStub.capture).not.toHaveBeenCalled();
+	});
+
+	it("makes no SDK call at all when no PostHog key is configured, even if opted in", async () => {
+		vi.stubEnv("VITE_AO_POSTHOG_KEY", "");
+		const getBootstrap = vi.fn();
+		mockPosthog();
+		vi.doMock("./bridge", () => ({ aoBridge: { telemetry: { getBootstrap }, updateSettings: { get: vi.fn(async () => ({})) } } }));
+		const { initTelemetry } = await import("./telemetry");
+		expect(await initTelemetry()).toBe(false);
+		expect(getBootstrap).not.toHaveBeenCalled();
+		expect(posthogStub.init).not.toHaveBeenCalled();
+	});
+
+	it("opts the SDK out when the user turns telemetry off after having it on", async () => {
+		mockPosthog();
+		vi.doMock("./bridge", () => ({
+			aoBridge: {
+				telemetry: { getBootstrap: vi.fn(async () => ({ appVersion: "1.2.3", platform: "darwin", distinctId: "ins_test", disabledEvents: [], eventsEnabled: true, consentGeneration: "g" })) },
+				updateSettings: { get: vi.fn(async () => ({})) },
+			},
+		}));
+		const { applyRendererTelemetryPolicy, initTelemetry } = await import("./telemetry");
+		expect(await initTelemetry()).toBe(true);
+		applyRendererTelemetryPolicy(false);
+		expect(posthogStub.opt_out_capturing).toHaveBeenCalledOnce();
 	});
 });

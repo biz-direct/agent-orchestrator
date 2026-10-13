@@ -924,6 +924,8 @@ export async function initTelemetry(): Promise<boolean> {
 		const channel = releaseChannelFrom(await readUpdateSettingsForTelemetry());
 		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform, channel);
 		posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
+		initialized = true;
+		posthog.opt_in_capturing();
 		posthog.register({
 			...telemetryContext,
 			surface: "renderer",
@@ -978,15 +980,30 @@ export async function initTelemetry(): Promise<boolean> {
 }
 
 /**
- * Acknowledges the renderer part of failure-reporting cleanup. Renderer fault
- * intake forwards directly through preload and owns no durable or retry queue;
- * PostHog product-analytics queues are deliberately outside this policy.
+ * Acknowledges the renderer part of telemetry cleanup. Opt-out stops the
+ * PostHog client (see applyRendererTelemetryPolicy), and the AO-owned daily
+ * queues are removed by the policy store.
  */
 export function clearRendererTelemetryQueues(): void {}
 
-// Failure-reporting enablement is enforced in preload/main. It never opts the
-// independent PostHog client in or out.
-export function applyRendererTelemetryPolicy(_enabled: boolean): void {}
+let initialized = false;
+
+/**
+ * Follows the main-owned opt-in. Off: capture is shut off and any later event
+ * re-checks the (null) bootstrap, so the SDK is never re-created without
+ * consent. On: drop a cached "withheld" init result so the next event inits.
+ */
+export function applyRendererTelemetryPolicy(enabled: boolean): void {
+	if (enabled) {
+		if (!initialized) initPromise = null;
+		return;
+	}
+	if (initialized) {
+		try { posthog.opt_out_capturing(); posthog.reset(); } catch { /* best effort */ }
+		initialized = false;
+	}
+	initPromise = null;
+}
 
 export async function captureRendererEvent(event: string, properties?: Record<string, unknown>): Promise<void> {
 	// Checked before the reservations so a silenced stream does not consume a

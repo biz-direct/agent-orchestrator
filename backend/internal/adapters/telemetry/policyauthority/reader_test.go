@@ -21,17 +21,17 @@ func readRaw(t *testing.T, raw string) (ports.AgentSwitchFailureAuthoritySnapsho
 	return snapshot, err
 }
 
-func TestReaderTreatsVersionOneAsConsentGivenWhileGated(t *testing.T) {
+func TestReaderTreatsVersionOneAsOffBecauseItPredatesExplicitOptIn(t *testing.T) {
 	got, err := readRaw(t, `{"schema_version":1,"events_enabled":true,"consent_generation":"`+generation+`","updated_at":"2026-08-28T10:15:30.000Z"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Present || !got.EventsEnabled || got.ConsentProductionEnabled || got.ConsentGeneration != generation {
+	if !got.Present || got.EventsEnabled || got.ConsentProductionEnabled || got.ConsentGeneration != generation {
 		t.Fatalf("snapshot = %+v", got)
 	}
 }
 
-func TestReaderReadsVersionTwoConsentProductionState(t *testing.T) {
+func TestReaderReadsVersionTwoAsOffRegardlessOfStoredEnablement(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		value := "false"
 		if want {
@@ -41,8 +41,24 @@ func TestReaderReadsVersionTwoConsentProductionState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !got.Present || !got.EventsEnabled || got.ConsentProductionEnabled != want {
+		if !got.Present || got.EventsEnabled || got.ConsentProductionEnabled != want {
 			t.Fatalf("consent_production_enabled=%s: snapshot = %+v", value, got)
+		}
+	}
+}
+
+func TestReaderHonorsExplicitOptInOnlyInVersionThree(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		value := "false"
+		if enabled {
+			value = "true"
+		}
+		got, err := readRaw(t, `{"schema_version":3,"events_enabled":`+value+`,"consent_generation":"`+generation+`","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.Present || got.EventsEnabled != enabled {
+			t.Fatalf("events_enabled=%s: snapshot = %+v", value, got)
 		}
 	}
 }
@@ -53,7 +69,7 @@ func TestReaderRejectsRecordsWhoseShapeDoesNotMatchTheirVersion(t *testing.T) {
 		"version 1 with gate state":    `{"schema_version":1,"events_enabled":true,"consent_generation":"` + generation + `","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}`,
 		"version 2 null gate state":    `{"schema_version":2,"events_enabled":true,"consent_generation":"` + generation + `","consent_production_enabled":null,"updated_at":"2026-08-28T10:15:30.000Z"}`,
 		"version 2 string gate state":  `{"schema_version":2,"events_enabled":true,"consent_generation":"` + generation + `","consent_production_enabled":"yes","updated_at":"2026-08-28T10:15:30.000Z"}`,
-		"unknown version":              `{"schema_version":3,"events_enabled":true,"consent_generation":"` + generation + `","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}`,
+		"unknown version":              `{"schema_version":4,"events_enabled":true,"consent_generation":"` + generation + `","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}`,
 		"unknown extra key":            `{"schema_version":2,"events_enabled":true,"consent_generation":"` + generation + `","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z","extra":1}`,
 	} {
 		t.Run(name, func(t *testing.T) {

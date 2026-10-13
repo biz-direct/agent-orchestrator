@@ -346,7 +346,7 @@ describe("GlobalSettingsForm", () => {
 		setTelemetryEvents.mockResolvedValue({ eventsEnabled: false, consentGeneration: "generation-off-2", updatedAt: "2026-08-28T10:15:31.000Z", acknowledged: false, consentRenewalRequired: false, state: "cleanup_pending", environmentVeto: false, durabilitySupported: true, reason: "daemon_cleanup_pending" });
 		useTelemetryPolicyStore.setState({ view: { eventsEnabled: true, consentGeneration: "generation-on", updatedAt: "2026-08-28T10:15:30.000Z", acknowledged: true, consentRenewalRequired: false, state: "applied", environmentVeto: false, durabilitySupported: true }, loaded: true });
 		const user = userEvent.setup(); renderForm();
-		await user.click(await screen.findByRole("switch", { name: "Share error events" }));
+		await user.click(await screen.findByRole("switch", { name: "Share usage and error data" }));
 		expect(await screen.findByText("Telemetry is off locally. Daemon cleanup is still pending.")).toBeInTheDocument();
 	});
 
@@ -364,11 +364,12 @@ describe("GlobalSettingsForm", () => {
 		expect(screen.queryByText("Telemetry cleanup failed. Reporting remains disabled while cleanup retries.")).not.toBeInTheDocument();
 	});
 
-	it("names the release gate when a saved opt-in cannot be honoured", async () => {
-		useTelemetryPolicyStore.setState({ view: { eventsEnabled: true, consentGeneration: "generation-on", updatedAt: "2026-08-28T10:15:30.000Z", acknowledged: true, consentRenewalRequired: false, state: "applied", environmentVeto: false, durabilitySupported: true, reason: "release_blocked" }, loaded: true });
+	it("shows the telemetry switch off, with opt-in copy, when the policy is the off default", async () => {
+		useTelemetryPolicyStore.setState({ view: { eventsEnabled: false, consentGeneration: "generation-off", updatedAt: "2026-08-28T10:15:30.000Z", acknowledged: true, consentRenewalRequired: false, state: "applied", environmentVeto: false, durabilitySupported: true, reason: "release_blocked" }, loaded: true });
 		renderForm();
-		expect(await screen.findByText("Error reporting is disabled by this release's safety gate.")).toBeInTheDocument();
-		expect(screen.queryByText("Telemetry is off locally. Daemon cleanup is still pending.")).not.toBeInTheDocument();
+		expect(await screen.findByRole("switch", { name: "Share usage and error data" })).not.toBeChecked();
+		expect(screen.getByText(/Off by default\. Nothing is sent unless you turn this on/)).toBeInTheDocument();
+		expect(screen.queryByText("Error reporting is disabled by this release's safety gate.")).not.toBeInTheDocument();
 	});
 
 	it("selects Git Bash as the default Windows terminal", async () => {

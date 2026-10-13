@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, readFileSync, lstatSync } from "node:fs";
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import {
 	AGENT_SWITCH_FAILURE_PRODUCTION_ENABLED,
+	TELEMETRY_DEFAULT_ENABLED,
 	parseTelemetryPolicyDiskRecord,
 	telemetryPolicySnapshot,
 	type TelemetryPolicyDiskRecord,
@@ -59,7 +60,8 @@ export class TelemetryPolicyAuthority {
 
 	constructor(private readonly options: {
 		dataDir: string;
-		packagedDefault: boolean;
+		/** @deprecated ignored: the default is always off (TELEMETRY_DEFAULT_ENABLED). Kept so callers need no change. */
+		packagedDefault?: boolean;
 		platform?: NodeJS.Platform;
 		productionEnabled?: boolean;
 		fs?: TelemetryPolicyFileSystem;
@@ -68,7 +70,7 @@ export class TelemetryPolicyAuthority {
 	}) {
 		this.policyPath = path.join(options.dataDir, TELEMETRY_POLICY_FILE);
 		this.durabilitySupported = (options.platform ?? process.platform) !== "win32";
-		this.record = this.newRecord(false);
+		this.record = this.newRecord(TELEMETRY_DEFAULT_ENABLED);
 		this.current = this.snapshotOf(this.record, false);
 	}
 
@@ -85,7 +87,7 @@ export class TelemetryPolicyAuthority {
 			stat = await fs.lstat(this.policyPath);
 		} catch (error) {
 			if (!isNotFound(error)) throw error;
-			const record = this.newRecord(this.options.packagedDefault);
+			const record = this.newRecord(TELEMETRY_DEFAULT_ENABLED);
 			this.record = record;
 			this.current = this.snapshotOf(record, false);
 			this.writable = true;
@@ -130,7 +132,7 @@ export class TelemetryPolicyAuthority {
 
 	private newRecord(eventsEnabled: boolean): TelemetryPolicyDiskRecord {
 		return {
-			schema_version: 2,
+			schema_version: 3,
 			events_enabled: eventsEnabled,
 			consent_generation: (this.options.newGeneration ?? randomUUID)(),
 			consent_production_enabled: this.productionEnabled(),
@@ -168,4 +170,21 @@ export class TelemetryPolicyAuthority {
 
 function isNotFound(error: unknown): boolean {
 	return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "ENOENT";
+}
+
+/**
+ * Synchronous read of the user's explicit opt-in, for spawn-time decisions
+ * (daemon env) that cannot await. Anything unreadable, unsafe, legacy or absent
+ * is off. Mirrors the checks in TelemetryPolicyAuthority.load().
+ */
+export function readTelemetryOptInSync(dataDir: string): boolean {
+	try {
+		const file = path.join(dataDir, TELEMETRY_POLICY_FILE);
+		const stat = lstatSync(file);
+		if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o077) !== 0) return false;
+		const parsed = parseTelemetryPolicyDiskRecord(readFileSync(file, "utf8"));
+		return parsed.ok && parsed.record.events_enabled;
+	} catch {
+		return false;
+	}
 }

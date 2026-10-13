@@ -1,7 +1,16 @@
 export const AGENT_SWITCH_FAILURE_PRODUCTION_ENABLED = false;
 
+/**
+ * Fork policy: every analytics, error-reporting and crash-reporting surface is
+ * OFF until the user explicitly opts in. Schema v3 marks a record written by an
+ * explicit choice (or the off default). v1/v2 records predate that rule: their
+ * `events_enabled` may only reflect the old packaged default, so they are read
+ * as off and the user must opt in again.
+ */
+export const TELEMETRY_DEFAULT_ENABLED = false;
+
 export type TelemetryPolicyDiskRecord = {
-	schema_version: 2;
+	schema_version: 3;
 	events_enabled: boolean;
 	consent_generation: string;
 	consent_production_enabled: boolean;
@@ -60,7 +69,7 @@ export function parseTelemetryPolicyDiskRecord(raw: string): TelemetryPolicyPars
 	}
 	if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false, reason: "invalid_record" };
 	const record = value as Record<string, unknown>;
-	const expectedKeys = record.schema_version === 1 ? RECORD_KEYS_V1 : record.schema_version === 2 ? RECORD_KEYS_V2 : null;
+	const expectedKeys = record.schema_version === 1 ? RECORD_KEYS_V1 : record.schema_version === 2 || record.schema_version === 3 ? RECORD_KEYS_V2 : null;
 	const keys = Object.keys(record).sort();
 	if (!expectedKeys || keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
 		return { ok: false, reason: "invalid_record" };
@@ -68,7 +77,7 @@ export function parseTelemetryPolicyDiskRecord(raw: string): TelemetryPolicyPars
 	if (typeof record.events_enabled !== "boolean") {
 		return { ok: false, reason: "invalid_record" };
 	}
-	if (record.schema_version === 2 && typeof record.consent_production_enabled !== "boolean") {
+	if (record.schema_version !== 1 && typeof record.consent_production_enabled !== "boolean") {
 		return { ok: false, reason: "invalid_record" };
 	}
 	if (typeof record.consent_generation !== "string" || !GENERATION.test(record.consent_generation)) {
@@ -78,10 +87,11 @@ export function parseTelemetryPolicyDiskRecord(raw: string): TelemetryPolicyPars
 		return { ok: false, reason: "invalid_record" };
 	}
 	return { ok: true, record: {
-		schema_version: 2,
-		events_enabled: record.events_enabled,
+		schema_version: 3,
+		// Only a v3 record can carry an explicit opt-in; see TELEMETRY_DEFAULT_ENABLED.
+		events_enabled: record.schema_version === 3 ? record.events_enabled : TELEMETRY_DEFAULT_ENABLED,
 		consent_generation: record.consent_generation,
-		consent_production_enabled: record.schema_version === 2 ? record.consent_production_enabled as boolean : false,
+		consent_production_enabled: record.schema_version !== 1 ? record.consent_production_enabled as boolean : false,
 		updated_at: record.updated_at,
 	} };
 }
