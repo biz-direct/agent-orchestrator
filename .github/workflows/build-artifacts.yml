@@ -149,6 +149,15 @@ jobs:
           apple-api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
           apple-api-issuer: ${{ secrets.APPLE_API_ISSUER }}
           apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      - name: List usable code-signing identities
+        if: steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          # Diagnostic: the identity named by APPLE_SIGNING_IDENTITY must appear
+          # here as valid, otherwise osx-sign cannot sign. The repo secret is
+          # masked in logs, so a match shows as ***.
+          security find-identity -v -p codesigning
+          security find-identity -p codesigning | grep -c "CSSMERR" || true
       - name: Build (signed + notarized when configured, no publish)
         shell: bash
         env:
