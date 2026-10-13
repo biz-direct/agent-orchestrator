@@ -1,4 +1,4 @@
-import posthog from "posthog-js/dist/module.full.no-external";
+import posthog, { PostHog } from "posthog-js/dist/module.full.no-external";
 import { aoBridge } from "./bridge";
 import { isLoopbackHostname } from "./loopback";
 import { ORCHESTRATOR_SPAWN_SOURCES } from "./orchestrator-spawn-sources";
@@ -900,7 +900,7 @@ export function buildPostHogConfig(distinctId: string): PostHogInitOptions {
 			distinctID: distinctId,
 			isIdentifiedID: false,
 		},
-		before_send: (event) => (event ? sanitizePostHogCaptureResult(event) : event),
+		before_send: (event) => (!captureActive || !event ? null : sanitizePostHogCaptureResult(event)),
 		session_recording: {
 			maskCapturedNetworkRequestFn: (request) => {
 				if (request.name) {
@@ -914,17 +914,31 @@ export function buildPostHogConfig(distinctId: string): PostHogInitOptions {
 
 export async function initTelemetry(): Promise<boolean> {
 	if (initPromise) return initPromise;
+	const epoch = consentEpoch;
 	const attempt = (async () => {
 		if (!POSTHOG_KEY) return false;
 		const bootstrap = await aoBridge.telemetry.getBootstrap();
+		if (epoch !== consentEpoch) return false;
 		// Null means the supervisor withheld it: no key, no data dir, or an
 		// unpackaged build that has not opted in. The client is never created.
 		if (!bootstrap) return false;
 		disabledEventMatchers = bootstrap.disabledEvents ?? [];
 		const channel = releaseChannelFrom(await readUpdateSettingsForTelemetry());
+		// Consent may have been revoked while the settings read was in flight.
+		if (epoch !== consentEpoch) return false;
 		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform, channel);
-		posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
-		posthog.register({
+		captureActive = true;
+		if (!sdkCreated) {
+			// A revoked client is never reused: requests it still has in flight
+			// (and their retries) belong to the revoked consent and must stay dead.
+			client = clientsCreated === 0 ? posthog : new PostHog();
+			clientsCreated += 1;
+			client.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
+			killTransport = installTransportGuard(client);
+			sdkCreated = true;
+		}
+		client.opt_in_capturing();
+		client.register({
 			...telemetryContext,
 			surface: "renderer",
 		});
@@ -937,7 +951,8 @@ export async function initTelemetry(): Promise<boolean> {
 			distinctId: bootstrap.distinctId,
 		});
 		bindErrorHandlers();
-		startDailyActiveHeartbeat({
+		stopHeartbeat?.();
+		stopHeartbeat = startDailyActiveHeartbeat({
 			storage: telemetryStorage(),
 			window,
 			document,
@@ -947,17 +962,19 @@ export async function initTelemetry(): Promise<boolean> {
 			// reached PostHog in packaged builds, so renderer app-active
 			// dropped to zero while batched events kept landing.
 			capture: async () =>
-				isDeniedEvent("ao.app.active")
+				!captureActive
+					? false
+				: isDeniedEvent("ao.app.active")
 					? true
 					: Boolean(
-					posthog.capture(
+					client.capture(
 						postHogEventName("ao.app.active"),
 						withTelemetryContext(await sanitizeRendererProperties("ao.app.active", { channel: "renderer" })),
 					),
 				),
 		});
 		if (!isDeniedEvent("ao.renderer.loaded")) {
-			posthog.capture(
+			client.capture(
 				postHogEventName("ao.renderer.loaded"),
 				withTelemetryContext(await sanitizeRendererProperties("ao.renderer.loaded")),
 			);
@@ -977,16 +994,89 @@ export async function initTelemetry(): Promise<boolean> {
 	return attempt;
 }
 
-/**
- * Acknowledges the renderer part of failure-reporting cleanup. Renderer fault
- * intake forwards directly through preload and owns no durable or retry queue;
- * PostHog product-analytics queues are deliberately outside this policy.
- */
-export function clearRendererTelemetryQueues(): void {}
 
-// Failure-reporting enablement is enforced in preload/main. It never opts the
-// independent PostHog client in or out.
-export function applyRendererTelemetryPolicy(_enabled: boolean): void {}
+
+// sdkCreated: posthog.init ran once (it cannot be re-run). captureActive: the
+// user currently consents. consentEpoch invalidates init attempts begun under an
+// earlier consent state. The SDK stays in its opted-out state after revocation
+// (reset() would clear the consent store and let capture resume).
+let sdkCreated = false;
+let clientsCreated = 0;
+let client: typeof posthog = posthog;
+let killTransport: (() => void) | null = null;
+let captureActive = true; // no SDK exists until consented init; revocation sets false
+let consentEpoch = 0;
+let stopHeartbeat: (() => void) | null = null;
+
+type TransportOptions = { callback?: (response: { statusCode: number }) => void };
+
+/**
+ * Wraps the SDK's low-level send so nothing is transmitted without current
+ * consent. Returns a kill switch: once called, this client can never send again
+ * (including retries of requests that began before revocation, which PostHog
+ * re-dispatches through copies of the original options). Re-enabling uses a
+ * fresh client instead of reviving this one.
+ */
+export function installTransportGuard(target: unknown): () => void {
+	let dead = false;
+	const instance = target as { _send_request?: (options: TransportOptions) => void };
+	if (instance && typeof instance._send_request === "function") {
+		const original = instance._send_request.bind(instance);
+		instance._send_request = (options: TransportOptions) => {
+			if (dead || !captureActive) {
+				// 403: a terminal (non-retryable) outcome, so the SDK drops rather than re-queues.
+				try { options.callback?.({ statusCode: 403 }); } catch { /* best effort */ }
+				return;
+			}
+			original(options);
+		};
+	}
+	return () => { dead = true; };
+}
+
+function discardQueuedPostHogEvents(): void {
+	// Best effort against posthog-js internals: drop anything batched or awaiting retry.
+	const internals = client as unknown as Record<string, { clear?: () => void; queue?: unknown[]; _queue?: unknown[]; unload?: () => void } | undefined>;
+	for (const name of ["_requestQueue", "_retryQueue", "requestQueue", "retryQueue"]) {
+		const queue = internals[name];
+		try {
+			if (!queue) continue;
+			if (Array.isArray(queue.queue)) queue.queue.length = 0;
+			if (Array.isArray(queue._queue)) queue._queue.length = 0;
+			queue.clear?.();
+		} catch { /* best effort */ }
+	}
+}
+
+/**
+ * Follows the main-owned opt-in. Off: invalidate in-flight inits, stop the
+ * heartbeat, opt the SDK out and discard queued events. On: drop a cached
+ * "withheld" init result so the next event re-inits (re-enabling does not
+ * resurrect discarded events).
+ */
+export function applyRendererTelemetryPolicy(enabled: boolean): void {
+	if (enabled) {
+		initPromise = null;
+		return;
+	}
+	consentEpoch += 1;
+	captureActive = false;
+	stopHeartbeat?.();
+	stopHeartbeat = null;
+	killTransport?.();
+	killTransport = null;
+	if (sdkCreated) {
+		try { client.opt_out_capturing(); } catch { /* best effort */ }
+		discardQueuedPostHogEvents();
+		sdkCreated = false;
+	}
+	initPromise = null;
+}
+
+/** Main-requested purge: discard queued/retry PostHog events before cleanup is acknowledged. */
+export function clearRendererTelemetryQueues(): void {
+	if (sdkCreated) discardQueuedPostHogEvents();
+}
 
 export async function captureRendererEvent(event: string, properties?: Record<string, unknown>): Promise<void> {
 	// Checked before the reservations so a silenced stream does not consume a
@@ -1002,7 +1092,7 @@ export async function captureRendererEvent(event: string, properties?: Record<st
 	}
 	if (!(await initTelemetry())) return;
 	const safeProperties = withTelemetryContext(sanitizedProperties);
-	posthog.capture(postHogEventName(event), safeProperties);
+	client.capture(postHogEventName(event), safeProperties);
 }
 
 export async function captureRendererException(error: unknown, properties?: Record<string, unknown>): Promise<void> {
@@ -1012,7 +1102,7 @@ export async function captureRendererException(error: unknown, properties?: Reco
 	if (!reserveCapture(`exception:${exceptionName(error)}`)) return;
 	if (!(await initTelemetry())) return;
 	const safeProperties = withTelemetryContext(await sanitizeRendererExceptionProperties(error, properties));
-	posthog.captureException(normalizeException(error), safeProperties);
+	client.captureException(normalizeException(error), safeProperties);
 	// Mirror into Sentry (no-op unless a DSN is configured). Source drives the
 	// category so a boundary crash classifies as render_crash.
 	const source = typeof properties?.source === "string" ? properties.source : undefined;
@@ -1026,7 +1116,7 @@ export async function captureRendererException(error: unknown, properties?: Reco
 export async function addRendererExceptionStep(message: string, properties?: Record<string, unknown>): Promise<void> {
 	if (!(await initTelemetry())) return;
 	const safeProperties = withTelemetryContext(await sanitizeRendererContextProperties(properties));
-	posthog.addExceptionStep(message, safeProperties);
+	client.addExceptionStep(message, safeProperties);
 }
 
 export { routeSurface };

@@ -1274,8 +1274,18 @@ func usagePipelineWatchRoots(roots usagesvc.SourceRoots) []string {
 
 // newLogger returns the daemon's slog logger. It writes to stderr so supervisors
 // can capture it separately from any structured stdout protocol added later.
+// The level defaults to info; AO_LOG_LEVEL=debug|info|warn|error opts into more
+// (or less) local detail. Logs never leave the machine.
 func newLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevelFromEnv(os.Getenv("AO_LOG_LEVEL"))}))
+}
+
+func logLevelFromEnv(raw string) slog.Level {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(strings.TrimSpace(raw))); err != nil || strings.TrimSpace(raw) == "" {
+		return slog.LevelInfo
+	}
+	return level
 }
 
 func stabilizeWorkingDirectory(dataDir string) error {

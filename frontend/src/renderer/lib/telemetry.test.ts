@@ -805,3 +805,24 @@ describe("route view reservation", () => {
 		expect(reserveRouteViewCapture(storage, "session_detail", new Date("2026-07-13T00:00:00.000Z"))).toBe(true);
 	});
 });
+
+describe("transport guard", () => {
+	it("kills a client for good: sends and late retries from it never go out", async () => {
+		const { installTransportGuard } = await import("./telemetry");
+		const client = new PostHog();
+		const sent: unknown[] = [];
+		(client as unknown as { _send_request: (o: unknown) => void })._send_request = (o) => { sent.push(o); };
+		const kill = installTransportGuard(client);
+		const send = (client as unknown as { _send_request: (o: Record<string, unknown>) => void })._send_request;
+
+		send({ url: "https://x.test/e" });
+		expect(sent).toHaveLength(1);
+
+		kill();
+		// A retry arrives as a fresh copy of the options, with no marker to inspect.
+		const statuses: number[] = [];
+		send({ url: "https://x.test/e", callback: (r: { statusCode: number }) => statuses.push(r.statusCode) });
+		expect(sent).toHaveLength(1);
+		expect(statuses).toEqual([403]);
+	});
+});

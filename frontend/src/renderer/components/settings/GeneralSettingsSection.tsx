@@ -280,7 +280,6 @@ function TelemetryEventsRow() {
 		: view.state === "cleanup_failed" ? "failed"
 		: view.state === "cleanup_pending" ? "pending"
 		: view.reason === "environment_veto" ? "veto"
-		: view.reason === "release_blocked" ? "releaseBlocked"
 		: null;
 	return <div className="flex w-full flex-col">
 		<SettingsRow label={t("settings.telemetryEvents.label")}>

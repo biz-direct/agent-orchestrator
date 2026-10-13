@@ -146,3 +146,12 @@ func TestTelemetryWiringAggregatesUsageErrorsAndPreservesCountOnTheWire(t *testi
 		t.Fatal("PostHog sink did not send the aggregated rollup")
 	}
 }
+
+// A default (fresh install) config must build no sink that can reach the network.
+func TestNewTelemetrySink_DefaultConfigIsNoop(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	sink := newTelemetrySink(cfg, nil, slog.New(slog.DiscardHandler))
+	if _, ok := sink.(telemetryadapter.NoopSink); !ok {
+		t.Fatalf("default config sink = %T, want NoopSink", sink)
+	}
+}

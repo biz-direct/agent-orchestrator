@@ -160,10 +160,37 @@ run: |
     expect(contents).toContain("workflow_dispatch:");
     expect(contents).toMatch(/permissions:\s*\n\s*contents:\s*read/);
     expect(contents).not.toContain("contents: write");
-    expect(contents).not.toContain("${{ secrets.");
     expect(contents).not.toMatch(
       /(?:gh release|electron-forge publish|npm run publish)/,
     );
+  });
+
+  it("signs the mac build only when the full Apple secret set is present", async () => {
+    const contents = await readFile(artifactBuilder, "utf8");
+    const names = [
+      "CSC_LINK",
+      "CSC_KEY_PASSWORD",
+      "APPLE_SIGNING_IDENTITY",
+      "APPLE_API_KEY_BASE64",
+      "APPLE_API_KEY_ID",
+      "APPLE_API_ISSUER",
+    ];
+    for (const name of names) {
+      // Optional workflow_call secret, forwarded by the release workflow.
+      expect(contents).toMatch(new RegExp(`${name}:\\s*\\n\\s*required: false`));
+      expect(contents).toContain(`secrets.${name}`);
+    }
+    // Reuses the existing composite action, only when signing is enabled.
+    expect(contents).toContain("uses: ./.github/actions/macos-signing-setup");
+    expect(contents).toContain("if: steps.signing.outputs.enabled == 'true'");
+    // Absent secrets warn; partial secrets fail.
+    expect(contents).toContain("::warning::macOS signing secrets are not configured");
+    expect(contents).toContain("::error::macOS signing is partially configured");
+    // Verification gates.
+    expect(contents).toContain("codesign --verify --deep --strict");
+    expect(contents).toContain("spctl --assess --type execute");
+    expect(contents).toContain("xcrun stapler validate");
+    expect(contents).not.toContain("continue-on-error");
   });
 
   it("requires the WorkOS client ID for unsigned artifacts", async () => {
@@ -208,8 +235,10 @@ run: |
     expect(contents).toContain("branches: [main]");
     expect(contents).toContain("paths: [FORK_VERSION]");
     expect(contents).not.toMatch(/schedule:|pull_request/);
-    expect(contents).not.toMatch(/secrets\.(?!GITHUB_TOKEN)/);
-    expect(contents).not.toMatch(/git (?:tag|push)\b|APPLE_/);
+    // Apple secrets are forwarded to the reusable build and nowhere else.
+    expect(contents).toContain("APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}");
+    expect(contents).not.toMatch(/secrets\.(?!GITHUB_TOKEN|CSC_|APPLE_)/);
+    expect(contents).not.toMatch(/git (?:tag|push)\b/);
     // Only the publish job may write.
     expect(contents.match(/contents:\s*write/g)).toHaveLength(1);
   });

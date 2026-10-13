@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TelemetryPolicySnapshot } from "./telemetry-policy";
+import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./posthog-config";
+import { DEFAULT_SENTRY_DSN } from "./sentry-config";
 
 export type TelemetryBootstrap = {
 	distinctId: string;
@@ -86,13 +88,14 @@ export async function buildTelemetryBootstrap(
 	// bootstrap, so the renderer never constructs a PostHog client at all. That
 	// is stronger than gating each capture, because it also removes the SDK's
 	// own background requests.
+	//
+	// Fork policy: nothing initializes without an explicit, durably
+	// acknowledged opt-in. The install id file is not even created until then.
 	if (!rendererTelemetryEnabled(env, isPackaged)) return null;
+	if (!policy || !policy.eventsEnabled || !policy.acknowledged) return null;
 	const dataDir = defaultDataDir(platform, env, homeDir);
 	if (!dataDir) return null;
-	if (!policy) return null;
-	// This policy controls failure reporting only. Existing anonymous PostHog
-	// product analytics retain their own packaged/env gate above.
-	const eventsEnabled = policy.eventsEnabled && policy.acknowledged;
+	const eventsEnabled = true;
 	return {
 		distinctId: await loadOrCreateTelemetryInstallId(dataDir),
 		appVersion,
@@ -100,5 +103,42 @@ export async function buildTelemetryBootstrap(
 		disabledEvents: parseDisabledEvents(env.AO_TELEMETRY_DISABLED_EVENTS),
 		eventsEnabled,
 		consentGeneration: policy.consentGeneration,
+	};
+}
+
+/**
+ * Environment stamped on the daemon at spawn. Single policy point for every
+ * daemon-side exporter (PostHog events, Sentry): without an explicit user
+ * opt-in everything is forced off, even if the parent environment carries
+ * keys. Once opted in, explicit env still wins; with no key/DSN configured
+ * the exporters stay no-ops. Takes effect for a daemon spawned after the
+ * opt-in (next launch).
+ */
+export function daemonTelemetryEnv(
+	optedIn: boolean,
+	env: Record<string, string | undefined>,
+	isDev: boolean,
+	appVersion: string,
+): Record<string, string> {
+	if (!optedIn) {
+		return {
+			AO_TELEMETRY_EVENTS: "off",
+			AO_TELEMETRY_METRICS: "off",
+			AO_TELEMETRY_REMOTE: "off",
+			AO_TELEMETRY_POSTHOG_KEY: "",
+			AO_SENTRY_DSN: "",
+			AO_TELEMETRY_APP_VERSION: appVersion,
+		};
+	}
+	const posthogKey = env.AO_TELEMETRY_POSTHOG_KEY ?? DEFAULT_POSTHOG_PROJECT_KEY;
+	const remote = env.AO_TELEMETRY_REMOTE ?? (isDev || !posthogKey ? "off" : "posthog");
+	return {
+		AO_TELEMETRY_EVENTS: env.AO_TELEMETRY_EVENTS ?? "on",
+		AO_TELEMETRY_REMOTE: remote,
+		AO_TELEMETRY_POSTHOG_KEY: posthogKey,
+		AO_TELEMETRY_POSTHOG_HOST: env.AO_TELEMETRY_POSTHOG_HOST ?? DEFAULT_POSTHOG_HOST,
+		AO_SENTRY_DSN: env.AO_SENTRY_DSN ?? (isDev ? "" : DEFAULT_SENTRY_DSN),
+		AO_TELEMETRY_APP_VERSION: env.AO_TELEMETRY_APP_VERSION ?? appVersion,
+		...(env.AO_TELEMETRY_DISABLED_EVENTS ? { AO_TELEMETRY_DISABLED_EVENTS: env.AO_TELEMETRY_DISABLED_EVENTS } : {}),
 	};
 }
