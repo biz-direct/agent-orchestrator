@@ -84,8 +84,7 @@ function GlobalRulesEditor({
 
 	return (
 		<div
-			role="group"
-			aria-label={label}
+			data-testid={`global-rules-${role}`}
 			className="flex w-full flex-col gap-2 rounded-md bg-[var(--color-bg-settings-row)] p-3"
 			onKeyDown={(event) => {
 				if (!isSaveShortcut(event)) return;

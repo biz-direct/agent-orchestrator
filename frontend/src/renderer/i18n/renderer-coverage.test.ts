@@ -25,7 +25,7 @@ const approvedLiterals: Record<string, readonly string[]> = {
 		"https://github.com/owner/repo", "GitHub PAT",
 	],
 	"components/DaemonStartupLoader.tsx": ["Agent Orchestrator"],
-	"components/ProjectPromptsSettings.tsx": ["docs/orchestrator-rules.md"],
+	"components/ProjectPromptsSettings.tsx": ["docs/orchestrator-rules.md", "docs/worker-rules.md"],
 	// Technical branch/prefix examples moved with the common settings fields.
 	"components/ProjectSettingsEditor.tsx": ["auto", "ao"],
 	"components/RemoteDirectoryPicker.tsx": ["/home/you/code"],

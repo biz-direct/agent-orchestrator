@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentReadiness } from "../test/agent-readiness-fixtures";
@@ -2181,6 +2181,116 @@ describe("ProjectSettingsForm", () => {
 			orchestrator: { agent: "claude-code" },
 		});
 		expect(postMock).not.toHaveBeenCalled();
+	});
+
+	describe("worker prompt section", () => {
+		const project = {
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, agentRules: "keep small", agentRulesFile: "docs/worker.md" },
+		};
+		const withPromptApis = () => {
+			mockProject(project);
+			const base = getMock.getMockImplementation()!;
+			getMock.mockImplementation(async (path: string, init?: { params?: { query?: { path?: string; role?: string } } }) => {
+				if (path === "/api/v1/projects/{id}/agent-rules-file") {
+					return init?.params?.query?.path === "docs/worker.md" || init?.params?.query?.path === "docs/new.md"
+						? { data: { path: init.params.query.path, content: "Worker file rules." }, error: undefined }
+						: { data: undefined, error: { message: 'agentRulesFile "x": not_found' } };
+				}
+				if (path === "/api/v1/projects/{id}/effective-prompt") {
+					const role = init?.params?.query?.role;
+					return {
+						data: {
+							role,
+							mode: "tui",
+							text: "BUILTIN\n\nGLOBAL\n\nPROJECT",
+							sections: [
+								{ layer: "builtin", title: "AO Worker Role", text: "## AO Worker Role" },
+								{ layer: "global", title: "Global Worker Rules", text: "## Global Worker Rules\nGlobal." },
+								{ layer: "project", title: "Project Rules", text: "## Project Rules\nkeep small" },
+								{ layer: "file", title: "Project Rules", text: "Worker file rules." },
+							],
+						},
+						error: undefined,
+					};
+				}
+				if (path === "/api/v1/prompts/sessions") {
+					return { data: { sessions: init?.params?.query?.role === "worker" ? [{ sessionId: "proj-1-3", projectId: "proj-1", role: "worker", freshness: "stale" }] : [] }, error: undefined };
+				}
+				return base(path);
+			});
+		};
+
+		it("shows both sections on one page and keeps the worker fields saved with the config", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			expect(await screen.findByRole("heading", { name: "Orchestrator" })).toBeInTheDocument();
+			expect(screen.getByRole("heading", { name: "Worker" })).toBeInTheDocument();
+			const rules = (await screen.findByLabelText("Project worker prompt")) as HTMLTextAreaElement;
+			expect(rules.value).toBe("keep small");
+			expect(((await screen.findByLabelText("Worker rules file")) as HTMLInputElement).value).toBe("docs/worker.md");
+			expect(await screen.findByTestId("worker-rules-file-preview")).toHaveTextContent("Worker file rules.");
+
+			await userEvent.type(rules, " and tidy");
+			await userEvent.click(screen.getByRole("switch", { name: "Skip global worker prompt" }));
+			expect(putMock).not.toHaveBeenCalled();
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			await waitFor(() => expect(putMock).toHaveBeenCalled());
+			expect(putMock.mock.calls.at(-1)?.[1].body.config).toMatchObject({
+				agentRules: "keep small and tidy",
+				agentRulesFile: "docs/worker.md",
+				skipGlobalWorkerRules: true,
+				orchestrator: { agent: "claude-code" },
+			});
+			expect(postMock).not.toHaveBeenCalled();
+		});
+
+		it("discards worker edits", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			const rules = (await screen.findByLabelText("Project worker prompt")) as HTMLTextAreaElement;
+			await userEvent.type(rules, " extra");
+			await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+			expect(rules.value).toBe("keep small");
+			expect(putMock).not.toHaveBeenCalled();
+		});
+
+		it("validates a changed worker rules file on Save and blocks a bad path", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			const input = await screen.findByLabelText("Worker rules file");
+			await userEvent.clear(input);
+			await userEvent.type(input, "docs/missing.md");
+			expect(await screen.findAllByText(/not_found/)).not.toHaveLength(0);
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			expect(putMock).not.toHaveBeenCalled();
+			// The error sits under the worker field, not the orchestrator one.
+			expect(input).toHaveAttribute("aria-invalid", "true");
+			expect(screen.getByLabelText("Rules file")).toHaveAttribute("aria-invalid", "false");
+		});
+
+		it("shows the effective prompt layer by layer and the sessions still on old rules after saving", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			await screen.findByLabelText("Project worker prompt");
+			expect(screen.queryByTestId("effective-worker")).not.toBeInTheDocument();
+			await userEvent.click(screen.getByRole("button", { name: "Effective worker prompt" }));
+			const view = await screen.findByTestId("effective-worker");
+			expect(within(view).getAllByTestId("prompt-layer").map((el) => el.textContent)).toEqual(["Built-in", "Global", "Project", "Rules file"]);
+
+			await userEvent.type(screen.getByLabelText("Project worker prompt"), "!");
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			const notice = await screen.findByTestId("prompt-apply-notice");
+			expect(await within(notice).findByText("proj-1-3")).toBeInTheDocument();
+			expect(within(notice).getByTestId("apply-worker")).toBeInTheDocument();
+			expect(within(notice).queryByTestId("apply-orchestrator")).not.toBeInTheDocument();
+		});
 	});
 
 	it("does not retry a failed orchestrator replacement when only prompt fields change", async () => {
