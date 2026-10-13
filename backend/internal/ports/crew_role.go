@@ -50,7 +50,4 @@ type CrewRoleHost interface {
 	// StopCrewRole ends only the role session's conversation. It never touches
 	// the owner's worktree, branch, or PR.
 	StopCrewRole(ctx context.Context, owner domain.SessionID, role string) error
-	// ReconnectCrewRoles adopts the still-running provider hosts of every live
-	// role session after a daemon restart. It never starts a new conversation.
-	ReconnectCrewRoles(ctx context.Context)
 }
