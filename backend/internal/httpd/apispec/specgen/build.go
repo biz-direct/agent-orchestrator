@@ -905,6 +905,7 @@ type agentRulesFileQuery struct {
 
 type effectivePromptQuery struct {
 	Role string `query:"role" enum:"orchestrator,worker" description:"Which role's prompt to assemble."`
+	Mode string `query:"mode,omitempty" enum:"chat,tui" description:"Interface to assemble for. Omit to use the default a new session would get."`
 }
 
 type promptSessionsQuery struct {

@@ -2,6 +2,8 @@ package sessionmanager
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -86,21 +88,51 @@ func promptKindForRole(role string) (domain.SessionKind, error) {
 	}
 }
 
+// ErrUnknownPromptMode is returned for an interface mode other than chat or tui.
+var ErrUnknownPromptMode = errors.New("unknown prompt mode")
+
+// effectivePromptMode resolves the interface a new session of kind would get
+// when the caller names none: orchestrators default to Chat, workers follow the
+// daemon preference, and either falls back to TUI when Chat is unavailable.
+func (m *Manager) effectivePromptMode(ctx context.Context, kind domain.SessionKind) domain.SessionMode {
+	mode := m.resolveSessionMode(ctx, "")
+	if kind == domain.KindOrchestrator {
+		mode = domain.SessionModeChat
+	}
+	if mode == domain.SessionModeChat && m.chat == nil {
+		return domain.SessionModeTUI
+	}
+	return mode
+}
+
 // EffectivePrompt assembles the prompt a new session of role would get in the
 // project right now: built-in, global rules, project rules, rules file, and the
-// per-session runtime blocks. A broken rules file fails the call, exactly as it
-// would fail a spawn. Session-specific values use the stand-in id.
-func (m *Manager) EffectivePrompt(ctx context.Context, projectID domain.ProjectID, role string) ([]PromptSection, error) {
+// per-session runtime blocks. mode is "chat" or "tui"; empty resolves the mode a
+// spawn would use by default (it does not probe whether the chosen agent can run
+// Chat, which can still make a real spawn fall back to TUI). A broken rules file
+// fails the call, exactly as it would fail a spawn. Session-specific values use
+// the stand-in id. The resolved mode is returned.
+func (m *Manager) EffectivePrompt(ctx context.Context, projectID domain.ProjectID, role, mode string) ([]PromptSection, string, error) {
 	kind, err := promptKindForRole(role)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	var resolved domain.SessionMode
+	switch mode {
+	case "":
+		resolved = m.effectivePromptMode(ctx, kind)
+	case string(domain.SessionModeChat), string(domain.SessionModeTUI):
+		resolved = domain.SessionMode(mode)
+	default:
+		return nil, "", ErrUnknownPromptMode
 	}
 	if _, ok, err := m.store.GetProject(ctx, string(projectID)); err != nil {
-		return nil, err
+		return nil, "", err
 	} else if !ok {
-		return nil, ErrUnknownPromptProject
+		return nil, "", ErrUnknownPromptProject
 	}
-	return m.buildSystemPromptSections(ctx, kind, projectID, "<session-id>", "", false)
+	sections, err := m.buildSystemPromptSections(ctx, kind, projectID, "<session-id>", "", resolved == domain.SessionModeChat)
+	return sections, string(resolved), err
 }
 
 // Prompt freshness values reported per running session.
@@ -125,7 +157,7 @@ type PromptSession struct {
 
 // PromptSessions lists the live sessions of role (in projectID, or in every
 // project when it is empty) with whether each still uses an older prompt. It
-// compares the prompt file written at spawn/restore with a fresh assembly.
+// compares the rules digest recorded at the last launch with the saved rules.
 func (m *Manager) PromptSessions(ctx context.Context, projectID domain.ProjectID, role string) ([]PromptSession, error) {
 	kind, err := promptKindForRole(role)
 	if err != nil {
@@ -150,20 +182,54 @@ func (m *Manager) PromptSessions(ctx context.Context, projectID domain.ProjectID
 	return out, nil
 }
 
+// rulesFingerprintFile records, per session, a digest of the standing rules in
+// the prompt it was last launched with.
+const rulesFingerprintFile = "rules.sha256"
+
+// rulesFingerprint digests only the user-controlled layers (global, project,
+// rules file). Built-in and per-session text, and later additions such as an
+// agent-switch continuation, are left out so they can never read as a stale rule.
+func rulesFingerprint(sections []PromptSection) string {
+	h := sha256.New()
+	for _, section := range sections {
+		switch section.Layer {
+		case PromptLayerGlobal, PromptLayerProject, PromptLayerFile:
+			h.Write([]byte(section.Layer))
+			h.Write([]byte{0})
+			h.Write([]byte(section.Text))
+			h.Write([]byte{0})
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// recordAppliedRules notes the rules a session is being launched with. It is
+// best effort: a failed write only makes the session report "unknown".
+func (m *Manager) recordAppliedRules(id domain.SessionID, sections []PromptSection) {
+	dir := m.systemPromptDir(id)
+	if dir == "" || id == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, rulesFingerprintFile), []byte(rulesFingerprint(sections)+"\n"), 0o600)
+}
+
 func (m *Manager) promptFreshness(ctx context.Context, rec domain.SessionRecord) string {
 	dir := m.systemPromptDir(rec.ID)
 	if dir == "" {
 		return PromptFreshnessUnknown
 	}
-	applied, err := os.ReadFile(filepath.Join(dir, "system.md"))
+	applied, err := os.ReadFile(filepath.Join(dir, rulesFingerprintFile))
 	if err != nil {
 		return PromptFreshnessUnknown
 	}
-	current, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.ID, rec.RequestedOutput, domain.NormalizeSessionMode(rec.Mode) == domain.SessionModeChat)
+	sections, err := m.buildSystemPromptSections(ctx, rec.Kind, rec.ProjectID, rec.ID, rec.RequestedOutput, domain.NormalizeSessionMode(rec.Mode) == domain.SessionModeChat)
 	if err != nil {
 		return PromptFreshnessUnknown
 	}
-	if strings.TrimSpace(string(applied)) == strings.TrimSpace(current) {
+	if strings.TrimSpace(string(applied)) == rulesFingerprint(sections) {
 		return PromptFreshnessCurrent
 	}
 	return PromptFreshnessStale

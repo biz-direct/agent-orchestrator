@@ -478,7 +478,8 @@ func (m *Manager) resumeChatController(
 
 	// Recomputed rather than persisted, matching the terminal path: a restored
 	// session keeps its standing instructions across the relaunch.
-	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.ID, rec.RequestedOutput, true)
+	// A reconnect to a live provider applies no new prompt, so it records no rules.
+	systemPrompt, err := m.buildSessionPrompt(ctx, rec.Kind, rec.ProjectID, rec.ID, rec.RequestedOutput, true, !reconnectOnly)
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("%s %s: system prompt: %w", operation, rec.ID, err)
 	}

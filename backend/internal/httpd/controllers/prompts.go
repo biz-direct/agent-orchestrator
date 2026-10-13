@@ -19,7 +19,7 @@ import (
 // implements it, so every view runs the code a spawn runs.
 type PromptService interface {
 	BuiltinPrompts() sessionmanager.BuiltinPrompts
-	EffectivePrompt(ctx context.Context, projectID domain.ProjectID, role string) ([]sessionmanager.PromptSection, error)
+	EffectivePrompt(ctx context.Context, projectID domain.ProjectID, role, mode string) ([]sessionmanager.PromptSection, string, error)
 	PromptSessions(ctx context.Context, projectID domain.ProjectID, role string) ([]sessionmanager.PromptSession, error)
 }
 
@@ -54,7 +54,7 @@ func (c *PromptsController) effective(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sections, err := c.Svc.EffectivePrompt(r.Context(), projectID(r), role)
+	sections, mode, err := c.Svc.EffectivePrompt(r.Context(), projectID(r), role, r.URL.Query().Get("mode"))
 	if err != nil {
 		writePromptError(w, r, err)
 		return
@@ -63,7 +63,7 @@ func (c *PromptsController) effective(w http.ResponseWriter, r *http.Request) {
 	for _, section := range sections {
 		texts = append(texts, section.Text)
 	}
-	envelope.WriteJSON(w, http.StatusOK, EffectivePromptResponse{Role: role, Sections: sections, Text: strings.Join(texts, "\n\n")})
+	envelope.WriteJSON(w, http.StatusOK, EffectivePromptResponse{Role: role, Mode: mode, Sections: sections, Text: strings.Join(texts, "\n\n")})
 }
 
 func (c *PromptsController) sessions(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +94,11 @@ func promptRole(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func writePromptError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, sessionmanager.ErrUnknownPromptMode) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"PROMPT_MODE_INVALID", "mode must be chat or tui", nil)
+		return
+	}
 	if errors.Is(err, sessionmanager.ErrUnknownPromptRole) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
 			"PROMPT_ROLE_INVALID", err.Error(), nil)

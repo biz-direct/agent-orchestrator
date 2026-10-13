@@ -3259,6 +3259,9 @@ type BuiltinPromptsResponse struct {
 // EffectivePromptResponse is the body of GET /api/v1/projects/{id}/effective-prompt.
 type EffectivePromptResponse struct {
 	Role string `json:"role" enum:"orchestrator,worker"`
+	// Mode is the interface the prompt was assembled for: chat sessions get
+	// extra blocks (inline pages, artifact guidance) that terminal sessions do not.
+	Mode string `json:"mode" enum:"chat,tui"`
 	// Sections are the prompt's blocks in order, each labelled with its layer.
 	Sections []sessionmanager.PromptSection `json:"sections"`
 	// Text is the sections joined exactly as a new session receives them.

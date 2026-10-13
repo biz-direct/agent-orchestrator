@@ -21,6 +21,7 @@ type fakePromptService struct {
 	effectiveErr error
 	gotProject   domain.ProjectID
 	gotRole      string
+	gotMode      string
 }
 
 func (f *fakePromptService) BuiltinPrompts() sessionmanager.BuiltinPrompts {
@@ -30,12 +31,15 @@ func (f *fakePromptService) BuiltinPrompts() sessionmanager.BuiltinPrompts {
 	}
 }
 
-func (f *fakePromptService) EffectivePrompt(_ context.Context, id domain.ProjectID, role string) ([]sessionmanager.PromptSection, error) {
-	f.gotProject, f.gotRole = id, role
+func (f *fakePromptService) EffectivePrompt(_ context.Context, id domain.ProjectID, role, mode string) ([]sessionmanager.PromptSection, string, error) {
+	f.gotProject, f.gotRole, f.gotMode = id, role, mode
 	if f.effectiveErr != nil {
-		return nil, f.effectiveErr
+		return nil, "", f.effectiveErr
 	}
-	return []sessionmanager.PromptSection{{Layer: "builtin", Text: "A"}, {Layer: "global", Text: "B"}}, nil
+	if mode == "" {
+		mode = "chat"
+	}
+	return []sessionmanager.PromptSection{{Layer: "builtin", Text: "A"}, {Layer: "global", Text: "B"}}, mode, nil
 }
 
 func (f *fakePromptService) PromptSessions(_ context.Context, id domain.ProjectID, role string) ([]sessionmanager.PromptSession, error) {
@@ -74,8 +78,17 @@ func TestPromptsEffective(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK {
 		t.Fatalf("status=%d err=%v body=%s", w.Code, err, w.Body)
 	}
-	if svc.gotProject != "mer" || svc.gotRole != "worker" || got.Text != "A\n\nB" || len(got.Sections) != 2 {
+	if svc.gotProject != "mer" || svc.gotRole != "worker" || got.Text != "A\n\nB" || len(got.Sections) != 2 || got.Mode != "chat" {
 		t.Fatalf("got %+v (project %q role %q)", got, svc.gotProject, svc.gotRole)
+	}
+}
+
+func TestPromptsEffectivePassesMode(t *testing.T) {
+	svc := &fakePromptService{}
+	w := promptsGet(t, promptsRouter(svc), "/projects/mer/effective-prompt?role=worker&mode=tui")
+	var got EffectivePromptResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK || svc.gotMode != "tui" || got.Mode != "tui" {
+		t.Fatalf("status=%d mode=%q resp=%+v err=%v", w.Code, svc.gotMode, got, err)
 	}
 }
 
@@ -95,6 +108,7 @@ func TestPromptsEffectiveErrors(t *testing.T) {
 		status int
 		code   string
 	}{
+		{"bad mode", sessionmanager.ErrUnknownPromptMode, http.StatusBadRequest, "PROMPT_MODE_INVALID"},
 		{"unknown project", sessionmanager.ErrUnknownPromptProject, http.StatusNotFound, "PROJECT_NOT_FOUND"},
 		{"broken worker rules file", &rulesfile.Error{Field: rulesfile.FieldAgentRulesFile, Path: "x.md", Reason: rulesfile.ReasonNotFound}, http.StatusBadRequest, "AGENT_RULES_FILE_INVALID"},
 		{"broken orchestrator rules file", &rulesfile.Error{Field: rulesfile.FieldOrchestratorRulesFile, Path: "x.md", Reason: rulesfile.ReasonTooLarge}, http.StatusBadRequest, "ORCHESTRATOR_RULES_FILE_INVALID"},

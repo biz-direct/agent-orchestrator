@@ -4278,6 +4278,8 @@ export interface components {
         };
         ControllersEffectivePromptResponse: {
             /** @enum {string} */
+            mode: "chat" | "tui";
+            /** @enum {string} */
             role: "orchestrator" | "worker";
             sections: components["schemas"]["SessionManagerPromptSection"][];
             text: string;
@@ -11341,6 +11343,8 @@ export interface operations {
             query?: {
                 /** @description Which role's prompt to assemble. */
                 role?: "orchestrator" | "worker";
+                /** @description Interface to assemble for. Omit to use the default a new session would get. */
+                mode?: "chat" | "tui";
             };
             header?: never;
             path: {

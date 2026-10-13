@@ -3190,6 +3190,17 @@ paths:
           - orchestrator
           - worker
           type: string
+      - description: Interface to assemble for. Omit to use the default a new session
+          would get.
+        in: query
+        name: mode
+        schema:
+          description: Interface to assemble for. Omit to use the default a new session
+            would get.
+          enum:
+          - chat
+          - tui
+          type: string
       responses:
         "200":
           content:
@@ -12657,6 +12668,11 @@ components:
       type: object
     ControllersEffectivePromptResponse:
       properties:
+        mode:
+          enum:
+          - chat
+          - tui
+          type: string
         role:
           enum:
           - orchestrator
@@ -12670,6 +12686,7 @@ components:
           type: string
       required:
       - role
+      - mode
       - sections
       - text
       type: object

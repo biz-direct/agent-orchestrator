@@ -175,7 +175,7 @@ func TestEffectivePrompt_MatchesSpawn(t *testing.T) {
 	if _, _, _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {
 		t.Fatal(err)
 	}
-	sections, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker)
+	sections, _, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,13 +200,16 @@ func TestEffectivePrompt_Errors(t *testing.T) {
 	cfg := testRoleAgents()
 	cfg.AgentRulesFile = "missing.md"
 	m, _ := workerPromptManager(t, dir, cfg, nil)
-	if _, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker); err == nil {
+	if _, _, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker, ""); err == nil {
 		t.Fatal("a broken rules file must fail the preview like it fails a spawn")
 	}
-	if _, err := m.EffectivePrompt(ctx, "nope", PromptRoleWorker); !errors.Is(err, ErrUnknownPromptProject) {
+	if _, _, err := m.EffectivePrompt(ctx, "nope", PromptRoleWorker, ""); !errors.Is(err, ErrUnknownPromptProject) {
 		t.Fatalf("err = %v, want unknown project", err)
 	}
-	if _, err := m.EffectivePrompt(ctx, "mer", "reviewer"); !errors.Is(err, ErrUnknownPromptRole) {
+	if _, _, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker, "web"); !errors.Is(err, ErrUnknownPromptMode) {
+		t.Fatalf("err = %v, want unknown mode", err)
+	}
+	if _, _, err := m.EffectivePrompt(ctx, "mer", "reviewer", ""); !errors.Is(err, ErrUnknownPromptRole) {
 		t.Fatalf("err = %v, want unknown role", err)
 	}
 }
@@ -240,52 +243,125 @@ func TestBuiltinPrompts_AreTheSpawnBuiltinSections(t *testing.T) {
 	}
 }
 
-func TestPromptSessions_Freshness(t *testing.T) {
+func TestEffectivePrompt_ChatMatchesChatSpawnText(t *testing.T) {
+	m, _ := workerPromptManager(t, t.TempDir(), testRoleAgents(), nil)
+	chat, mode, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker, "chat")
+	if err != nil || mode != "chat" {
+		t.Fatalf("mode=%q err=%v", mode, err)
+	}
+	tui, mode, err := m.EffectivePrompt(ctx, "mer", PromptRoleWorker, "tui")
+	if err != nil || mode != "tui" {
+		t.Fatalf("mode=%q err=%v", mode, err)
+	}
+	join := func(sections []PromptSection) string {
+		texts := make([]string, 0, len(sections))
+		for _, s := range sections {
+			texts = append(texts, s.Text)
+		}
+		return strings.Join(texts, "\n\n")
+	}
+	if !strings.Contains(join(chat), "Showing pages in chat") || strings.Contains(join(tui), "Showing pages in chat") {
+		t.Fatal("chat blocks must appear only in the chat preview")
+	}
+	want, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "<session-id>", "", true)
+	if err != nil || join(chat) != want {
+		t.Fatalf("chat preview differs from the chat build (err %v)", err)
+	}
+	// With no explicit mode: workers follow the daemon default; orchestrators default to Chat, which this build lacks, so TUI.
+	if _, mode, _ := m.EffectivePrompt(ctx, "mer", PromptRoleWorker, ""); mode != "tui" {
+		t.Fatalf("default worker mode = %q, want tui (no chat driver, TUI default)", mode)
+	}
+}
+
+func freshnessManager(t *testing.T) (*Manager, *fakeStore, string) {
+	t.Helper()
 	dataDir := t.TempDir()
 	st := newFakeStore()
-	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{AgentRules: "New rule."}}
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{AgentRules: "Old rule."}}
 	st.sessions["mer-o"] = domain.SessionRecord{ID: "mer-o", ProjectID: "mer", Kind: domain.KindOrchestrator}
-	m := New(Deps{Runtime: &fakeRuntime{}, Store: st, DataDir: dataDir})
-	current, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write := func(id, text string) {
-		dir := filepath.Join(dataDir, "prompts", id)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "system.md"), []byte(text+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("mer-1", current)
-	write("mer-2", "an older prompt")
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker}
-	st.sessions["mer-2"] = domain.SessionRecord{ID: "mer-2", ProjectID: "mer", Kind: domain.KindWorker}
-	st.sessions["mer-3"] = domain.SessionRecord{ID: "mer-3", ProjectID: "mer", Kind: domain.KindWorker}
-	st.sessions["mer-4"] = domain.SessionRecord{ID: "mer-4", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true}
-	st.sessions["x-1"] = domain.SessionRecord{ID: "x-1", ProjectID: "x", Kind: domain.KindWorker}
+	return New(Deps{Runtime: &fakeRuntime{}, Store: st, DataDir: dataDir}), st, dataDir
+}
 
+func freshnessOf(t *testing.T, m *Manager, id string) string {
+	t.Helper()
 	got, err := m.PromptSessions(ctx, "mer", PromptRoleWorker)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh := map[string]string{}
 	for _, s := range got {
-		fresh[s.SessionID] = s.Freshness
-	}
-	want := map[string]string{"mer-1": PromptFreshnessCurrent, "mer-2": PromptFreshnessStale, "mer-3": PromptFreshnessUnknown}
-	if len(fresh) != len(want) {
-		t.Fatalf("sessions = %v, want %v", fresh, want)
-	}
-	for id, f := range want {
-		if fresh[id] != f {
-			t.Fatalf("%s freshness = %q, want %q (all: %v)", id, fresh[id], f, fresh)
+		if s.SessionID == id {
+			return s.Freshness
 		}
 	}
+	t.Fatalf("session %s not listed in %+v", id, got)
+	return ""
+}
+
+func TestPromptSessions_Freshness(t *testing.T) {
+	m, st, dataDir := freshnessManager(t)
+
+	// Never launched through the builder: nothing to compare.
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessUnknown {
+		t.Fatalf("before launch = %q, want unknown", got)
+	}
+	// Spawn / restore build the prompt, which records the rules.
+	if _, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessCurrent {
+		t.Fatalf("after launch = %q, want current", got)
+	}
+	// An unrelated change to built-in text (a new orchestrator) is not a rules change.
+	delete(st.sessions, "mer-o")
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessCurrent {
+		t.Fatalf("after orchestrator change = %q, want current", got)
+	}
+	// Editing the rules makes the running session stale.
+	project := st.projects["mer"]
+	project.Config.AgentRules = "New rule."
+	st.projects["mer"] = project
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessStale {
+		t.Fatalf("after rules edit = %q, want stale", got)
+	}
+	// A restore (including a Chat restore, which builds with chat=true) applies the new rules.
+	if _, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessCurrent {
+		t.Fatalf("after restore = %q, want current", got)
+	}
+	// A reconnect to a live provider applies nothing, so it must not record the new rules.
+	project.Config.AgentRules = "Newer rule."
+	st.projects["mer"] = project
+	if _, err := m.buildSessionPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessStale {
+		t.Fatalf("after reconnect-only = %q, want stale", got)
+	}
+	// Switch continuation text lives outside the rules digest: it cannot read as stale.
+	if _, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "prompts", "mer-1", "system.md"), []byte("prompt plus switch continuation\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessCurrent {
+		t.Fatalf("after switch continuation = %q, want current", got)
+	}
+}
+
+func TestPromptSessions_Filtering(t *testing.T) {
+	m, st, _ := freshnessManager(t)
+	st.sessions["mer-4"] = domain.SessionRecord{ID: "mer-4", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true}
+	st.sessions["x-1"] = domain.SessionRecord{ID: "x-1", ProjectID: "x", Kind: domain.KindWorker}
+	got, err := m.PromptSessions(ctx, "mer", PromptRoleWorker)
+	if err != nil || len(got) != 1 || got[0].SessionID != "mer-1" {
+		t.Fatalf("project listing = %+v, %v; want only mer-1", got, err)
+	}
 	all, err := m.PromptSessions(ctx, "", PromptRoleWorker)
-	if err != nil || len(all) != 4 {
-		t.Fatalf("all-project listing = %d sessions, %v; want 4", len(all), err)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all-project listing = %d sessions, %v; want 2", len(all), err)
 	}
 }

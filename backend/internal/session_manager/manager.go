@@ -5452,9 +5452,20 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, se
 // agent runs as a chat session, the only mode with the html tools and ao render.
 // requestedOutput is the deliverable requested at spawn.
 func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, sessionID domain.SessionID, requestedOutput domain.RequestedOutput, chat bool) (string, error) {
+	return m.buildSessionPrompt(ctx, kind, projectID, sessionID, requestedOutput, chat, true)
+}
+
+// buildSessionPrompt builds the standing instructions a session is about to be
+// launched with. When record is set it also notes which rules went in, so the
+// prompt views can tell whether a running session lags behind the saved rules.
+// A reconnect to a live provider applies nothing new and must pass record=false.
+func (m *Manager) buildSessionPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, sessionID domain.SessionID, requestedOutput domain.RequestedOutput, chat, record bool) (string, error) {
 	sections, err := m.buildSystemPromptSections(ctx, kind, projectID, sessionID, requestedOutput, chat)
 	if err != nil {
 		return "", err
+	}
+	if record {
+		m.recordAppliedRules(sessionID, sections)
 	}
 	texts := make([]string, 0, len(sections))
 	for _, section := range sections {
