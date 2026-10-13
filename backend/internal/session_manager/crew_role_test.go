@@ -24,6 +24,16 @@ func (s crewStore) GetSessionCrewRole(_ context.Context, id domain.SessionID) (s
 	return "", nil
 }
 
+func (s crewStore) ListLiveCrewRoleSessionIDs(context.Context) ([]domain.SessionID, error) {
+	var ids []domain.SessionID
+	for marker, sid := range s.forAttempt {
+		if _, ok := domain.CrewRoleFromMarker(marker); ok && !s.sessions[sid].IsTerminated {
+			ids = append(ids, sid)
+		}
+	}
+	return ids, nil
+}
+
 func newCrewRoleManager(t *testing.T) (*Manager, *attachedStore, *recordingLauncher, *fakeWorkspace, domain.SessionRecord) {
 	t.Helper()
 	m, st, launcher, ws, owner := newPipelineStageManager(t)
@@ -188,5 +198,69 @@ func TestOrdinaryWorkersAndPipelineStagesGetNoCrewPrompt(t *testing.T) {
 		if strings.Contains(prompt, "Crew role") {
 			t.Errorf("%s must not receive a crew section:\n%s", name, prompt)
 		}
+	}
+}
+
+// A kill that already owns the worker refuses an overlapping add, so a role can
+// never start in a worktree that teardown is about to remove.
+func TestStartCrewRoleIsRefusedWhileTheWorkerIsBeingTornDown(t *testing.T) {
+	m, st, launcher, _, owner := newCrewRoleManager(t)
+	if err := m.beginAgentOperation(context.Background(), owner.ID, agentOperationKill); err != nil {
+		t.Fatal(err)
+	}
+	defer m.endAgentOperation(owner.ID, agentOperationKill)
+
+	before := len(st.sessions)
+	_, err := m.StartCrewRole(context.Background(), ports.CrewRoleStart{Owner: owner.ID, RoleID: "builder", Harness: domain.HarnessClaudeCode})
+	if !errors.Is(err, ports.ErrCrewOwnerBusy) {
+		t.Fatalf("an add overlapping teardown must be refused: %v", err)
+	}
+	if len(st.sessions) != before || len(launcher.started) != 0 {
+		t.Fatalf("a refused add must create nothing: %d sessions, %d controllers", len(st.sessions), len(launcher.started))
+	}
+}
+
+// A kill arriving while a role is still starting is refused until the role is
+// registered, so the cascade cannot snapshot the attachments without it.
+func TestKillArrivingDuringRoleCreationCannotMissTheRole(t *testing.T) {
+	m, st, launcher, ws, owner := newCrewRoleManager(t)
+	var killErr error
+	launcher.beforeStart = func(ChatStart) {
+		_, killErr = m.Kill(context.Background(), owner.ID)
+	}
+	role := startRole(t, m, owner, "builder")
+	if killErr == nil {
+		t.Fatal("a kill must not run while a role is being created")
+	}
+	if ws.destroyed != 0 || st.sessions[owner.ID].IsTerminated || st.sessions[role.ID].IsTerminated {
+		t.Fatalf("nothing is torn down by the refused kill: destroyed=%d", ws.destroyed)
+	}
+	launcher.beforeStart = nil
+	if _, err := m.Kill(context.Background(), owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !st.sessions[role.ID].IsTerminated || ws.destroyed != 1 {
+		t.Fatalf("a later kill ends the role before the worktree goes: destroyed=%d", ws.destroyed)
+	}
+}
+
+func TestReconnectCrewRolesAdoptsLiveRoleHostsAfterRestart(t *testing.T) {
+	m, st, launcher, _, owner := newCrewRoleManager(t)
+	live := startRole(t, m, owner, "builder")
+	ended := startRole(t, m, owner, "tester")
+	if err := m.StopCrewRole(context.Background(), owner.ID, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	// A restarted daemon has no controller for the role; its host may still run.
+	launcher.live = false
+	launcher.started = nil
+
+	m.ReconnectCrewRoles(context.Background())
+
+	if len(launcher.started) != 1 || launcher.started[0].SessionID != live.ID || !launcher.started[0].ReconnectOnly {
+		t.Fatalf("only the live role is adopted, and only by reconnecting (never a fresh conversation): %+v", launcher.started)
+	}
+	if st.sessions[ended.ID].IsTerminated != true {
+		t.Fatal("an ended role stays ended")
 	}
 }

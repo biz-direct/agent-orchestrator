@@ -3897,6 +3897,7 @@ func (m *Manager) ReconcileBackground(ctx context.Context) (resultErr error) {
 		return fmt.Errorf("reconcile: list sessions: %w", err)
 	}
 	m.reconcileLivePass(ctx, recs)
+	m.ReconnectCrewRoles(ctx)
 	for _, rec := range recs {
 		if !rec.IsTerminated {
 			continue

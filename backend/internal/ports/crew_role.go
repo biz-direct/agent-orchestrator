@@ -19,6 +19,9 @@ var (
 	ErrCrewRoleExists = errors.New("the task already has a session for this role")
 	// ErrCrewRoleNotFound means the task has no live session for the role.
 	ErrCrewRoleNotFound = errors.New("the task has no session for this role")
+	// ErrCrewOwnerBusy means another lifecycle operation (a kill, switch, or
+	// restore) currently owns the worker, so a role cannot be added safely.
+	ErrCrewOwnerBusy = errors.New("the task is busy with another operation; try again shortly")
 	// ErrCrewOwnerInvalid means the target is not a live worker task that can
 	// host role sessions.
 	ErrCrewOwnerInvalid = errors.New("the task cannot host role sessions")
@@ -47,4 +50,7 @@ type CrewRoleHost interface {
 	// StopCrewRole ends only the role session's conversation. It never touches
 	// the owner's worktree, branch, or PR.
 	StopCrewRole(ctx context.Context, owner domain.SessionID, role string) error
+	// ReconnectCrewRoles adopts the still-running provider hosts of every live
+	// role session after a daemon restart. It never starts a new conversation.
+	ReconnectCrewRoles(ctx context.Context)
 }

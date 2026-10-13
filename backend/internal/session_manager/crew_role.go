@@ -67,6 +67,17 @@ func (m *Manager) StartCrewRole(ctx context.Context, start ports.CrewRoleStart) 
 	if err := m.PreflightCrewRole(ctx, start.Harness); err != nil {
 		return domain.SessionRecord{}, err
 	}
+	// Hold the owner's lifecycle operation for the whole add. A kill, switch, or
+	// restore that already owns the worker refuses the add, and one that arrives
+	// meanwhile is refused until the role is registered, so the teardown cascade
+	// can never miss a role whose controller is starting in the owner's worktree.
+	if err := m.beginAgentOperation(ctx, start.Owner, agentOperationCrewRole); err != nil {
+		if errors.Is(err, errAgentOperationInProgress) {
+			return domain.SessionRecord{}, ports.ErrCrewOwnerBusy
+		}
+		return domain.SessionRecord{}, err
+	}
+	defer m.endAgentOperation(start.Owner, agentOperationCrewRole)
 	owner, err := m.getRecord(ctx, start.Owner)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("%w: %w", ports.ErrCrewOwnerInvalid, err)
@@ -284,4 +295,32 @@ func (m *Manager) crewRolePrompt(ctx context.Context, id domain.SessionID) (stri
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+// crewRoleLister is the optional store capability that enumerates live role
+// sessions, which every ordinary session listing deliberately omits.
+type crewRoleLister interface {
+	ListLiveCrewRoleSessionIDs(ctx context.Context) ([]domain.SessionID, error)
+}
+
+// ReconnectCrewRoles implements ports.CrewRoleHost. It is the startup
+// counterpart of the ordinary Chat reconnect for hidden role rows: a role's
+// provider host that survived the restart is adopted (so an in-flight turn keeps
+// running and the human can keep talking to it), and a host that is gone is left
+// for the human to resume. Failures are logged, never fatal to startup.
+func (m *Manager) ReconnectCrewRoles(ctx context.Context) {
+	lister, ok := m.store.(crewRoleLister)
+	if !ok {
+		return
+	}
+	ids, err := lister.ListLiveCrewRoleSessionIDs(ctx)
+	if err != nil {
+		m.logger.Warn("reconcile: list crew role sessions failed", "error", err)
+		return
+	}
+	for _, id := range ids {
+		if _, err := m.ReconnectExecutor(ctx, id); err != nil {
+			m.logger.Warn("reconcile: crew role reconnect failed", "sessionID", id, "error", err)
+		}
+	}
 }

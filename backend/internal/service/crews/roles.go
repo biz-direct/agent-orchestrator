@@ -204,6 +204,8 @@ func roleError(err error) error {
 		return apierr.Conflict("CREW_ROLE_EXISTS", err.Error(), nil)
 	case errors.Is(err, ports.ErrCrewRoleNotFound):
 		return apierr.NotFound("CREW_ROLE_NOT_FOUND", err.Error())
+	case errors.Is(err, ports.ErrCrewOwnerBusy):
+		return apierr.Conflict("CREW_OWNER_BUSY", err.Error(), nil)
 	case errors.Is(err, ports.ErrCrewOwnerInvalid):
 		return apierr.Conflict("CREW_OWNER_INVALID", err.Error(), nil)
 	}

@@ -106,3 +106,33 @@ func TestCrewRoleSessionsAreHiddenDedupedAndReleasedOnEnd(t *testing.T) {
 		t.Fatalf("a removed role can be added again: %v", err)
 	}
 }
+
+func TestListLiveCrewRoleSessionIDsOnlyReturnsLiveRoles(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	seedProject(t, s, "lvr")
+	owner, err := s.CreateSession(ctx, sampleRecord("lvr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := s.CreateAttachedSessionForAttempt(ctx, sampleRecord("lvr"), owner.ID, domain.CrewRoleMarker(owner.ID, "builder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended, err := s.CreateAttachedSessionForAttempt(ctx, sampleRecord("lvr"), owner.ID, domain.CrewRoleMarker(owner.ID, "tester"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateAttachedSessionForAttempt(ctx, sampleRecord("lvr"), owner.ID, "pipeline-attempt-1"); err != nil {
+		t.Fatal(err)
+	}
+	rec, _, _ := s.GetSession(ctx, ended.ID)
+	rec.IsTerminated = true
+	if err := s.UpdateSession(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.ListLiveCrewRoleSessionIDs(ctx)
+	if err != nil || len(ids) != 1 || ids[0] != live.ID {
+		t.Fatalf("live roles only (no stage, no ended role): %v %v", ids, err)
+	}
+}

@@ -451,6 +451,11 @@ UPDATE sessions SET attached_for_attempt_id = ? WHERE id = ?;
 -- name: GetSessionAttachedAttempt :one
 SELECT attached_for_attempt_id FROM sessions WHERE id = ?;
 
+-- name: ListLiveCrewRoleSessionIDs :many
+SELECT id FROM sessions
+WHERE attached_for_attempt_id LIKE 'crew-role:%' AND is_terminated = 0
+ORDER BY created_at, id;
+
 -- name: GetAttachedSessionIDForAttempt :one
 SELECT id FROM sessions WHERE attached_for_attempt_id = ?;
 

@@ -673,3 +673,14 @@ func (s *Store) GetSessionCrewRole(ctx context.Context, id domain.SessionID) (st
 func (s *Store) FindCrewRoleSession(ctx context.Context, owner domain.SessionID, role string) (domain.SessionID, bool, error) {
 	return s.FindAttachedSessionForAttempt(ctx, domain.CrewRoleMarker(owner, role))
 }
+
+// ListLiveCrewRoleSessionIDs returns every unterminated crew role session. Role
+// rows are hidden from ordinary listings, so startup recovery and persistent
+// host preservation enumerate them here instead.
+func (s *Store) ListLiveCrewRoleSessionIDs(ctx context.Context) ([]domain.SessionID, error) {
+	ids, err := s.qr.ListLiveCrewRoleSessionIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list live crew roles: %w", err)
+	}
+	return ids, nil
+}

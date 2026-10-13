@@ -937,6 +937,35 @@ func (q *Queries) ListChatHibernationCandidates(ctx context.Context) ([]domain.S
 	return items, nil
 }
 
+const listLiveCrewRoleSessionIDs = `-- name: ListLiveCrewRoleSessionIDs :many
+SELECT id FROM sessions
+WHERE attached_for_attempt_id LIKE 'crew-role:%' AND is_terminated = 0
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListLiveCrewRoleSessionIDs(ctx context.Context) ([]domain.SessionID, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveCrewRoleSessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.SessionID{}
+	for rows.Next() {
+		var id domain.SessionID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionsByProject = `-- name: ListSessionsByProject :many
 SELECT id, project_id, num, issue_id, kind, harness,
     activity_state, activity_last_at, is_terminated, branch, workspace_path,

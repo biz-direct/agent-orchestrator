@@ -22,6 +22,7 @@ const (
 	agentOperationRestore           agentOperationKind = "restore"
 	agentOperationRetire            agentOperationKind = "retire"
 	agentOperationReconcile         agentOperationKind = "reconcile"
+	agentOperationCrewRole          agentOperationKind = "crew_role"
 	agentOperationInterfaceRecovery agentOperationKind = "interface_recovery"
 )
 
