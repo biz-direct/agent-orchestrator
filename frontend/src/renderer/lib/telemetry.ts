@@ -931,6 +931,7 @@ export async function initTelemetry(): Promise<boolean> {
 		if (!sdkCreated) {
 			posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
 			sdkCreated = true;
+			installTransportGuard(posthog);
 		}
 		posthog.opt_in_capturing();
 		posthog.register({
@@ -999,6 +1000,30 @@ let sdkCreated = false;
 let captureActive = true; // no SDK exists until consented init; revocation sets false
 let consentEpoch = 0;
 let stopHeartbeat: (() => void) | null = null;
+
+type TransportOptions = { __aoConsentEpoch?: number; callback?: (response: { statusCode: number }) => void };
+
+/**
+ * Wraps the SDK's low-level send so nothing is transmitted without current
+ * consent, and so a payload stamped under an earlier consent epoch (a late
+ * retry of a request that began before revocation) is dropped even after the
+ * user opts back in.
+ */
+export function installTransportGuard(client: unknown): void {
+	const target = client as { _send_request?: (options: TransportOptions) => void; __aoGuarded?: boolean };
+	if (!target || target.__aoGuarded || typeof target._send_request !== "function") return;
+	const original = target._send_request.bind(target);
+	target._send_request = (options: TransportOptions) => {
+		options.__aoConsentEpoch ??= consentEpoch;
+		if (!captureActive || options.__aoConsentEpoch !== consentEpoch) {
+			// Report a non-retryable outcome so the SDK does not queue it again.
+			try { options.callback?.({ statusCode: 0 }); } catch { /* best effort */ }
+			return;
+		}
+		original(options);
+	};
+	target.__aoGuarded = true;
+}
 
 function discardQueuedPostHogEvents(): void {
 	// Best effort against posthog-js internals: drop anything batched or awaiting retry.

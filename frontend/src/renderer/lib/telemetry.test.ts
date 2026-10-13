@@ -805,3 +805,26 @@ describe("route view reservation", () => {
 		expect(reserveRouteViewCapture(storage, "session_detail", new Date("2026-07-13T00:00:00.000Z"))).toBe(true);
 	});
 });
+
+describe("transport guard", () => {
+	it("drops sends and late retries after revocation and reports a non-retryable outcome", async () => {
+		const { applyRendererTelemetryPolicy, installTransportGuard } = await import("./telemetry");
+		const client = new PostHog();
+		const sent: unknown[] = [];
+		(client as unknown as { _send_request: (o: unknown) => void })._send_request = (o) => { sent.push(o); };
+		installTransportGuard(client);
+		const send = (client as unknown as { _send_request: (o: Record<string, unknown>) => void })._send_request;
+
+		const inFlight: Record<string, unknown> = { url: "https://x.test/e" };
+		send(inFlight);
+		expect(sent).toHaveLength(1);
+
+		applyRendererTelemetryPolicy(false);
+		// The original request fails after revocation and the SDK retries the same options.
+		send(inFlight);
+		const statuses: number[] = [];
+		send({ url: "https://x.test/new", callback: (r: { statusCode: number }) => statuses.push(r.statusCode) });
+		expect(sent).toHaveLength(1);
+		expect(statuses).toEqual([0]);
+	});
+});

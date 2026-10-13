@@ -1157,7 +1157,7 @@
 	"settings.appearance": "Appearance",
 	"settings.privacy": "Privacy",
 	"settings.telemetryEvents.label": "Share usage and error data",
-	"settings.telemetryEvents.description": "Off by default. Nothing is sent unless you turn this on. When enabled, anonymous usage analytics and privacy-filtered error reports may be shared; the background service picks this up on next launch.",
+	"settings.telemetryEvents.description": "Off by default. Nothing is sent unless you turn this on. When enabled, usage analytics, daemon event data and privacy-filtered error reports may be shared with the endpoint configured for this build. Usage analytics are tied to a random installation ID and are not guaranteed to be anonymous; the background service picks this up on next launch.",
 	"settings.telemetryEvents.pending": "Telemetry is off locally. Daemon cleanup is still pending.",
 	"settings.telemetryEvents.failed": "Telemetry cleanup failed. Reporting remains disabled while cleanup retries.",
 	"settings.telemetryEvents.veto": "This preference is disabled by the environment.",
