@@ -1,9 +1,12 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
+import { DEFAULT_POSTHOG_PROJECT_KEY } from "./posthog-config";
+import { DEFAULT_SENTRY_DSN } from "./sentry-config";
 import {
 	buildTelemetryBootstrap,
+	daemonTelemetryEnv,
 	defaultDataDir,
 	loadOrCreateTelemetryInstallId,
 	parseDisabledEvents,
@@ -61,15 +64,62 @@ test("buildTelemetryBootstrap withholds the bootstrap on an unpackaged build", a
 	expect(optedIn?.appVersion).toBe("0.11.2");
 });
 
-test("failure-reporting opt-out does not withhold PostHog identity", async () => {
+test("no opt-in means no bootstrap, no SDK init and no install id on disk", async () => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), "ao-telemetry-"));
 	tempDirs.push(dir);
-	const bootstrap = await buildTelemetryBootstrap({}, "0.11.2", "linux", dir, true, {
-		...enabledPolicy,
-		eventsEnabled: false,
-	});
-	expect(bootstrap?.eventsEnabled).toBe(false);
+	// Not opted in, no policy at all, or an unacknowledged opt-in: all withheld.
+	expect(await buildTelemetryBootstrap({}, "0.11.2", "linux", dir, true, { ...enabledPolicy, eventsEnabled: false })).toBeNull();
+	expect(await buildTelemetryBootstrap({}, "0.11.2", "linux", dir, true, undefined)).toBeNull();
+	expect(await buildTelemetryBootstrap({}, "0.11.2", "linux", dir, true, { ...enabledPolicy, acknowledged: false })).toBeNull();
+	// The AO_TELEMETRY_RENDERER=off environment veto beats an opt-in.
+	expect(await buildTelemetryBootstrap({ AO_TELEMETRY_RENDERER: "off" }, "0.11.2", "linux", dir, true, enabledPolicy)).toBeNull();
+	expect(await readdir(dir)).toEqual([]);
+});
+
+test("an explicit acknowledged opt-in yields a bootstrap with an install id", async () => {
+	const dir = await mkdtemp(path.join(os.tmpdir(), "ao-telemetry-"));
+	tempDirs.push(dir);
+	const bootstrap = await buildTelemetryBootstrap({}, "0.11.2", "linux", dir, true, enabledPolicy);
 	expect(bootstrap?.distinctId).toMatch(/^ins_/);
+});
+
+describe("daemonTelemetryEnv", () => {
+	const leaky = {
+		AO_TELEMETRY_EVENTS: "on",
+		AO_TELEMETRY_REMOTE: "posthog",
+		AO_TELEMETRY_POSTHOG_KEY: "phc_leak",
+		AO_SENTRY_DSN: "https://k@o1.ingest.sentry.io/1",
+	};
+
+	test("is fully off without opt-in, even when the parent env carries keys", () => {
+		const env = daemonTelemetryEnv(false, leaky, false, "1.0.0");
+		expect(env).toMatchObject({
+			AO_TELEMETRY_EVENTS: "off",
+			AO_TELEMETRY_METRICS: "off",
+			AO_TELEMETRY_REMOTE: "off",
+			AO_TELEMETRY_POSTHOG_KEY: "",
+			AO_SENTRY_DSN: "",
+		});
+	});
+
+	test("with opt-in but no key or DSN configured, exporters stay no-ops", () => {
+		const env = daemonTelemetryEnv(true, {}, false, "1.0.0");
+		expect(env.AO_TELEMETRY_REMOTE).toBe("off");
+		expect(env.AO_TELEMETRY_POSTHOG_KEY).toBe("");
+		expect(env.AO_SENTRY_DSN).toBe("");
+	});
+
+	test("with opt-in and an explicit key/DSN, the exporters are configured", () => {
+		const env = daemonTelemetryEnv(true, leaky, false, "1.0.0");
+		expect(env.AO_TELEMETRY_REMOTE).toBe("posthog");
+		expect(env.AO_TELEMETRY_POSTHOG_KEY).toBe("phc_leak");
+		expect(env.AO_SENTRY_DSN).toBe(leaky.AO_SENTRY_DSN);
+	});
+});
+
+test("the fork ships no baked PostHog key or Sentry DSN", () => {
+	expect(DEFAULT_POSTHOG_PROJECT_KEY).toBe("");
+	expect(DEFAULT_SENTRY_DSN).toBe("");
 });
 
 test("buildTelemetryBootstrap carries the deny list across the process boundary", async () => {

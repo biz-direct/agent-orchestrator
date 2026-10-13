@@ -11,7 +11,7 @@ import (
 func TestLoadDefaults(t *testing.T) {
 	// Clear every recognised var so we observe pure defaults regardless of the
 	// surrounding environment.
-	for _, k := range []string{"AO_PORT", "AO_REQUEST_TIMEOUT", "AO_SHUTDOWN_TIMEOUT", "AO_RUN_FILE", "AO_DATA_DIR", "AO_AGENT", "AO_ALLOWED_ORIGINS", "AO_TELEMETRY_EVENTS", "AO_TELEMETRY_METRICS", "AO_TELEMETRY_REMOTE", "AO_TELEMETRY_POSTHOG_KEY", "AO_TELEMETRY_POSTHOG_HOST", "AO_TELEMETRY_DISABLED_EVENTS", "AO_TELEMETRY_APP_VERSION"} {
+	for _, k := range []string{"AO_PORT", "AO_REQUEST_TIMEOUT", "AO_SHUTDOWN_TIMEOUT", "AO_RUN_FILE", "AO_DATA_DIR", "AO_AGENT", "AO_ALLOWED_ORIGINS", "AO_TELEMETRY_EVENTS", "AO_TELEMETRY_METRICS", "AO_TELEMETRY_REMOTE", "AO_TELEMETRY_POSTHOG_KEY", "AO_TELEMETRY_POSTHOG_HOST", "AO_TELEMETRY_DISABLED_EVENTS", "AO_TELEMETRY_APP_VERSION", "AO_SENTRY_DSN"} {
 		t.Setenv(k, "")
 	}
 
@@ -57,6 +57,10 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.Telemetry.EventsExplicit {
 		t.Fatal("Telemetry.EventsExplicit = true for an absent setting")
+	}
+	// Fork policy: nothing is collected or exported unless the user opts in.
+	if cfg.Telemetry.Events || cfg.Telemetry.Metrics || cfg.Telemetry.PostHogKey != "" || cfg.Telemetry.SentryDSN != "" {
+		t.Fatalf("Telemetry must default to fully off with no keys/DSN, got %+v", cfg.Telemetry)
 	}
 }
 

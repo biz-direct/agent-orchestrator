@@ -10,7 +10,7 @@ describe("telemetry policy wire record", () => {
 			consent_production_enabled: true,
 			updated_at: "2026-08-28T10:15:30.000Z",
 		}))).toEqual({ ok: true, record: {
-			schema_version: 2,
+			schema_version: 3,
 			events_enabled: false,
 			consent_generation: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca",
 			consent_production_enabled: true,
@@ -18,15 +18,32 @@ describe("telemetry policy wire record", () => {
 		} });
 	});
 
-	it("reads a version 1 record as consent given while the release gate was closed", () => {
+	it("honors an explicit opt-in only in a version 3 record", () => {
+		const raw = (version: number) => JSON.stringify({
+			schema_version: version,
+			events_enabled: true,
+			consent_generation: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca",
+			consent_production_enabled: true,
+			updated_at: "2026-08-28T10:15:30.000Z",
+		});
+		const enabled = (version: number) => {
+			const parsed = parseTelemetryPolicyDiskRecord(raw(version));
+			return parsed.ok && parsed.record.events_enabled;
+		};
+		expect(enabled(3)).toBe(true);
+		// v2 predates explicit opt-in: its flag may just be the old default.
+		expect(enabled(2)).toBe(false);
+	});
+
+	it("reads a version 1 record as off because it predates explicit opt-in", () => {
 		expect(parseTelemetryPolicyDiskRecord(JSON.stringify({
 			schema_version: 1,
 			events_enabled: true,
 			consent_generation: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca",
 			updated_at: "2026-08-28T10:15:30.000Z",
 		}))).toEqual({ ok: true, record: {
-			schema_version: 2,
-			events_enabled: true,
+			schema_version: 3,
+			events_enabled: false,
 			consent_generation: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca",
 			consent_production_enabled: false,
 			updated_at: "2026-08-28T10:15:30.000Z",
@@ -42,7 +59,7 @@ describe("telemetry policy wire record", () => {
 		'{"schemaVersion":1,"eventsEnabled":false,"consentGeneration":"7f80c8a9-ec67-4a16-a067-a444ffcc5cca","updatedAt":"2026-08-28T10:15:30.000Z"}',
 		'{"schema_version":1,"events_enabled":true,"consent_generation":"7f80c8a9-ec67-4a16-a067-a444ffcc5cca","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}',
 		'{"schema_version":2,"events_enabled":true,"consent_generation":"7f80c8a9-ec67-4a16-a067-a444ffcc5cca","consent_production_enabled":"yes","updated_at":"2026-08-28T10:15:30.000Z"}',
-		'{"schema_version":3,"events_enabled":true,"consent_generation":"7f80c8a9-ec67-4a16-a067-a444ffcc5cca","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}',
+		'{"schema_version":4,"events_enabled":true,"consent_generation":"7f80c8a9-ec67-4a16-a067-a444ffcc5cca","consent_production_enabled":true,"updated_at":"2026-08-28T10:15:30.000Z"}',
 	])("fails closed for malformed or expanded records: %s", (raw) => {
 		expect(parseTelemetryPolicyDiskRecord(raw)).toEqual({ ok: false, reason: "invalid_record" });
 	});
@@ -50,7 +67,7 @@ describe("telemetry policy wire record", () => {
 
 describe("telemetryPolicySnapshot", () => {
 	const record = (eventsEnabled: boolean, consentProductionEnabled: boolean): TelemetryPolicyDiskRecord => ({
-		schema_version: 2,
+		schema_version: 3,
 		events_enabled: eventsEnabled,
 		consent_generation: "7f80c8a9-ec67-4a16-a067-a444ffcc5cca",
 		consent_production_enabled: consentProductionEnabled,
