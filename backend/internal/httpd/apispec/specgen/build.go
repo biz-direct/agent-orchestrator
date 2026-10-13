@@ -17,6 +17,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	crewssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crews"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/githubpat"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	pipelineruns "github.com/aoagents/agent-orchestrator/backend/internal/service/pipelineruns"
@@ -263,6 +264,7 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainSessionBranchState":        "SessionBranchState",
 	"DomainProjectConfig":             "ProjectConfig",
 	"DomainPipelineSelection":         "PipelineSelection",
+	"DomainCrewSelection":             "CrewSelection",
 	"PipelinerunsStageReport":         "PipelineStageReport",
 	"PipelinerunsFeedback":            "PipelineFeedback",
 	"PipelinerunsFeedbackCheck":       "PipelineFeedbackCheck",
@@ -2564,6 +2566,38 @@ func projectOperations() []operation {
 				{http.StatusOK, pipelinessvc.CommandTrust{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusForbidden, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/crew", id: "getProjectCrew", tag: "projects",
+			summary:    "Discover and validate the project's repository-defined crew roles and workflows",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, crewssvc.CatalogResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/crew/default", id: "getProjectDefaultCrew", tag: "projects",
+			summary:    "Read the project-default crew workflow selection and its availability",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, crewssvc.DefaultStatus{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/projects/{id}/crew/default", id: "setProjectDefaultCrew", tag: "projects",
+			summary:    "Save or clear the project-default crew workflow without replacing other project settings",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			reqBody:    crewssvc.SetDefaultInput{},
+			resps: []respUnit{
+				{http.StatusOK, crewssvc.DefaultStatus{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

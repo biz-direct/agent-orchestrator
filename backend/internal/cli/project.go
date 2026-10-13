@@ -134,6 +134,9 @@ type projectConfig struct {
 	// TrustPipelineCommands round-trips the user authorization for repository
 	// pipeline commands. Use `ao pipeline trust` to change it.
 	TrustPipelineCommands bool `json:"trustPipelineCommands,omitempty"`
+	// DefaultCrew round-trips the daemon's default-crew reference so project
+	// get/set-config JSON does not drop it. Use `ao crew default` to change it.
+	DefaultCrew *crewSelectionDTO `json:"defaultCrew,omitempty"`
 }
 
 // setConfigRequest mirrors the daemon's SetConfigInput body for

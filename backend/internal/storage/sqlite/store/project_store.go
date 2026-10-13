@@ -388,6 +388,12 @@ func (s *Store) SetProjectDefaultPipeline(ctx context.Context, id string, select
 	return s.patchProjectConfig(ctx, "set project default pipeline", id, func(c *domain.ProjectConfig) { c.DefaultPipeline = selection })
 }
 
+// SetProjectDefaultCrew sets or clears (nil) the project's default crew
+// workflow selection without touching any other config field.
+func (s *Store) SetProjectDefaultCrew(ctx context.Context, id string, selection *domain.CrewSelection) (domain.ProjectRecord, bool, error) {
+	return s.patchProjectConfig(ctx, "set project default crew", id, func(c *domain.ProjectConfig) { c.DefaultCrew = selection })
+}
+
 // SetProjectPipelineCommandTrust records the user's authorization (or its
 // revocation) for running repository-declared pipeline validation commands.
 func (s *Store) SetProjectPipelineCommandTrust(ctx context.Context, id string, trusted bool) (domain.ProjectRecord, bool, error) {

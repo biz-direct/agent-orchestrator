@@ -21,6 +21,7 @@ import { newestActiveOrchestrator } from "../types/workspace";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
 import { buildIntake } from "./IntakeFields";
 import { ProjectPromptsSettings } from "./ProjectPromptsSettings";
+import { ProjectCrewSettings } from "./ProjectCrewSettings";
 import { ProjectPipelineSettings } from "./ProjectPipelineSettings";
 import { ReviewerSelect, reviewerTrustWarning } from "./ReviewerSelect";
 import { ProjectSettingsEditor, type ProjectAgentPickerProps, type ProjectSettingsDraft } from "./ProjectSettingsEditor";
@@ -358,7 +359,7 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 		capabilities={{ workflow: !isScratchProject, sessionPrefix: !isScratchProject, intake: intakeVisible, reviewer: !isScratchProject, requiredAgents: true, workersRequestReview: !isScratchProject }}
 		details={[{ label: t("settings.project.path"), value: project.path, href: hostId ? undefined : `file://${encodeURI(project.path)}` }, { label: t("settings.project.repo"), value: project.repo || "—", href: project.repo ? repositoryHref(project.repo) : undefined }]}
 		workspaceRepos={project.kind === "workspace" ? project.workspaceRepos ?? [] : undefined} repository={project.repo}
-		generalExtra={!isScratchProject ? <ProjectPipelineSettings projectId={projectId} hostId={hostId} /> : undefined}
+		generalExtra={!isScratchProject ? <><ProjectPipelineSettings projectId={projectId} hostId={hostId} /><ProjectCrewSettings projectId={projectId} hostId={hostId} /></> : undefined}
 		renderPrompts={(draft, patch) => <ProjectPromptsSettings
 			projectId={projectId} hostId={hostId}
 			orchestratorRules={draft.orchestratorRules ?? ""}

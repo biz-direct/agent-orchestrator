@@ -64,6 +64,7 @@ beforeEach(() => {
 	vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
 		if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project } } as never;
 		if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
+		if (path === "/api/v1/projects/{id}/crew") return { data: { projectId: "proj-1", roles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", message: "" } } } as never;
 		if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
 		if (path === "/api/v1/agents/installers") return { data: { agents: [] } } as never;
 		if (path === "/api/v1/agents/install-jobs") return { data: { jobs: [] } } as never;
@@ -114,6 +115,37 @@ describe("Settings recovery modal integration", () => {
 		await waitFor(() => expect(useUiStore.getState().settingsModal).toBeNull());
 	});
 
+	it("keeps a saved crew default when another project setting is saved afterwards", async () => {
+		vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
+			if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project } } as never;
+			if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
+			if (path === "/api/v1/projects/{id}/crew") return { data: { projectId: "proj-1", roles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", message: "" } } } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "tui", chatHarnesses: [], cloudEnabled: false, localEnabled: true, trackerIntakeEnabled: true } } as never;
+			throw new Error(`Unexpected GET ${path}`);
+		});
+		const put = vi.spyOn(apiClient, "PUT").mockImplementation(async (path) => {
+			if (path === "/api/v1/projects/{id}/crew/default") return { data: { selection: { mode: "no_crew" }, state: "no_crew", message: "" } } as never;
+			return { data: { status: "ok" } } as never;
+		});
+		useUiStore.getState().openProjectSettings("proj-1");
+		renderDialogs();
+		await userEvent.click(await screen.findByRole("button", { name: "Default crew workflow" }));
+		await userEvent.click(screen.getByRole("menuitem", { name: "No crew" }));
+		await waitFor(() => expect(put).toHaveBeenCalledWith("/api/v1/projects/{id}/crew/default", expect.anything()));
+
+		await userEvent.click(await screen.findByRole("button", { name: "Edit Project name" }));
+		const name = screen.getByRole("textbox", { name: "Project name" });
+		await userEvent.clear(name);
+		await userEvent.type(name, "Renamed project");
+		await userEvent.click(screen.getByRole("button", { name: "Close settings" }));
+
+		await waitFor(() => expect(put).toHaveBeenCalledWith(
+			"/api/v1/projects/{id}",
+			expect.objectContaining({ body: expect.objectContaining({ config: expect.objectContaining({ defaultCrew: { mode: "no_crew" } }) }) }),
+		));
+	});
+
 	it("keeps edited project settings open when saving fails", async () => {
 		vi.spyOn(apiClient, "PUT").mockResolvedValue({ error: { message: "Save rejected" } } as never);
 		useUiStore.getState().openProjectSettings("proj-1");
@@ -137,6 +169,7 @@ describe("Settings recovery modal integration", () => {
 		vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
 			if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project: invalid } } as never;
 			if (path === "/api/v1/projects/{id}/pipelines") return { data: { projectId: "proj-1", profiles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", executable: false, message: "" } } } as never;
+		if (path === "/api/v1/projects/{id}/crew") return { data: { projectId: "proj-1", roles: [], workflows: [], diagnostics: [], default: { selection: null, state: "unset", message: "" } } } as never;
 			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
 			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "tui", chatHarnesses: [], cloudEnabled: false, localEnabled: true, trackerIntakeEnabled: true } } as never;
 			throw new Error(`Unexpected GET ${path}`);
