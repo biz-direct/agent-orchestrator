@@ -1,7 +1,7 @@
 # .github/workflows/sync-upstream.yml
 name: Sync upstream
 
-# FORK ONLY: bring OrchestratorInc/agent-orchestrator main into this fork's main
+# FORK ONLY: manual only (Actions tab -> Run workflow); no schedule. Bring OrchestratorInc/agent-orchestrator main into this fork's main
 # through a reviewed PR. Never tags or publishes, never force-pushes.
 #
 #   clean merge  -> push sync/upstream-<sha> and open a PR into main.
@@ -21,8 +21,6 @@ name: Sync upstream
 # trigger CI on the sync PR. The Pullfrog dispatch uses GITHUB_TOKEN (actions: write).
 
 on:
-  schedule:
-    - cron: "23 5 * * *"
   workflow_dispatch:
 
 permissions:

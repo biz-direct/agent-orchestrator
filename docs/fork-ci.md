@@ -15,7 +15,7 @@
 - **Arch/Omarchy:** `chmod +x agent-orchestrator-linux-x64.AppImage && ./agent-orchestrator-linux-x64.AppImage` (needs `fuse2`; or run with `--appimage-extract-and-run`).
 
 ## Upstream sync
-`sync-upstream.yml` runs daily (and on dispatch): merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch, opens a PR into `main` and merges it (auto-merge when checks are required, direct otherwise). On conflicts it opens an `upstream-sync-conflict` issue and pushes nothing. Needs secret `SYNC_PAT` (repo + workflow scopes) and "Allow auto-merge" enabled in repo settings.
+`sync-upstream.yml` runs only on manual dispatch (Actions → "Sync upstream" → Run workflow; no schedule): merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch, opens a PR into `main` and merges it (auto-merge when checks are required, direct otherwise). On conflicts it opens an `upstream-sync-conflict` issue and pushes nothing. Needs secret `SYNC_PAT` (repo + workflow scopes) and "Allow auto-merge" enabled in repo settings.
 
 ## Workflow audit
 Automatic on the fork: PR/push CI that guards code quality, plus the fork's own workflows. Upstream-only workflows are gated with a job-level `if: github.repository == 'OrchestratorInc/agent-orchestrator'` (skipped, not deleted, to keep upstream merges clean).
@@ -28,7 +28,7 @@ Automatic on the fork: PR/push CI that guards code quality, plus the fork's own 
 | cli-e2e.yml | PR (backend/test paths), push main | keep on ubuntu+macOS; Windows dropped; concurrency added | real CLI/daemon coverage |
 | build-artifacts.yml | dispatch, workflow_call | keep | fork builds (mac arm64, linux AppImage) |
 | fork-release.yml | dispatch, `v*` tag | keep | fork releases |
-| sync-upstream.yml | daily cron, dispatch | keep | upstream sync |
+| sync-upstream.yml | dispatch only | keep | upstream sync |
 | pr-review-leaderboard.yml | pull_request_target | gated off | upstream PR stats |
 | deploy-docs.yml | push main (docs), dispatch | gated off | upstream GitHub Pages |
 | mac-update-e2e.yml | dispatch, workflow_call | gated off | needs signed upstream releases |
