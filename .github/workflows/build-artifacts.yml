@@ -7,10 +7,13 @@ name: Desktop build artifacts
 # caller-supplied version, uploads each installer as a short-lived run
 # artifact, and emits a digests.json artifact (a flat JSON object mapping
 # each artifact filename to its sha256 hex string) that the conductor reads
-# to verify hashes before signing. Creates no release, references no secrets.
-# macOS output is intentionally UNSIGNED: forge.config.ts only activates
-# osxSign/osxNotarize when the Apple env vars are present, and this workflow
-# never sets them (no macos-signing-setup). The conductor signs downstream.
+# to verify hashes before signing. Creates no release.
+# macOS signing is OPTIONAL (FORK): when the caller passes the full set of
+# Apple secrets (see docs/macos-signing.md), the mac job imports the Developer ID
+# certificate via .github/actions/macos-signing-setup, forge signs + notarizes +
+# staples, and the verify step fails the build if Gatekeeper would reject it.
+# With no Apple secrets the build stays UNSIGNED with a warning; with only some
+# of them it fails (a half-configured release must not ship unsigned silently).
 
 on:
   workflow_dispatch:
@@ -31,6 +34,19 @@ on:
       version:
         type: string
         required: true
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_API_KEY_BASE64:
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
 
 permissions:
   contents: read
@@ -96,7 +112,53 @@ jobs:
           BUILD_VERSION: ${{ inputs.version }}
         run: |
           node -e "const v=process.env.BUILD_VERSION.split('+')[0].replace(/^v/,''); const fs=require('fs'); const p=require('./package.json'); p.version=v; fs.writeFileSync('./package.json', JSON.stringify(p,null,'\t')+'\n');"
-      - name: Build (unsigned, no publish)
+      - name: Detect macOS signing configuration
+        id: signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          set_count=0
+          missing=()
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            if [ -n "${!name}" ]; then set_count=$((set_count + 1)); else missing+=("$name"); fi
+          done
+          if [ "$set_count" -eq 0 ]; then
+            echo "::warning::macOS signing secrets are not configured; building an UNSIGNED app. Gatekeeper will report it as damaged and in-app auto-update will not work. See docs/macos-signing.md."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::macOS signing is partially configured; missing: ${missing[*]}. Set all six secrets (docs/macos-signing.md) or none."
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up macOS signing
+        if: steps.signing.outputs.enabled == 'true'
+        uses: ./.github/actions/macos-signing-setup
+        with:
+          csc-link: ${{ secrets.CSC_LINK }}
+          csc-key-password: ${{ secrets.CSC_KEY_PASSWORD }}
+          apple-api-key-base64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          apple-api-key-id: ${{ secrets.APPLE_API_KEY_ID }}
+          apple-api-issuer: ${{ secrets.APPLE_API_ISSUER }}
+          apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      - name: List usable code-signing identities
+        if: steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          # Diagnostic: the identity named by APPLE_SIGNING_IDENTITY must appear
+          # here as valid, otherwise osx-sign cannot sign. The repo secret is
+          # masked in logs, so a match shows as ***.
+          security find-identity -v -p codesigning
+          security find-identity -p codesigning | grep -c "CSSMERR" || true
+      - name: Build (signed + notarized when configured, no publish)
         shell: bash
         env:
           # Bake the update feed's owner/repo from the repo this build runs in.
@@ -123,6 +185,35 @@ jobs:
             echo "::error::app-update.yml bakes $owner/$repo but this build publishes from $GITHUB_REPOSITORY" >&2
             exit 1
           fi
+      - name: Verify macOS signature, Gatekeeper and notarization ticket
+        if: steps.signing.outputs.enabled == 'true'
+        shell: bash
+        env:
+          EXPECTED_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          zip="$(find out/make/zip/darwin -name '*.zip' | head -n1)"
+          test -n "$zip" || { echo "::error::no mac zip found to verify"; exit 1; }
+          work="$(mktemp -d)"
+          # ditto, never unzip: unzip materializes AppleDouble entries and breaks the seal.
+          ditto -x -k "$zip" "$work"
+          app="$(find "$work" -maxdepth 1 -name '*.app' | head -n1)"
+          test -n "$app" || { echo "::error::no .app inside $zip"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
+          # Squirrel.Mac accepts an update only if its designated requirement
+          # matches the running app's. Pin it to the Developer ID leaf + team so
+          # every release signed by this team satisfies the previous one.
+          details="$(codesign -dvv "$app" 2>&1)"
+          echo "$details" | grep -E 'Authority=|TeamIdentifier='
+          team="$(sed -n 's/.*(\([A-Z0-9]\{10\}\)).*/\1/p' <<<"$EXPECTED_IDENTITY" | head -n1)"
+          if ! grep -q "^Authority=${EXPECTED_IDENTITY}\$" <<<"$details" || ! grep -q "^TeamIdentifier=${team}\$" <<<"$details"; then
+            echo "::error::signed app does not carry the expected identity/team ($EXPECTED_IDENTITY)"
+            exit 1
+          fi
+          codesign -d -r- "$app" 2>&1 | grep -E '^designated'
+          echo "### macOS signing verified" >> "$GITHUB_STEP_SUMMARY"
       - name: Collect artifact and compute digest
         shell: bash
         env:

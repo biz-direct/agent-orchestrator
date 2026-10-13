@@ -234,7 +234,7 @@ Join [Discord](https://discord.com/invite/UZv7JjxbwG) for help and contributor d
 ## Product telemetry
 
 Product telemetry is designed to exclude your code, prompts, agent conversations, and credentials.\
-Orchestrator.inc collects limited usage and reliability telemetry to improve the product. [Learn what we collect and how to turn off desktop telemetry](docs/telemetry.md).
+In this fork all telemetry, analytics and error reporting are **off by default** and nothing leaves your machine unless you opt in under Settings → General. [Learn what we collect and how to turn off desktop telemetry](docs/telemetry.md).
 
 ## License
 

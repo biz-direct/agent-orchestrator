@@ -7,10 +7,26 @@ authenticated username, so they can identify an account. Other events use a
 random installation identifier to group activity. Telemetry is not wholly
 anonymous.
 
-Remote telemetry is enabled in production desktop and mobile releases. A
-packaged desktop release also enables telemetry for the daemon it starts.
-Development builds and daemons started directly do not send remote telemetry by
-default.
+> **Fork default: everything is off.** In the `biz-direct/agent-orchestrator`
+> fork, all analytics, product telemetry, crash/error reporting and remote
+> logging are **off by default**, for new installs and for existing installs that
+> never made an explicit choice. Nothing leaves your machine unless you turn on
+> **Settings → General → Share usage and error data**. When it is off, no
+> analytics or error-reporting SDK is initialized and no telemetry request is made.
+> A stored setting from an earlier version is treated as off; only a fresh,
+> explicit opt-in turns it on. The fork also ships **no** PostHog project key and
+> **no** Sentry DSN, so even after opting in nothing is sent unless you supply
+> your own endpoint (`VITE_AO_POSTHOG_KEY`/`AO_TELEMETRY_POSTHOG_KEY`,
+> `VITE_AO_SENTRY_DSN`/`AO_SENTRY_DSN`). The background service reads the choice
+> when it starts, so enabling takes effect on the next launch; disabling applies
+> immediately to the app and stops the daemon exporters at next launch.
+>
+> Local logs are kept for debugging at the default `info` level (set
+> `AO_LOG_LEVEL=debug` to opt into verbose output); they are never shipped
+> anywhere and should not contain prompts, file contents or tokens.
+>
+> The rest of this page describes what is sent **after you opt in** (or in
+> upstream builds, where telemetry defaults to on).
 
 ## What Orchestrator.inc sends
 
@@ -259,9 +275,10 @@ in PostHog from earlier events is not deleted retroactively.
 
 ## Turn desktop and daemon telemetry off
 
-The desktop General Settings page includes an **Event reporting** control for
-the staged agent-switch reliability path. The environment-variable controls
-below continue to govern the existing desktop/daemon product-telemetry paths.
+The desktop General Settings page includes a **Share usage and error data**
+switch, off by default in this fork. It is the single opt-in for renderer
+analytics, daemon event export, Sentry and the staged agent-switch reliability
+path. The environment-variable controls below are an additional hard veto.
 Set all three variables in the environment used to launch Orchestrator.inc:
 
 ```bash

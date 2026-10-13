@@ -115,6 +115,27 @@ function parseReleaseRepo(value: string | undefined): { owner: string; name: str
 	return { owner, name };
 }
 
+// The pinned @electron/packager types omit continueOnError, though it exists at
+// runtime. electron-packager defaults it to true, which downgrades a signing
+// failure (e.g. identity not found) to a warning that forge hides; the build then
+// dies later in notarize with a misleading "code has no resources" error. Set it
+// false so signing fails at the cause.
+type MacSignConfig = Exclude<NonNullable<NonNullable<ForgeConfig["packagerConfig"]>["osxSign"]>, boolean> & {
+	continueOnError: boolean;
+};
+
+function macSignConfig(): MacSignConfig | undefined {
+	if (process.env.APPLE_SIGNING_IDENTITY) {
+		return {
+			identity: process.env.APPLE_SIGNING_IDENTITY,
+			optionsForFile: macSignOptionsForFile,
+			continueOnError: false,
+		};
+	}
+	if (process.env.CSC_LINK) return { optionsForFile: macSignOptionsForFile, continueOnError: false };
+	return undefined;
+}
+
 const config: ForgeConfig = {
 	packagerConfig: {
 		asar: true,
@@ -140,14 +161,7 @@ const config: ForgeConfig = {
 		//  - Local: AO_NOTARY_PROFILE, a notarytool keychain profile created with
 		//    `notarytool store-credentials`. See ao-macos-signed-release runbook.
 		// Both are valid NotaryToolCredentials, so no cast is needed.
-		osxSign: process.env.APPLE_SIGNING_IDENTITY
-			? {
-					identity: process.env.APPLE_SIGNING_IDENTITY,
-					optionsForFile: macSignOptionsForFile,
-				}
-			: process.env.CSC_LINK
-				? { optionsForFile: macSignOptionsForFile }
-				: undefined,
+		osxSign: macSignConfig(),
 		osxNotarize: process.env.AO_NOTARY_PROFILE
 			? { keychainProfile: process.env.AO_NOTARY_PROFILE }
 			: process.env.APPLE_API_KEY

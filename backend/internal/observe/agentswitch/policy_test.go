@@ -83,10 +83,10 @@ func TestOpenGateDoesNotResumeConsentGivenWhileGated(t *testing.T) {
 			"schema_version": 1, "events_enabled": true, "consent_generation": generation, "updated_at": "2026-08-28T10:15:30.000Z",
 		}},
 		{name: "opt-in recorded while gated", record: map[string]any{
-			"schema_version": 2, "events_enabled": true, "consent_generation": generation, "consent_production_enabled": false, "updated_at": "2026-08-28T10:15:30.000Z",
+			"schema_version": 3, "events_enabled": true, "consent_generation": generation, "consent_production_enabled": false, "updated_at": "2026-08-28T10:15:30.000Z",
 		}},
 		{name: "opt-in recorded while open", wantEnabled: true, record: map[string]any{
-			"schema_version": 2, "events_enabled": true, "consent_generation": generation, "consent_production_enabled": true, "updated_at": "2026-08-28T10:15:30.000Z",
+			"schema_version": 3, "events_enabled": true, "consent_generation": generation, "consent_production_enabled": true, "updated_at": "2026-08-28T10:15:30.000Z",
 		}},
 	}
 	for _, tc := range tests {
@@ -117,7 +117,7 @@ func TestClosedGateKeepsHonouringTheStoredChoiceAsTheHint(t *testing.T) {
 	generation := "7f80c8a9-ec67-4a16-a067-a444ffcc5cca"
 	path := filepath.Join(t.TempDir(), PolicyFileName)
 	writePolicyRecord(t, path, map[string]any{
-		"schema_version": 2, "events_enabled": true, "consent_generation": generation, "consent_production_enabled": false, "updated_at": "2026-08-28T10:15:30.000Z",
+		"schema_version": 3, "events_enabled": true, "consent_generation": generation, "consent_production_enabled": false, "updated_at": "2026-08-28T10:15:30.000Z",
 	}, 0o600)
 	coordinator := NewPolicyCoordinator(&policyStoreFake{}, PolicyOptions{
 		AuthorityReader: policyauthority.New(path), TelemetryEvents: true, TelemetryEventsExplicit: true,
@@ -477,7 +477,7 @@ func boolPtr(value bool) *bool { return &value }
 func writePolicy(t *testing.T, path string, enabled bool, generation string, mode os.FileMode) {
 	t.Helper()
 	writePolicyRecord(t, path, map[string]any{
-		"schema_version":             2,
+		"schema_version":             3,
 		"events_enabled":             enabled,
 		"consent_generation":         generation,
 		"consent_production_enabled": true,
