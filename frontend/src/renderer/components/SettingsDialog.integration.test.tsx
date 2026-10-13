@@ -96,6 +96,26 @@ describe("Settings recovery modal integration", () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
+	it("keeps unsaved prompt edits across Scripts, Environment and Cues and saves nothing implicitly", async () => {
+		vi.spyOn(apiClient, "GET").mockImplementation(async (path) => {
+			if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project } } as never;
+			if (path === "/api/v1/agents/readiness") return { data: catalog } as never;
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "tui", chatHarnesses: [], cloudEnabled: false, localEnabled: true, trackerIntakeEnabled: false, globalOrchestratorRules: "" } } as never;
+			return { data: {} } as never;
+		});
+		const put = vi.spyOn(apiClient, "PUT").mockResolvedValue({ data: { status: "ok" } } as never);
+		useUiStore.getState().openProjectSettings("proj-1", { section: "prompts" });
+		renderDialogs();
+		await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "Keep me.");
+		for (const section of ["Scripts", "Environment", "Cues"]) {
+			await userEvent.click(screen.getByRole("button", { name: section }));
+			await screen.findByRole("heading", { name: section }).catch(() => undefined);
+			await userEvent.click(screen.getByRole("button", { name: "Prompts" }));
+			expect(await screen.findByLabelText("Project orchestrator prompt")).toHaveValue("Keep me.");
+		}
+		expect(put).not.toHaveBeenCalled();
+	});
+
 	it.each(["close button", "Escape"])("saves edited project settings on %s", async (dismiss) => {
 		const put = vi.spyOn(apiClient, "PUT").mockResolvedValue({ data: { status: "ok" } } as never);
 		useUiStore.getState().openProjectSettings("proj-1");

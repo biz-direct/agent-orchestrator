@@ -11,6 +11,7 @@ import { useRestoreFocusOnClose } from "../hooks/useRestoreFocusOnClose";
 import { ensureCodexAccounts } from "../hooks/useCodexAccountsQuery";
 import { writeCodexAccounts } from "../hooks/codex-accounts-state";
 import { GlobalSettingsForm } from "./GlobalSettingsForm";
+import type { ProjectPromptValues } from "./ProjectSettingsEditor";
 import { ProjectSettingsForm, type ProjectSettingsSaveState, type ProjectSettingsSection as ProjectFormSection } from "./ProjectSettingsForm";
 import { ProjectScriptsSettings } from "./ProjectScriptsSettings";
 import { ProjectEnvironmentSettings } from "./ProjectEnvironmentSettings";
@@ -118,6 +119,9 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 	const [pendingProjectSection, setPendingProjectSection] = useState<ProjectSettingsSection | null>(null);
 	const [projectSaveState, setProjectSaveState] = useState<ProjectSettingsSaveState>(initialProjectSaveState);
 	const [cueBusy, setCueBusy] = useState(false);
+	// Unsaved Prompts-page edits live at the dialog so they survive every section switch;
+	// they are dropped when the dialog closes or another project opens, and never saved implicitly.
+	const [promptEdits, setPromptEdits] = useState<ProjectPromptValues | null>(null);
 	useEffect(() => {
 		if (pendingProjectSection && projectSaveState.phase === "saved" && !projectSaveState.dirty) {
 			setActiveProjectSection(pendingProjectSection);
@@ -276,7 +280,7 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 				return <ProjectEnvironmentSettings projectId={displaySettings.projectId} onSaveState={setProjectSaveState} />;
 			}
 			if (displaySettings?.scope === "project") {
-				return <ProjectSettingsForm projectId={displaySettings.projectId} hostId={remoteHostId} cloudOrgId={cloudOrgId} section={activeProjectSection as ProjectFormSection} onSaveState={setProjectSaveState} />;
+				return <ProjectSettingsForm projectId={displaySettings.projectId} hostId={remoteHostId} cloudOrgId={cloudOrgId} section={activeProjectSection as ProjectFormSection} onSaveState={setProjectSaveState} promptEdits={promptEdits} onPromptEditsChange={setPromptEdits} />;
 			}
 			return <GlobalSettingsForm cloudEnabled={cloudEnabled} hasCoder={hasCoder} selfServeBilling={selfServeBilling} focusAgentId={focusAgentId} hostId={displaySettings?.scope === "global" ? displaySettings.hostId : undefined} harnessView={harnessView} startLogin={startLogin} section={activeSection} />;
 		},

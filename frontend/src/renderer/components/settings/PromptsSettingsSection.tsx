@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettings, useUpdateGlobalOrchestratorRules } from "../../hooks/useSettings";
 import { apiErrorMessage } from "../../lib/api-client";
@@ -29,6 +29,8 @@ export function PromptsSettingsSection({ titleHidden }: { titleHidden?: boolean 
 	const [justSaved, setJustSaved] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const draft = edits ?? saved;
+	const latestEditsRef = useRef(edits);
+	latestEditsRef.current = edits;
 
 	const tooLarge = orchestratorRulesBytes(draft) > MAX_ORCHESTRATOR_RULES_BYTES;
 	const dirty = edits !== null && edits.trim() !== saved.trim();
@@ -37,10 +39,14 @@ export function PromptsSettingsSection({ titleHidden }: { titleHidden?: boolean 
 	const save = () => {
 		if (!dirty || saving || tooLarge || isLoading || edits === null) return;
 		setSaveError(null);
-		update(edits).then(
+		const submitted = edits;
+		update(submitted).then(
 			() => {
-				setEdits(null);
-				setJustSaved(true);
+				// Acknowledge only the submitted snapshot; text typed since stays unsaved.
+				if (latestEditsRef.current === submitted) {
+					setEdits(null);
+					setJustSaved(true);
+				}
 			},
 			(cause: unknown) => setSaveError(apiErrorMessage(cause)),
 		);

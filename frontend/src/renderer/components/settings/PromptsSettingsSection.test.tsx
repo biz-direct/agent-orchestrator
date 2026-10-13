@@ -85,3 +85,21 @@ it("saves with Cmd/Ctrl+S and blocks an over-size prompt inline", async () => {
 	await userEvent.keyboard("{Control>}s{/Control}");
 	expect(patchMock).toHaveBeenCalledTimes(1);
 });
+
+it("keeps text typed while a save is pending as an unsaved draft", async () => {
+	let finish: () => void = () => undefined;
+	patchMock.mockImplementationOnce(async (_path: string, init: { body: { globalOrchestratorRules: string } }) => {
+		await new Promise<void>((resolve) => { finish = resolve; });
+		serverRules = init.body.globalOrchestratorRules;
+		return { data: {}, error: undefined };
+	});
+	renderSection();
+	const field = await textarea();
+	await userEvent.type(field, " first");
+	await userEvent.click(screen.getByRole("button", { name: "Save" }));
+	await userEvent.type(field, " newer");
+	finish();
+	await waitFor(() => expect(getMock.mock.calls.length).toBeGreaterThan(1));
+	await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+	expect(field.value).toBe("Saved global. first newer");
+});

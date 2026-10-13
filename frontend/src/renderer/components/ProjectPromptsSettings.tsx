@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { fetchOrchestratorRulesFile, orchestratorRulesFileQueryKey } from "../hooks/useOrchestratorRulesFile";
@@ -42,6 +42,8 @@ export function ProjectPromptsSettings({
 	const [justSaved, setJustSaved] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const current = edits ?? saved;
+	const latestEditsRef = useRef(edits);
+	latestEditsRef.current = edits;
 	const orchestratorRules = current.orchestratorRules ?? "";
 	const orchestratorRulesFile = current.orchestratorRulesFile ?? "";
 	const skipGlobal = current.skipGlobalOrchestratorRules ?? false;
@@ -76,10 +78,14 @@ export function ProjectPromptsSettings({
 		if (!dirty || saving || tooLarge || edits === null) return;
 		setSaving(true);
 		setSaveError(null);
-		onSave(edits).then(
+		const submitted = edits;
+		onSave(submitted).then(
 			() => {
-				onEditsChange(null);
-				setJustSaved(true);
+				// Acknowledge only the submitted snapshot; text typed since stays unsaved.
+				if (latestEditsRef.current === submitted) {
+					onEditsChange(null);
+					setJustSaved(true);
+				}
 			},
 			(cause: unknown) => setSaveError(cause instanceof Error ? cause.message : t("settings.project.saveFailed")),
 		).finally(() => setSaving(false));
