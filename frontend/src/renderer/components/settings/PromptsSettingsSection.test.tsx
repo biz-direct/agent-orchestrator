@@ -103,3 +103,14 @@ it("keeps text typed while a save is pending as an unsaved draft", async () => {
 	await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
 	expect(field.value).toBe("Saved global. first newer");
 });
+
+it("keeps acknowledged text when the post-save refresh fails", async () => {
+	renderSection();
+	const field = await textarea();
+	await userEvent.type(field, " new");
+	getMock.mockRejectedValue(new Error("offline"));
+	await userEvent.click(screen.getByRole("button", { name: "Save" }));
+	await waitFor(() => expect(patchMock).toHaveBeenCalledTimes(1));
+	await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved"));
+	expect(field.value).toBe("Saved global. new");
+});

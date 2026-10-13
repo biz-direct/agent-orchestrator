@@ -116,6 +116,32 @@ describe("Settings recovery modal integration", () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
+	it.each(["close and reopen", "open another project"])("does not carry an unsaved prompt draft over on %s", async (mode) => {
+		vi.spyOn(apiClient, "GET").mockImplementation((async (path: string, init?: { params?: { path?: { id?: string } } }) => {
+			if (path === "/api/v1/projects/{id}") return { data: { status: "ok", project: { ...project, id: init?.params?.path?.id ?? "proj-1", config: { ...project.config, orchestratorRules: "Persisted." } } } };
+			if (path === "/api/v1/agents/readiness") return { data: catalog };
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "tui", chatHarnesses: [], cloudEnabled: false, localEnabled: true, trackerIntakeEnabled: false, globalOrchestratorRules: "" } };
+			return { data: {} };
+		}) as never);
+		const put = vi.spyOn(apiClient, "PUT").mockResolvedValue({ data: { status: "ok" } } as never);
+		useUiStore.getState().openProjectSettings("proj-1", { section: "prompts" });
+		renderDialogs();
+		const field = await screen.findByLabelText("Project orchestrator prompt");
+		await waitFor(() => expect(field).toHaveValue("Persisted."));
+		await userEvent.type(field, " Draft only.");
+		if (mode === "close and reopen") {
+			act(() => useUiStore.getState().closeSettings());
+			await waitFor(() => expect(useUiStore.getState().settingsModal).toBeNull());
+			act(() => useUiStore.getState().openProjectSettings("proj-1", { section: "prompts" }));
+		} else {
+			act(() => useUiStore.getState().openProjectSettings("proj-2", { section: "prompts" }));
+		}
+		const reopened = await screen.findByLabelText("Project orchestrator prompt");
+		await waitFor(() => expect(reopened).toHaveValue("Persisted."));
+		expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+		expect(put).not.toHaveBeenCalled();
+	});
+
 	it.each(["close button", "Escape"])("saves edited project settings on %s", async (dismiss) => {
 		const put = vi.spyOn(apiClient, "PUT").mockResolvedValue({ data: { status: "ok" } } as never);
 		useUiStore.getState().openProjectSettings("proj-1");

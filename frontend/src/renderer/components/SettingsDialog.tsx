@@ -121,7 +121,14 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 	const [cueBusy, setCueBusy] = useState(false);
 	// Unsaved Prompts-page edits live at the dialog so they survive every section switch;
 	// they are dropped when the dialog closes or another project opens, and never saved implicitly.
-	const [promptEdits, setPromptEdits] = useState<ProjectPromptValues | null>(null);
+	const [promptDraft, setPromptDraft] = useState<{ key: string; edits: ProjectPromptValues } | null>(null);
+	const promptScope = settingsModal?.scope === "project" ? `${settingsModal.hostId ?? LOCAL_HOST}/${settingsModal.projectId}` : null;
+	// A draft only applies to the project it was typed in; closing settings drops it.
+	const promptEdits = promptDraft && promptDraft.key === promptScope ? promptDraft.edits : null;
+	const setPromptEdits = (next: ProjectPromptValues | null) => setPromptDraft(next && promptScope ? { key: promptScope, edits: next } : null);
+	useEffect(() => {
+		if (promptScope === null) setPromptDraft(null);
+	}, [promptScope]);
 	useEffect(() => {
 		if (pendingProjectSection && projectSaveState.phase === "saved" && !projectSaveState.dirty) {
 			setActiveProjectSection(pendingProjectSection);
