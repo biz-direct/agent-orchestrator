@@ -130,4 +130,43 @@ describe("initTelemetry recovery", () => {
 		applyRendererTelemetryPolicy(false);
 		expect(posthogStub.opt_out_capturing).toHaveBeenCalledOnce();
 	});
+
+	it("does not init, opt in or capture when consent is revoked while init is in flight", async () => {
+		mockPosthog();
+		let releaseSettings!: (value: object) => void;
+		const settings = new Promise<object>((resolve) => { releaseSettings = resolve; });
+		vi.doMock("./bridge", () => ({
+			aoBridge: {
+				telemetry: { getBootstrap: vi.fn(async () => ({ appVersion: "1.2.3", platform: "darwin", distinctId: "ins_test", disabledEvents: [], eventsEnabled: true, consentGeneration: "g" })) },
+				updateSettings: { get: vi.fn(() => settings) },
+			},
+		}));
+		const { applyRendererTelemetryPolicy, initTelemetry } = await import("./telemetry");
+		const pending = initTelemetry();
+		await Promise.resolve();
+		applyRendererTelemetryPolicy(false);
+		releaseSettings({});
+		expect(await pending).toBe(false);
+		expect(posthogStub.init).not.toHaveBeenCalled();
+		expect(posthogStub.opt_in_capturing).not.toHaveBeenCalled();
+		expect(posthogStub.capture).not.toHaveBeenCalled();
+	});
+
+	it("keeps the SDK opted out after revocation (no reset) and does not capture", async () => {
+		mockPosthog();
+		vi.doMock("./bridge", () => ({
+			aoBridge: {
+				telemetry: { getBootstrap: vi.fn().mockResolvedValueOnce({ appVersion: "1.2.3", platform: "darwin", distinctId: "ins_test", disabledEvents: [], eventsEnabled: true, consentGeneration: "g" }).mockResolvedValue(null) },
+				updateSettings: { get: vi.fn(async () => ({})) },
+			},
+		}));
+		const { applyRendererTelemetryPolicy, captureRendererEvent, initTelemetry } = await import("./telemetry");
+		expect(await initTelemetry()).toBe(true);
+		posthogStub.capture.mockClear();
+		applyRendererTelemetryPolicy(false);
+		expect(posthogStub.opt_out_capturing).toHaveBeenCalledOnce();
+		expect(posthogStub.reset).not.toHaveBeenCalled();
+		await captureRendererEvent("ao.renderer.route_viewed", { surface: "home" });
+		expect(posthogStub.capture).not.toHaveBeenCalled();
+	});
 });

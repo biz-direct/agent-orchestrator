@@ -900,7 +900,7 @@ export function buildPostHogConfig(distinctId: string): PostHogInitOptions {
 			distinctID: distinctId,
 			isIdentifiedID: false,
 		},
-		before_send: (event) => (event ? sanitizePostHogCaptureResult(event) : event),
+		before_send: (event) => (!captureActive || !event ? null : sanitizePostHogCaptureResult(event)),
 		session_recording: {
 			maskCapturedNetworkRequestFn: (request) => {
 				if (request.name) {
@@ -914,17 +914,24 @@ export function buildPostHogConfig(distinctId: string): PostHogInitOptions {
 
 export async function initTelemetry(): Promise<boolean> {
 	if (initPromise) return initPromise;
+	const epoch = consentEpoch;
 	const attempt = (async () => {
 		if (!POSTHOG_KEY) return false;
 		const bootstrap = await aoBridge.telemetry.getBootstrap();
+		if (epoch !== consentEpoch) return false;
 		// Null means the supervisor withheld it: no key, no data dir, or an
 		// unpackaged build that has not opted in. The client is never created.
 		if (!bootstrap) return false;
 		disabledEventMatchers = bootstrap.disabledEvents ?? [];
 		const channel = releaseChannelFrom(await readUpdateSettingsForTelemetry());
+		// Consent may have been revoked while the settings read was in flight.
+		if (epoch !== consentEpoch) return false;
 		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform, channel);
-		posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
-		initialized = true;
+		captureActive = true;
+		if (!sdkCreated) {
+			posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
+			sdkCreated = true;
+		}
 		posthog.opt_in_capturing();
 		posthog.register({
 			...telemetryContext,
@@ -939,7 +946,8 @@ export async function initTelemetry(): Promise<boolean> {
 			distinctId: bootstrap.distinctId,
 		});
 		bindErrorHandlers();
-		startDailyActiveHeartbeat({
+		stopHeartbeat?.();
+		stopHeartbeat = startDailyActiveHeartbeat({
 			storage: telemetryStorage(),
 			window,
 			document,
@@ -949,7 +957,9 @@ export async function initTelemetry(): Promise<boolean> {
 			// reached PostHog in packaged builds, so renderer app-active
 			// dropped to zero while batched events kept landing.
 			capture: async () =>
-				isDeniedEvent("ao.app.active")
+				!captureActive
+					? false
+				: isDeniedEvent("ao.app.active")
 					? true
 					: Boolean(
 					posthog.capture(
@@ -979,30 +989,56 @@ export async function initTelemetry(): Promise<boolean> {
 	return attempt;
 }
 
-/**
- * Acknowledges the renderer part of telemetry cleanup. Opt-out stops the
- * PostHog client (see applyRendererTelemetryPolicy), and the AO-owned daily
- * queues are removed by the policy store.
- */
-export function clearRendererTelemetryQueues(): void {}
 
-let initialized = false;
+
+// sdkCreated: posthog.init ran once (it cannot be re-run). captureActive: the
+// user currently consents. consentEpoch invalidates init attempts begun under an
+// earlier consent state. The SDK stays in its opted-out state after revocation
+// (reset() would clear the consent store and let capture resume).
+let sdkCreated = false;
+let captureActive = true; // no SDK exists until consented init; revocation sets false
+let consentEpoch = 0;
+let stopHeartbeat: (() => void) | null = null;
+
+function discardQueuedPostHogEvents(): void {
+	// Best effort against posthog-js internals: drop anything batched or awaiting retry.
+	const internals = posthog as unknown as Record<string, { clear?: () => void; queue?: unknown[]; _queue?: unknown[]; unload?: () => void } | undefined>;
+	for (const name of ["_requestQueue", "_retryQueue", "requestQueue", "retryQueue"]) {
+		const queue = internals[name];
+		try {
+			if (!queue) continue;
+			if (Array.isArray(queue.queue)) queue.queue.length = 0;
+			if (Array.isArray(queue._queue)) queue._queue.length = 0;
+			queue.clear?.();
+		} catch { /* best effort */ }
+	}
+}
 
 /**
- * Follows the main-owned opt-in. Off: capture is shut off and any later event
- * re-checks the (null) bootstrap, so the SDK is never re-created without
- * consent. On: drop a cached "withheld" init result so the next event inits.
+ * Follows the main-owned opt-in. Off: invalidate in-flight inits, stop the
+ * heartbeat, opt the SDK out and discard queued events. On: drop a cached
+ * "withheld" init result so the next event re-inits (re-enabling does not
+ * resurrect discarded events).
  */
 export function applyRendererTelemetryPolicy(enabled: boolean): void {
 	if (enabled) {
-		if (!initialized) initPromise = null;
+		initPromise = null;
 		return;
 	}
-	if (initialized) {
-		try { posthog.opt_out_capturing(); posthog.reset(); } catch { /* best effort */ }
-		initialized = false;
+	consentEpoch += 1;
+	captureActive = false;
+	stopHeartbeat?.();
+	stopHeartbeat = null;
+	if (sdkCreated) {
+		try { posthog.opt_out_capturing(); } catch { /* best effort */ }
+		discardQueuedPostHogEvents();
 	}
 	initPromise = null;
+}
+
+/** Main-requested purge: discard queued/retry PostHog events before cleanup is acknowledged. */
+export function clearRendererTelemetryQueues(): void {
+	if (sdkCreated) discardQueuedPostHogEvents();
 }
 
 export async function captureRendererEvent(event: string, properties?: Record<string, unknown>): Promise<void> {
