@@ -115,22 +115,11 @@ func (c *SettingsController) setGlobalOrchestratorRules(w http.ResponseWriter, r
 	if !decodeConversationBody(w, r, &req) {
 		return
 	}
-	if req.GlobalOrchestratorRules == nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
-			"GLOBAL_ORCHESTRATOR_RULES_INVALID", "globalOrchestratorRules must be a string", nil)
-		return
-	}
-	snapshot, err := c.Svc.SetGlobalOrchestratorRules(r.Context(), *req.GlobalOrchestratorRules)
-	if errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
-			"ORCHESTRATOR_RULES_TOO_LARGE", err.Error(), nil)
-		return
-	}
-	if err != nil {
-		envelope.WriteError(w, r, err)
-		return
-	}
-	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+	c.setGlobalRules(w, r, req.GlobalOrchestratorRules, globalRulesRoute{
+		invalidCode: "GLOBAL_ORCHESTRATOR_RULES_INVALID", invalidMsg: "globalOrchestratorRules must be a string",
+		tooLarge: domain.ErrOrchestratorRulesTooLarge, tooLargeCode: "ORCHESTRATOR_RULES_TOO_LARGE",
+		save: c.Svc.SetGlobalOrchestratorRules,
+	})
 }
 
 func (c *SettingsController) setGlobalWorkerRules(w http.ResponseWriter, r *http.Request) {
@@ -142,15 +131,30 @@ func (c *SettingsController) setGlobalWorkerRules(w http.ResponseWriter, r *http
 	if !decodeConversationBody(w, r, &req) {
 		return
 	}
-	if req.GlobalWorkerRules == nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
-			"GLOBAL_WORKER_RULES_INVALID", "globalWorkerRules must be a string", nil)
+	c.setGlobalRules(w, r, req.GlobalWorkerRules, globalRulesRoute{
+		invalidCode: "GLOBAL_WORKER_RULES_INVALID", invalidMsg: "globalWorkerRules must be a string",
+		tooLarge: domain.ErrWorkerRulesTooLarge, tooLargeCode: "WORKER_RULES_TOO_LARGE",
+		save: c.Svc.SetGlobalWorkerRules,
+	})
+}
+
+// globalRulesRoute is what differs between the orchestrator and worker global
+// rules routes.
+type globalRulesRoute struct {
+	invalidCode, invalidMsg string
+	tooLarge                error
+	tooLargeCode            string
+	save                    func(ctx context.Context, rules string) (settingssvc.Snapshot, error)
+}
+
+func (c *SettingsController) setGlobalRules(w http.ResponseWriter, r *http.Request, rules *string, route globalRulesRoute) {
+	if rules == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", route.invalidCode, route.invalidMsg, nil)
 		return
 	}
-	snapshot, err := c.Svc.SetGlobalWorkerRules(r.Context(), *req.GlobalWorkerRules)
-	if errors.Is(err, domain.ErrWorkerRulesTooLarge) {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
-			"WORKER_RULES_TOO_LARGE", err.Error(), nil)
+	snapshot, err := route.save(r.Context(), *rules)
+	if errors.Is(err, route.tooLarge) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", route.tooLargeCode, err.Error(), nil)
 		return
 	}
 	if err != nil {
