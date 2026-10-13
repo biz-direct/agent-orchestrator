@@ -662,13 +662,19 @@ func (m *Manager) markChatControllerSpawned(
 		if providerBoundary != nil {
 			return domain.ConversationRecord{}, errors.New("live Chat reconnect cannot replace the provider boundary")
 		}
+		// A live reconnect applies no new prompt: drop what the build staged.
+		m.pendingRules.Delete(id)
 		return conversation, m.lcm.MarkChatReconnected(ctx, id, metadata)
 	}
 	if handoff != nil && (providerBoundary == nil || commitProviderHistory == nil) {
 		return domain.ConversationRecord{}, errors.New("native Chat handoff requires atomic history publication")
 	}
 	if providerBoundary == nil {
-		return conversation, m.lcm.MarkSpawned(ctx, id, metadata)
+		if err := m.lcm.MarkSpawned(ctx, id, metadata); err != nil {
+			return conversation, err
+		}
+		m.commitAppliedRules(id)
+		return conversation, nil
 	}
 	var err error
 	if commitProviderHistory == nil {
@@ -696,6 +702,7 @@ func (m *Manager) markChatControllerSpawned(
 	if err != nil {
 		return domain.ConversationRecord{}, err
 	}
+	m.commitAppliedRules(id)
 	conversation.ActiveBranchID = providerBoundary.ID
 	conversation.SessionID = id
 	conversation.UpdatedAt = providerBoundary.CreatedAt

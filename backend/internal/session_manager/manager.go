@@ -428,7 +428,10 @@ type Manager struct {
 	modelCatalog interface {
 		Models(context.Context, string, string, bool) (ports.AgentModelCatalog, error)
 	}
-	lcm                         lifecycleRecorder
+	lcm lifecycleRecorder
+	// pendingRules holds, per session, the rules digest of the prompt just built
+	// for a launch. It becomes the applied digest only when that launch succeeds.
+	pendingRules                sync.Map
 	preview                     PreviewLifecycle
 	browser                     BrowserLifecycle
 	browserCapabilities         BrowserCapabilityIssuer
@@ -1468,6 +1471,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		m.markSpawnFailedTerminatedAfterFailure(ctx, id, false)
 		return domain.SessionRecord{}, 0, 0, wrapSpawnStage(id, ErrSpawnCommit, err)
 	}
+	m.commitAppliedRules(id)
 	if delivery == ports.PromptDeliveryAfterStart && afterStartPrompt != "" {
 		if err := m.deliverAfterStartPrompt(ctx, agent, launchCfg, handle, id, afterStartPrompt); err != nil {
 			runtimeDestroyed := m.destroySpawnRuntimeAfterFailure(ctx, handle)
@@ -3434,6 +3438,7 @@ func (m *Manager) relaunchSessionWithPolicyAndGeneration(ctx context.Context, op
 		m.cleanupSystemPromptDir(rec.ID)
 		return RestoreResult{}, fmt.Errorf("%s %s: completed: %w", operation, rec.ID, err)
 	}
+	m.commitAppliedRules(rec.ID)
 	if delivery == ports.PromptDeliveryAfterStart && afterStartPrompt != "" {
 		if err := m.deliverAfterStartPrompt(ctx, agent, launchCfg, handle, rec.ID, afterStartPrompt); err != nil {
 			m.destroySpawnRuntimeAfterFailure(ctx, handle)
@@ -5465,7 +5470,7 @@ func (m *Manager) buildSessionPrompt(ctx context.Context, kind domain.SessionKin
 		return "", err
 	}
 	if record {
-		m.recordAppliedRules(sessionID, sections)
+		m.pendingRules.Store(sessionID, rulesFingerprint(sections))
 	}
 	texts := make([]string, 0, len(sections))
 	for _, section := range sections {

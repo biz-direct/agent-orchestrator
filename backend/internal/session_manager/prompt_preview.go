@@ -203,17 +203,24 @@ func rulesFingerprint(sections []PromptSection) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// recordAppliedRules notes the rules a session is being launched with. It is
-// best effort: a failed write only makes the session report "unknown".
-func (m *Manager) recordAppliedRules(id domain.SessionID, sections []PromptSection) {
+// commitAppliedRules makes the rules staged by the last prompt build for id the
+// applied ones. It runs only after the launch they were built for succeeded, so a
+// preflight failure, cancellation, or rollback leaves the previous digest alone.
+// Best effort: a failed write only makes the session report "unknown".
+func (m *Manager) commitAppliedRules(id domain.SessionID) {
+	staged, ok := m.pendingRules.LoadAndDelete(id)
+	if !ok {
+		return
+	}
+	fingerprint, _ := staged.(string)
 	dir := m.systemPromptDir(id)
-	if dir == "" || id == "" {
+	if dir == "" || id == "" || fingerprint == "" {
 		return
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(dir, rulesFingerprintFile), []byte(rulesFingerprint(sections)+"\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, rulesFingerprintFile), []byte(fingerprint+"\n"), 0o600)
 }
 
 func (m *Manager) promptFreshness(ctx context.Context, rec domain.SessionRecord) string {

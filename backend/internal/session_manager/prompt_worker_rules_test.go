@@ -309,6 +309,11 @@ func TestPromptSessions_Freshness(t *testing.T) {
 	if _, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", false); err != nil {
 		t.Fatal(err)
 	}
+	// Building is not applying: nothing is recorded until the launch succeeds.
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessUnknown {
+		t.Fatalf("after build only = %q, want unknown", got)
+	}
+	m.commitAppliedRules("mer-1")
 	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessCurrent {
 		t.Fatalf("after launch = %q, want current", got)
 	}
@@ -328,6 +333,10 @@ func TestPromptSessions_Freshness(t *testing.T) {
 	if _, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", true); err != nil {
 		t.Fatal(err)
 	}
+	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessStale {
+		t.Fatalf("restore built but not yet launched = %q, want stale", got)
+	}
+	m.commitAppliedRules("mer-1")
 	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessCurrent {
 		t.Fatalf("after restore = %q, want current", got)
 	}
@@ -337,6 +346,7 @@ func TestPromptSessions_Freshness(t *testing.T) {
 	if _, err := m.buildSessionPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", true, false); err != nil {
 		t.Fatal(err)
 	}
+	m.commitAppliedRules("mer-1")
 	if got := freshnessOf(t, m, "mer-1"); got != PromptFreshnessStale {
 		t.Fatalf("after reconnect-only = %q, want stale", got)
 	}
@@ -344,6 +354,7 @@ func TestPromptSessions_Freshness(t *testing.T) {
 	if _, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", "mer-1", "", false); err != nil {
 		t.Fatal(err)
 	}
+	m.commitAppliedRules("mer-1")
 	if err := os.WriteFile(filepath.Join(dataDir, "prompts", "mer-1", "system.md"), []byte("prompt plus switch continuation\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -363,5 +374,85 @@ func TestPromptSessions_Filtering(t *testing.T) {
 	all, err := m.PromptSessions(ctx, "", PromptRoleWorker)
 	if err != nil || len(all) != 2 {
 		t.Fatalf("all-project listing = %d sessions, %v; want 2", len(all), err)
+	}
+}
+
+// Lifecycle level: a Chat-to-TUI transition whose target preflight fails leaves
+// the running Chat source on its old rules, so freshness must stay stale.
+func TestPromptFreshness_FailedTransitionPreflightKeepsPreviousDigest(t *testing.T) {
+	manager, store, _, _, _ := newTransitionManager(t, domain.SessionModeChat)
+	manager.dataDir = t.TempDir()
+	project := store.projects["proj"]
+	project.Config.AgentRules = "Old rule."
+	store.projects["proj"] = project
+	manager.agents = singleAgent{agent: failingRestoreTransitionAgent{
+		transitionAgent: transitionAgent{},
+		err:             errors.New("native terminal resume unavailable"),
+	}}
+	// The original launch applied the old rules.
+	if _, err := manager.buildSystemPrompt(ctx, domain.KindWorker, "proj", "session-1", "", true); err != nil {
+		t.Fatal(err)
+	}
+	manager.commitAppliedRules("session-1")
+	project.Config.AgentRules = "New rule."
+	store.projects["proj"] = project
+	freshness := func() string {
+		sessions, err := manager.PromptSessions(ctx, "proj", PromptRoleWorker)
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("sessions = %+v, %v", sessions, err)
+		}
+		return sessions[0].Freshness
+	}
+	if got := freshness(); got != PromptFreshnessStale {
+		t.Fatalf("after rules edit = %q, want stale", got)
+	}
+
+	transition, err := manager.StartInterfaceTransition(ctx, "session-1", domain.SessionModeTUI,
+		domain.SessionInterfaceTransitionInterrupt, domain.SessionInterfaceTransitionHistoryStrict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled := awaitTransition(t, store, transition.ID)
+	if settled.Phase != domain.SessionInterfaceTransitionFailed {
+		t.Fatalf("transition = %+v, want failed preflight", settled)
+	}
+	if got := freshness(); got != PromptFreshnessStale {
+		t.Fatalf("after failed preflight = %q, want stale (the Chat source still has the old rules)", got)
+	}
+}
+
+// A real spawn applies the rules once MarkSpawned succeeds; an edit afterwards makes it stale.
+func TestPromptFreshness_SpawnRecordsAppliedRules(t *testing.T) {
+	st := newFakeStore()
+	cfg := testRoleAgents()
+	cfg.AgentRules = "Old rule."
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+	agent := &recordingAgent{}
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: agent}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: func(string) (string, error) { return "/bin/true", nil }, DataDir: t.TempDir()})
+	rec, _, _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshness := func() string {
+		sessions, err := m.PromptSessions(ctx, "mer", PromptRoleWorker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range sessions {
+			if s.SessionID == string(rec.ID) {
+				return s.Freshness
+			}
+		}
+		t.Fatalf("spawned session %s not listed: %+v", rec.ID, sessions)
+		return ""
+	}
+	if got := freshness(); got != PromptFreshnessCurrent {
+		t.Fatalf("after spawn = %q, want current", got)
+	}
+	project := st.projects["mer"]
+	project.Config.AgentRules = "New rule."
+	st.projects["mer"] = project
+	if got := freshness(); got != PromptFreshnessStale {
+		t.Fatalf("after rules edit = %q, want stale", got)
 	}
 }

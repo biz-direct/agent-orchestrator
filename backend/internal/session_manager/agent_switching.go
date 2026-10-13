@@ -912,6 +912,9 @@ func (m *Manager) executeAgentSwitch(ctx context.Context, admitted *admittedAgen
 	}
 	recorder.boundary(domain.AgentSwitchFailureTargetActivationCommit)
 	activated, activationErr := m.lcm.ActivateAgentSwitchTarget(ctx, activation)
+	if activationErr == nil && activated {
+		m.commitAppliedRules(rec.ID)
+	}
 	if activationErr != nil || !activated {
 		recorder.failurePoint = domain.AgentSwitchFailureTargetActivationReadback
 		activationCtx, cancelActivation := switchDurableContext(ctx)
@@ -3638,6 +3641,7 @@ func (m *Manager) reconcileStartingTarget(ctx context.Context, store ports.Agent
 	if !activated {
 		return false, fmt.Errorf("reconcile agent switch %s: target activation ownership changed concurrently", sw.ID)
 	}
+	m.commitAppliedRules(rec.ID)
 	current, err := requireAgentSwitch(ctx, store, sw.ID)
 	if err != nil {
 		return false, err
