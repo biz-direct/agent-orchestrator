@@ -456,3 +456,31 @@ func TestPromptFreshness_SpawnRecordsAppliedRules(t *testing.T) {
 		t.Fatalf("after rules edit = %q, want stale", got)
 	}
 }
+
+// A switch whose target launch-auth check fails leaves the source controller
+// untouched, so its rules digest must not move to the edited rules.
+func TestPromptFreshness_FailedSwitchPreflightKeepsPreviousDigest(t *testing.T) {
+	runtime := &fakeRestartRuntime{fakeRuntime: &fakeRuntime{}}
+	manager, store, _ := newSwitchTestManager(t, runtime)
+	manager.dataDir = t.TempDir()
+	project := store.projects["proj"]
+	project.Config.AgentRules = "Old rule."
+	store.projects["proj"] = project
+	if _, err := manager.buildSystemPrompt(ctx, domain.KindWorker, "proj", "proj-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	manager.commitAppliedRules("proj-1")
+	project.Config.AgentRules = "New rule."
+	store.projects["proj"] = project
+	manager.agents.(switchTestAgents)[domain.HarnessCodex].(*switchTestAgent).launchAuthStatus = ports.AgentAuthStatusUnauthorized
+
+	if _, err := switchAgentSynchronously(ctx, manager, "proj-1", SwitchAgentConfig{
+		TargetHarness: domain.HarnessCodex, IdempotencyKey: "rules-digest-preflight",
+	}); !errors.Is(err, ErrTargetAgentUnauthorized) {
+		t.Fatalf("switch error = %v, want ErrTargetAgentUnauthorized", err)
+	}
+	sessions, err := manager.PromptSessions(ctx, "proj", PromptRoleWorker)
+	if err != nil || len(sessions) != 1 || sessions[0].Freshness != PromptFreshnessStale {
+		t.Fatalf("sessions = %+v, %v; want one stale (source still has the old rules)", sessions, err)
+	}
+}
