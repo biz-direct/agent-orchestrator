@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettings, useUpdateGlobalOrchestratorRules } from "../../hooks/useSettings";
-import { Button } from "../ui/button";
+import { apiErrorMessage } from "../../lib/api-client";
 import { Textarea } from "../ui/textarea";
+import { isSaveShortcut, PromptsSaveBar } from "./PromptsSaveBar";
 import { SettingsSection } from "./SettingsSection";
 
 /** Mirrors the daemon's 32 KiB cap on one orchestrator rules value. */
@@ -20,25 +21,45 @@ export function orchestratorRulesBytes(value: string): number {
 export function PromptsSettingsSection({ titleHidden }: { titleHidden?: boolean }) {
 	const { t } = useTranslation();
 	const { settings, isLoading, error } = useSettings();
-	const { update, saving, error: saveError } = useUpdateGlobalOrchestratorRules();
+	const { update, saving } = useUpdateGlobalOrchestratorRules();
 	const saved = settings?.globalOrchestratorRules ?? "";
-	const [draft, setDraft] = useState(saved);
-	// Follow the saved value only while the draft is untouched, so a refresh that
-	// lands after the user kept typing never overwrites the newer edits.
-	const syncedRef = useRef(saved);
-	useEffect(() => {
-		const previous = syncedRef.current;
-		syncedRef.current = saved;
-		setDraft((current) => (current.trim() === previous.trim() ? saved : current));
-	}, [saved]);
+	// `edits` holds the user's unsaved text; null means "show the saved value".
+	// A background refetch only changes `saved`, so it can never overwrite edits.
+	const [edits, setEdits] = useState<string | null>(null);
+	const [justSaved, setJustSaved] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const draft = edits ?? saved;
 
 	const tooLarge = orchestratorRulesBytes(draft) > MAX_ORCHESTRATOR_RULES_BYTES;
-	const dirty = draft.trim() !== saved.trim();
+	const dirty = edits !== null && edits.trim() !== saved.trim();
 	const message = tooLarge ? t("settings.prompts.tooLarge") : (saveError ?? error);
+
+	const save = () => {
+		if (!dirty || saving || tooLarge || isLoading || edits === null) return;
+		setSaveError(null);
+		update(edits).then(
+			() => {
+				setEdits(null);
+				setJustSaved(true);
+			},
+			(cause: unknown) => setSaveError(apiErrorMessage(cause)),
+		);
+	};
+	const discard = () => {
+		setEdits(null);
+		setSaveError(null);
+	};
 
 	return (
 		<SettingsSection titleHidden={titleHidden} title={t("settings.prompts")}>
-			<div className="flex w-full flex-col gap-2 rounded-md bg-[var(--color-bg-settings-row)] p-3">
+			<div
+				className="flex w-full flex-col gap-2 rounded-md bg-[var(--color-bg-settings-row)] p-3"
+				onKeyDown={(event) => {
+					if (!isSaveShortcut(event)) return;
+					event.preventDefault();
+					save();
+				}}
+			>
 				<label htmlFor="global-orchestrator-prompt" className="text-sm font-medium text-foreground">
 					{t("settings.prompts.global.label")}
 				</label>
@@ -49,22 +70,22 @@ export function PromptsSettingsSection({ titleHidden }: { titleHidden?: boolean 
 					value={draft}
 					disabled={isLoading}
 					aria-invalid={tooLarge}
-					onChange={(event) => setDraft(event.target.value)}
+					onChange={(event) => {
+						setEdits(event.target.value);
+						setJustSaved(false);
+						setSaveError(null);
+					}}
 				/>
 				<p className="text-xs leading-relaxed text-muted-foreground">{t("settings.prompts.global.scope")}</p>
-				{message ? (
-					<p role="alert" className="text-xs text-destructive">{message}</p>
-				) : null}
-				<div className="flex justify-end">
-					<Button
-						type="button"
-						size="sm"
-						disabled={!dirty || saving || tooLarge || isLoading}
-						onClick={() => void update(draft).catch(() => undefined)}
-					>
-						{t("settings.prompts.save")}
-					</Button>
-				</div>
+				<PromptsSaveBar
+					dirty={dirty}
+					saving={saving}
+					blocked={tooLarge || isLoading}
+					saved={justSaved}
+					error={message}
+					onSave={save}
+					onDiscard={discard}
+				/>
 			</div>
 		</SettingsSection>
 	);

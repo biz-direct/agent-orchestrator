@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { fetchOrchestratorRulesFile, orchestratorRulesFileQueryKey } from "../hooks/useOrchestratorRulesFile";
 import { useSettings } from "../hooks/useSettings";
 import { cn } from "../lib/utils";
+import type { CommitProjectPrompts, ProjectPromptValues } from "./ProjectSettingsEditor";
+import { isSaveShortcut, PromptsSaveBar } from "./settings/PromptsSaveBar";
 import { MAX_ORCHESTRATOR_RULES_BYTES, orchestratorRulesBytes } from "./settings/PromptsSettingsSection";
 import { Input } from "./ui/input";
 import { Switch } from "./ui/switch";
@@ -12,32 +14,47 @@ import { Textarea } from "./ui/textarea";
 
 /**
  * Project orchestrator prompt: the host's global prompt (read-only, collapsed),
- * the per-project opt-out, and the project's own `orchestratorRules`. Edits flow
- * through the project form's autosave; they never replace a running orchestrator.
+ * the per-project opt-out, and the project's own `orchestratorRules`. Edits stay
+ * local until Save is clicked (or Cmd/Ctrl+S); they never replace a running
+ * orchestrator, and a refetch of the saved values never overwrites them.
  */
 export function ProjectPromptsSettings({
 	projectId,
 	hostId,
-	orchestratorRules,
-	orchestratorRulesFile,
+	saved,
+	edits,
+	onEditsChange,
+	onSave,
 	rulesFileError,
-	skipGlobal,
-	onOrchestratorRulesChange,
-	onOrchestratorRulesFileChange,
-	onSkipGlobalChange,
 }: {
 	projectId: string;
 	hostId?: string;
-	orchestratorRules: string;
-	orchestratorRulesFile: string;
+	saved: ProjectPromptValues;
+	/** Unsaved values; null while nothing has been edited. */
+	edits: ProjectPromptValues | null;
+	onEditsChange: (next: ProjectPromptValues | null) => void;
+	onSave: CommitProjectPrompts;
 	/** Set when saving was blocked because the file path did not validate. */
 	rulesFileError?: string | null;
-	skipGlobal: boolean;
-	onOrchestratorRulesChange: (value: string) => void;
-	onOrchestratorRulesFileChange: (value: string) => void;
-	onSkipGlobalChange: (value: boolean) => void;
 }) {
 	const { t } = useTranslation();
+	const [saving, setSaving] = useState(false);
+	const [justSaved, setJustSaved] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const current = edits ?? saved;
+	const orchestratorRules = current.orchestratorRules ?? "";
+	const orchestratorRulesFile = current.orchestratorRulesFile ?? "";
+	const skipGlobal = current.skipGlobalOrchestratorRules ?? false;
+	const dirty =
+		edits !== null &&
+		(orchestratorRules.trim() !== (saved.orchestratorRules ?? "").trim() ||
+			orchestratorRulesFile.trim() !== (saved.orchestratorRulesFile ?? "").trim() ||
+			skipGlobal !== (saved.skipGlobalOrchestratorRules ?? false));
+	const edit = (patch: Partial<ProjectPromptValues>) => {
+		setJustSaved(false);
+		setSaveError(null);
+		onEditsChange({ ...current, ...patch });
+	};
 	const { settings, isLoading, error } = useSettings(hostId);
 	const [previewOpen, setPreviewOpen] = useState(false);
 	const globalRules = (settings?.globalOrchestratorRules ?? "").trim();
@@ -55,9 +72,32 @@ export function ProjectPromptsSettings({
 	});
 	const fileMessage = rulesFileError ?? (previewPath === trimmedFile && filePreview.error instanceof Error ? filePreview.error.message : null);
 	const tooLarge = orchestratorRulesBytes(orchestratorRules) > MAX_ORCHESTRATOR_RULES_BYTES;
+	const save = () => {
+		if (!dirty || saving || tooLarge || edits === null) return;
+		setSaving(true);
+		setSaveError(null);
+		onSave(edits).then(
+			() => {
+				onEditsChange(null);
+				setJustSaved(true);
+			},
+			(cause: unknown) => setSaveError(cause instanceof Error ? cause.message : t("settings.project.saveFailed")),
+		).finally(() => setSaving(false));
+	};
+	const discard = () => {
+		setSaveError(null);
+		onEditsChange(null);
+	};
 
 	return (
-		<div className="flex w-full flex-col gap-4 rounded-md bg-[var(--color-bg-settings-row)] p-3">
+		<div
+			className="flex w-full flex-col gap-4 rounded-md bg-[var(--color-bg-settings-row)] p-3"
+			onKeyDown={(event) => {
+				if (!isSaveShortcut(event)) return;
+				event.preventDefault();
+				save();
+			}}
+		>
 			<section className="flex flex-col gap-2" aria-label={t("settings.prompts.project.globalPreview")}>
 				<button
 					type="button"
@@ -95,7 +135,7 @@ export function ProjectPromptsSettings({
 				<Switch
 					id="skip-global-orchestrator-prompt"
 					checked={skipGlobal}
-					onCheckedChange={onSkipGlobalChange}
+					onCheckedChange={(value) => edit({ skipGlobalOrchestratorRules: value })}
 				/>
 			</div>
 
@@ -108,7 +148,7 @@ export function ProjectPromptsSettings({
 					className="min-h-48 font-mono text-xs"
 					value={orchestratorRules}
 					aria-invalid={tooLarge}
-					onChange={(event) => onOrchestratorRulesChange(event.target.value)}
+					onChange={(event) => edit({ orchestratorRules: event.target.value })}
 				/>
 				{tooLarge ? <p role="alert" className="text-xs text-destructive">{t("settings.prompts.tooLarge")}</p> : null}
 			</div>
@@ -124,7 +164,7 @@ export function ProjectPromptsSettings({
 					placeholder="docs/orchestrator-rules.md"
 					aria-invalid={Boolean(fileMessage)}
 					aria-describedby={fileMessage ? "project-orchestrator-rules-file-error" : undefined}
-					onChange={(event) => onOrchestratorRulesFileChange(event.target.value)}
+					onChange={(event) => edit({ orchestratorRulesFile: event.target.value })}
 				/>
 				{fileMessage ? <p id="project-orchestrator-rules-file-error" role="alert" className="text-xs text-destructive">{fileMessage}</p> : null}
 				{trimmedFile && !fileMessage && previewPath === trimmedFile && filePreview.data !== undefined ? (
@@ -138,6 +178,16 @@ export function ProjectPromptsSettings({
 			</div>
 
 			<p className="text-xs leading-relaxed text-muted-foreground">{t("settings.prompts.project.takesEffect")}</p>
+
+			<PromptsSaveBar
+				dirty={dirty}
+				saving={saving}
+				blocked={tooLarge}
+				saved={justSaved}
+				error={saveError !== rulesFileError ? saveError : null}
+				onSave={save}
+				onDiscard={discard}
+			/>
 		</div>
 	);
 }
