@@ -74,6 +74,8 @@ type fakeSessionService struct {
 	workspaceSearchQuery       string
 	workspaceSearchCursor      string
 	workspaceSearchLimit       int
+	workspaceResolvePath       string
+	workspaceResolution        sessionsvc.WorkspacePathResolution
 	workspaceTree              sessionsvc.WorkspaceTree
 	workspaceTreePath          string
 	workspacePaths             []string
@@ -814,6 +816,17 @@ func (f *fakeSessionService) GetPRFileRevisionAtCommit(ctx context.Context, id d
 func (f *fakeSessionService) GetWorkspaceFileRevisionAtCommit(ctx context.Context, id domain.SessionID, path string, side sessionsvc.WorkspaceFileBlobSide, workspaceVersion, expectedRevision, commitSHA string) (sessionsvc.WorkspaceFileRevision, error) {
 	f.workspaceRevisionCommitSHA = commitSHA
 	return f.GetWorkspaceFileRevision(ctx, id, path, sessionsvc.WorkspaceDiffCommitted, side, workspaceVersion, expectedRevision)
+}
+
+func (f *fakeSessionService) ResolveWorkspacePath(_ context.Context, id domain.SessionID, rawPath string) (sessionsvc.WorkspacePathResolution, error) {
+	f.workspaceResolvePath = rawPath
+	if f.workspaceErr != nil {
+		return sessionsvc.WorkspacePathResolution{}, f.workspaceErr
+	}
+	if _, ok := f.sessions[id]; !ok {
+		return sessionsvc.WorkspacePathResolution{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	return f.workspaceResolution, nil
 }
 
 func (f *fakeSessionService) SearchWorkspaceFiles(_ context.Context, id domain.SessionID, query, cursor string, limit int) (sessionsvc.WorkspaceFileSearch, error) {
@@ -3730,6 +3743,26 @@ func TestSessionsAPI_SearchWorkspaceFiles(t *testing.T) {
 	var got controllers.WorkspaceFileSearchResponse
 	mustJSON(t, body, &got)
 	if len(got.Results) != 1 || got.Results[0].Path != "README.md" || got.NextCursor != "1" {
+		t.Fatalf("response = %#v", got)
+	}
+}
+
+func TestSessionsAPI_ResolveWorkspacePath(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceResolution = sessionsvc.WorkspacePathResolution{SessionID: "ao-1", Kind: sessionsvc.WorkspacePathKindWorkspace, Path: "src/app.ts"}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, headers := doRequest(t, srv, http.MethodGet, "/api/v1/sessions/ao-1/workspace/resolve?path="+url.QueryEscape("/root/src/app.ts"), "")
+	assertJSON(t, headers)
+	if status != http.StatusOK {
+		t.Fatalf("GET workspace resolve = %d body=%s", status, body)
+	}
+	if svc.workspaceResolvePath != "/root/src/app.ts" {
+		t.Fatalf("service path = %q, want /root/src/app.ts", svc.workspaceResolvePath)
+	}
+	var got controllers.WorkspacePathResolutionResponse
+	mustJSON(t, body, &got)
+	if got.SessionID != "ao-1" || got.Kind != sessionsvc.WorkspacePathKindWorkspace || got.Path != "src/app.ts" {
 		t.Fatalf("response = %#v", got)
 	}
 }

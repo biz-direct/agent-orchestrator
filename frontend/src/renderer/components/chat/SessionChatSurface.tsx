@@ -416,7 +416,10 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 		}
 	};
 
-	const openLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths);
+	const openLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths, onOpenFile);
+	// Links opened on the user's behalf stay quiet about a file the session does
+	// not own; only a click earns the explanation in the file pane.
+	const autoOpenLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths);
 	const openSessionLink = useSessionLinkNavigation(hostId);
 	const conversationLinkBaselines = useRef(new Map<string, ConversationLinkBaseline>());
 	useEffect(() => {
@@ -469,11 +472,11 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 			if (url) {
 				autoOpenedLinkSessions.add(uiSessionId);
 				pendingCompleted.delete(item.id);
-				openLinkInBrowser(url);
+				autoOpenLinkInBrowser(url);
 				break;
 			}
 		}
-	}, [isLoading, openLinkInBrowser, paths, snapshot, uiSessionId]);
+	}, [autoOpenLinkInBrowser, isLoading, paths, snapshot, uiSessionId]);
 	const observedSuccessfulSwitch = Boolean(
 		agentSwitch &&
 			observedSettledSwitchId === agentSwitch.id &&

@@ -111,6 +111,7 @@ func TestBuildSystemPrompt_OrchestratorRequiresConfirmationAndAOOnlyDelegation(t
 		"ask the human to choose an alternative",
 		"## In-App Session Links",
 		"ao://sessions/{project-id}/{session-id}",
+		"ao://sessions/{project-id}/{session-id}/artifacts/{path}",
 		"Use stable project and session IDs",
 		"operating-system deep links",
 	} {

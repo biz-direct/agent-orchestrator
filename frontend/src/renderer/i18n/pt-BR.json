@@ -55,6 +55,8 @@
 	"agentSelector.needsSetup": "Requer configuração",
 	"session.statusChecking": "Verificando…",
 	"session.statusUnavailable": "Não foi possível verificar",
+	"artifactLink.unavailable": "Artefato indisponível",
+	"artifactLink.noPreview": "Nenhuma pré-visualização disponível",
 	"session.agentTerminated": "Agente encerrado",
 	"activity.active": "Em andamento",
 	"activity.blocked": "Aguardando decisão",
@@ -1530,6 +1532,14 @@
 	"shell.kanban": "Kanban",
 	"shell.kill": "Encerrar",
 	"shell.archiveSession": "Arquivar sessão",
+<<<<<<< HEAD
+=======
+	"shell.openArtifactNamed": "Abrir artefato {{name}}",
+	"shell.moreArtifacts": "+{{count}} a mais",
+	"inspector.more": "Mais",
+	"artifacts.sessionEmpty": "Esta sessão ainda não tem artefatos.",
+	"artifacts.back": "Voltar aos artefatos",
+>>>>>>> upstream/main
 	"shell.archiving": "Arquivando...",
 	"shell.workspaceCleanupPending": "Cleanup pending: {{title}}",
 	"shell.workspaceCleanupFailed": "Workspace cleanup failed. Retry cleanup in project Scripts settings.",
@@ -1991,6 +2001,7 @@
 	"files.expandFile": "Expandir {{file}}",
 	"files.loadingDiff": "Carregando diff...",
 	"files.error.loadFile": "Não foi possível carregar este arquivo.",
+	"files.error.outsideWorkspace": "Este arquivo está fora do workspace da sessão, então não pode ser aberto aqui.",
 	"files.noChangesHead": "Nenhuma alteração em relação a HEAD.",
 	"files.noChangesBase": "Nenhuma alteração em relação à base.",
 	"files.noneChanged": "Nenhum arquivo alterado encontrado.",
@@ -2169,6 +2180,13 @@
 	"settings.help": "Help",
 	"settings.diagnostics": "Diagnóstico",
 	"settings.diagnosticsToggleHint": "Mostra o uso de memória e CPU nos cartões de sessão e no quadro, além da página de Diagnóstico.",
+<<<<<<< HEAD
+=======
+	"settings.sideChats": "Chats laterais",
+	"settings.sideChatsHint": "Abra conversas laterais separadas no inspetor e use /btw ou /side para fazer uma pergunta.",
+	"settings.windowTranslucency": "Transparência da janela",
+	"settings.windowTranslucencyHint": "Desfoca a área de trabalho atrás da janela do app.",
+>>>>>>> upstream/main
 	"settings.harness": "Harness",
 	"settings.harness.thisComputer": "Este computador",
 	"settings.harness.remoteBrowserAuthNote": "O login no navegador pode exigir um navegador no host ou encaminhamento da porta de retorno.",
@@ -2612,6 +2630,19 @@
 	"chat.draftDiscard.leaveAnyway": "Sair mesmo assim",
 	"chat.edit.abandonRecovery": "Abandonar recuperação da edição",
 	"chat.welcome.heading": "Em que você quer trabalhar?",
+<<<<<<< HEAD
+=======
+	"chat.welcome.artifactHeading": "What do you want to create?",
+	"chat.welcome.artifactPlaceholder": "Describe the page or document you want",
+	"chat.welcome.artifactPrompts": "Sample artifact requests",
+	"chat.welcome.artifactPrompt.plan": "Write a one-page plan for a new feature",
+	"chat.welcome.artifactPrompt.compare": "Build an HTML page comparing three options side by side",
+	"chat.welcome.artifactPrompt.notes": "Turn my rough notes into a polished Markdown document",
+	"chat.welcome.prompts": "Sample requests",
+	"chat.welcome.prompt.review": "Review my recent changes for bugs",
+	"chat.welcome.prompt.tests": "Add tests for the code I am working on",
+	"chat.welcome.prompt.trace": "Walk me through how a request flows through this code",
+>>>>>>> upstream/main
 	"chat.mcpNotice.unavailable_one": "{{names}} não iniciou. Continuando sem ele.",
 	"chat.mcpNotice.unavailable_other": "{{names}} não iniciaram. Continuando sem eles.",
 	"chat.mcpNotice.unavailable_many": "{{names}} não iniciaram. Continuando sem eles.",

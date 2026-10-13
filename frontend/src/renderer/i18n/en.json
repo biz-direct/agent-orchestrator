@@ -55,6 +55,8 @@
 	"agentSelector.needsSetup": "Needs setup",
 	"session.statusChecking": "Checking…",
 	"session.statusUnavailable": "Unable to verify",
+	"artifactLink.unavailable": "Artifact unavailable",
+	"artifactLink.noPreview": "No preview available",
 	"session.agentTerminated": "Agent terminated",
 	"activity.active": "Working",
 	"activity.blocked": "Awaiting Decision",
@@ -1263,6 +1265,13 @@
 	"settings.help": "Help",
 	"settings.diagnostics": "Diagnostics",
 	"settings.diagnosticsToggleHint": "Show memory and CPU usage on session cards and the board, and the Diagnostics page.",
+<<<<<<< HEAD
+=======
+	"settings.sideChats": "Side chats",
+	"settings.sideChatsHint": "Open separate side conversations in the inspector, and use /btw or /side to ask one a question.",
+	"settings.windowTranslucency": "Window transparency",
+	"settings.windowTranslucencyHint": "Blur the desktop behind the app window.",
+>>>>>>> upstream/main
 	"settings.harness": "Harness",
 	"settings.harness.thisComputer": "This computer",
 	"settings.harness.remoteBrowserAuthNote": "Browser sign-in may require a browser on the host or callback-port forwarding.",
@@ -1655,6 +1664,14 @@
 	"shell.kanban": "Kanban",
 	"shell.kill": "Kill",
 	"shell.archiveSession": "Archive session",
+<<<<<<< HEAD
+=======
+	"shell.openArtifactNamed": "Open artifact {{name}}",
+	"shell.moreArtifacts": "+{{count}} more",
+	"inspector.more": "More",
+	"artifacts.sessionEmpty": "No artifacts in this session yet.",
+	"artifacts.back": "Back to artifacts",
+>>>>>>> upstream/main
 	"shell.archiving": "Archiving…",
 	"shell.workspaceCleanupPending": "Cleanup pending: {{title}}",
 	"shell.workspaceCleanupFailed": "Workspace cleanup failed. Retry cleanup in project Scripts settings.",
@@ -2204,6 +2221,7 @@
 	"files.expandFile": "Expand {{file}}",
 	"files.loadingDiff": "Loading diff...",
 	"files.error.loadFile": "Unable to load this file.",
+	"files.error.outsideWorkspace": "This file is outside the session's workspace, so it can't be opened here.",
 	"files.noChangesHead": "No changes against HEAD.",
 	"files.noChangesBase": "No changes against base.",
 	"files.noneChanged": "No changed files found.",
@@ -2562,6 +2580,19 @@
 	"chat.draftDiscard.leaveAnyway": "Leave anyway",
 	"chat.edit.abandonRecovery": "Abandon edit recovery",
 	"chat.welcome.heading": "What do you want to work on?",
+<<<<<<< HEAD
+=======
+	"chat.welcome.artifactHeading": "What do you want to create?",
+	"chat.welcome.artifactPlaceholder": "Describe the page or document you want",
+	"chat.welcome.artifactPrompts": "Sample artifact requests",
+	"chat.welcome.artifactPrompt.plan": "Write a one-page plan for a new feature",
+	"chat.welcome.artifactPrompt.compare": "Build an HTML page comparing three options side by side",
+	"chat.welcome.artifactPrompt.notes": "Turn my rough notes into a polished Markdown document",
+	"chat.welcome.prompts": "Sample requests",
+	"chat.welcome.prompt.review": "Review my recent changes for bugs",
+	"chat.welcome.prompt.tests": "Add tests for the code I am working on",
+	"chat.welcome.prompt.trace": "Walk me through how a request flows through this code",
+>>>>>>> upstream/main
 	"chat.mcpNotice.unavailable_one": "{{names}} didn’t start. Continuing without it.",
 	"chat.mcpNotice.unavailable_other": "{{names}} didn’t start. Continuing without them.",
 	"common.or": "or",

@@ -35,6 +35,7 @@ import { isArtifactPreviewUrl } from "../lib/artifact-preview";
 import { SessionBrowserPopOut } from "./SessionBrowserPopOut";
 import { SessionActionsMenu } from "./SessionActionsMenu";
 import { SessionInspector } from "./SessionInspector";
+import type { ArtifactOpenRequest } from "./SessionArtifactsView";
 import { ShellTopbar } from "./ShellTopbar";
 import { SwitchAgentDialog } from "./SwitchAgentDialog";
 import { SessionTopbarHost } from "./SessionTopbarPortal";
@@ -77,8 +78,8 @@ import { clientForSessionHost } from "../lib/host-clients";
 import { useHostConnection } from "../hooks/useHostConnection";
 import { sessionReviewsQueryKey } from "../lib/session-reviews";
 import { sessionUiKey } from "../lib/hosts";
-import { sessionWorkspaceFilesQueryOptions } from "../hooks/useSessionWorkspaceFiles";
-import { matchWorkspaceFilePath } from "../lib/workspace-file-path";
+import { resolveSessionWorkspacePath, sessionWorkspaceFilesQueryOptions } from "../hooks/useSessionWorkspaceFiles";
+import { isAbsoluteFileReference, matchWorkspaceFilePath, normalizeWorkspaceFileReference } from "../lib/workspace-file-path";
 import { markFileViewerPerformance } from "../lib/file-viewer-performance";
 import { aoBridge } from "../lib/bridge";
 import {
@@ -95,7 +96,7 @@ import { isMacPlatform } from "../lib/platform";
 import { useShell } from "../lib/shell-context";
 import { cn } from "../lib/utils";
 import { usesPreviewWorkspaceData } from "../lib/preview-mode";
-import { isOrchestratorSession, sessionAgentExited, sessionIsActive } from "../types/workspace";
+import { isOrchestratorSession, sessionAgentExited, sessionIsActive, type SessionArtifact, type WorkspaceSummary } from "../types/workspace";
 import { terminalTargetBelongsToSession, type TerminalTarget } from "../types/terminal";
 import { useCloudSessionPresence } from "../hooks/useCloudSessionPresence";
 import { focusAfterPaint, useSessionShortcut } from "../hooks/useAppShortcut";
@@ -518,9 +519,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	});
 	const [filesPoppedOut, setFilesPoppedOut] = useState(false);
 	const [filesSplit, setFilesSplit] = useState(() => window.localStorage.getItem("ao.files.diffStyle") === "split");
-	const [filePreviewRequestsBySession, setFilePreviewRequestsBySession] = useState<
-		Record<string, { feedback?: boolean; path: string; key: number; source?: "artifact" }>
-	>({});
+	const [artifactRequestsBySession, setArtifactRequestsBySession] = useState<Record<string, ArtifactOpenRequest>>({});
 	const [fileTabsBySession, setFileTabsBySession] = useState<Record<string, SessionFileTabState>>({});
 	const fileTabs = fileTabsBySession[uiSessionId] ?? EMPTY_SESSION_FILE_TABS;
 	const [dirtyFilesBySession, setDirtyFilesBySession] = useState<Record<string, Record<string, true>>>({});
@@ -1498,35 +1497,68 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		);
 	}, [hostId, queryClient, sessionId, t]);
 
-	const revealResolvedWorkspaceFile = useCallback(
-		async (rawPath: string, options?: FileOpenOptions) => {
-			const data = await fetchWorkspaceFiles();
-			const path = matchWorkspaceFilePath(rawPath, data.files ?? []);
-			openCenterFile(path, options);
+	const handleOpenArtifact = useCallback(
+		(target: { feedback?: boolean; path: string }) => {
+			if (browserOnly) return;
+			setBrowserPopOutState({ sessionId, phase: "docked" });
+			setFilesPoppedOut(false);
+			transitionInspectorView("artifacts");
+			setInspectorOpenForSession(uiSessionId, true);
+			setArtifactRequestsBySession((current) => ({
+				...current,
+				[uiSessionId]: { feedback: target.feedback, path: target.path, key: (current[uiSessionId]?.key ?? 0) + 1 },
+			}));
 		},
-		[openCenterFile, fetchWorkspaceFiles],
+		[browserOnly, sessionId, setInspectorOpenForSession, transitionInspectorView, uiSessionId],
 	);
 
-	// A reveal is one-shot. Left in place, it would reopen the file (and take
-	// focus from the agent tab) every time the explorer re-ran it, which happens
-	// on each return to this session.
-	const handleRevealHandled = useCallback((key: number) => {
-		setFilePreviewRequestsBySession((current) => {
-			if (current[uiSessionId]?.key !== key) return current;
-			const { [uiSessionId]: _handled, ...rest } = current;
-			return rest;
-		});
-	}, [uiSessionId]);
+	// A file written moments ago, or one past the artifact list cap, is not in
+	// the cached session, and the Files inspector can only show listed
+	// artifacts. Refresh once before deciding it cannot be opened.
+	const revealResolvedArtifact = useCallback(
+		async (path: string) => {
+			if (browserOnly) return false;
+			const listed = (artifacts: SessionArtifact[] | undefined) => artifacts?.some((artifact) => artifact.path === path) ?? false;
+			if (!listed(session?.artifactFiles)) {
+				await refreshWorkspaces();
+				const refreshed = queryClient.getQueryData<WorkspaceSummary[]>(workspaceQueryKeyForHost(hostId))
+					?.flatMap((workspace) => workspace.sessions)
+					.find((candidate) => candidate.id === sessionId);
+				if (!listed(refreshed?.artifactFiles)) return false;
+			}
+			handleOpenArtifact({ path });
+			return true;
+		},
+		[browserOnly, handleOpenArtifact, hostId, queryClient, refreshWorkspaces, session?.artifactFiles, sessionId],
+	);
+
+	const revealResolvedWorkspaceFile = useCallback(
+		async (rawPath: string, options?: FileOpenOptions) => {
+			const reference = normalizeWorkspaceFileReference(rawPath);
+			if (!isAbsoluteFileReference(reference)) {
+				const data = await fetchWorkspaceFiles();
+				openCenterFile(matchWorkspaceFilePath(rawPath, data.files ?? []), options);
+				return;
+			}
+			// The renderer is never told where a session's worktree lives, so the
+			// daemon decides which root an absolute path belongs to.
+			const resolved = await resolveSessionWorkspacePath(sessionId, reference, hostId);
+			if (resolved?.kind === "workspace") {
+				openCenterFile(resolved.path, options);
+				return;
+			}
+			if (resolved?.kind === "artifact" && await revealResolvedArtifact(resolved.path)) return;
+			// Outside the session, or the daemon could not say. Nothing shows the
+			// path belongs here, so open it as written and let the file pane say
+			// so, rather than a workspace file that happens to share its name.
+			openCenterFile(reference, options);
+		},
+		[fetchWorkspaceFiles, hostId, openCenterFile, revealResolvedArtifact, sessionId],
+	);
 
 	const handleOpenFiles = useCallback(() => {
 		markFileViewerPerformance("files-click");
-		// Opens the workspace changes, replacing an artifact opened earlier.
 		setFilesSource(uiSessionId, { kind: "workspace" });
-		setFilePreviewRequestsBySession((current) => {
-			if (current[uiSessionId]?.source !== "artifact") return current;
-			const { [uiSessionId]: _artifact, ...rest } = current;
-			return rest;
-		});
 		prepareFilesInspector();
 		void fetchWorkspaceFiles();
 	}, [fetchWorkspaceFiles, prepareFilesInspector, setFilesSource, uiSessionId]);
@@ -1545,19 +1577,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		[revealResolvedWorkspaceFile],
 	);
 
-	const handleOpenArtifact = useCallback(
-		(target: { feedback?: boolean; path: string }) => {
-			if (browserOnly) return;
-			prepareFilesInspector();
-			setFilePreviewRequestsBySession((current) => ({
-				...current,
-				[uiSessionId]: { feedback: target.feedback, path: target.path, key: (current[uiSessionId]?.key ?? 0) + 1, source: "artifact" },
-			}));
-		},
-		[browserOnly, prepareFilesInspector, uiSessionId],
-	);
-	const handleFilePreviewRequestConsumed = useCallback((key: number) => {
-		setFilePreviewRequestsBySession((current) => {
+	const handleArtifactRequestConsumed = useCallback((key: number) => {
+		setArtifactRequestsBySession((current) => {
 			const request = current[uiSessionId];
 			if (!request || request.key !== key || !request.feedback) return current;
 			return {
@@ -1573,7 +1594,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		const { line, nonce, path, source } = workspaceFileOpenRequest;
 		if (source === "artifact") {
 			// Same routing as the Summary panel's artifact rows: HTML opens in
-			// the Browser panel, everything else in the Files artifact viewer.
+			// the Browser panel, everything else in the Artifacts view.
 			const artifact = session.artifactFiles?.find((file) => file.path === path);
 			if (artifact?.kind === "html" && artifact.previewUrl) openArtifactPreview(artifact.previewUrl);
 			else handleOpenArtifact({ path });
@@ -2086,14 +2107,10 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 										<CloudWorkspaceDiff annotation={fileAnnotation} onOpenFile={openCenterFile} onSplitChange={setFilesSplit} onToggleMaximized={handleToggleFilesPopOut} session={session} split={filesSplit} />
 									) : (
 										<SessionFileExplorer
-											artifacts={session.artifactFiles ?? []}
 											hostId={hostId}
 											onOpenFile={openCenterFile}
-											onRevealHandled={handleRevealHandled}
-											onRevealRequestConsumed={handleFilePreviewRequestConsumed}
 											onSplitChange={setFilesSplit}
 											onToggleMaximized={handleToggleFilesPopOut}
-											revealRequest={filePreviewRequestsBySession[uiSessionId] ?? null}
 											sessionId={session.id}
 											split={filesSplit}
 										/>
@@ -2101,6 +2118,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 								) : null
 							}
 							isInspectorVisible={inspectorPanelVisible}
+							artifactRequest={artifactRequestsBySession[uiSessionId] ?? null}
+							onArtifactRequestConsumed={handleArtifactRequestConsumed}
 							onOpenArtifact={browserOnly ? undefined : handleOpenArtifact}
 							onOpenFiles={browserOnly ? undefined : handleOpenFiles}
 							onOpenReviewFile={handleOpenReviewFile}
@@ -2186,14 +2205,10 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 									<CloudWorkspaceDiff annotation={fileAnnotation} isMaximized onOpenFile={openCenterFile} onSplitChange={setFilesSplit} onToggleMaximized={handleToggleFilesPopOut} session={session} split={filesSplit} />
 								) : (
 									<SessionFileExplorer
-										artifacts={session.artifactFiles ?? []}
 										hostId={hostId}
 										isMaximized
-										onRevealHandled={handleRevealHandled}
-										onRevealRequestConsumed={handleFilePreviewRequestConsumed}
 										onSplitChange={setFilesSplit}
 										onToggleMaximized={handleToggleFilesPopOut}
-										revealRequest={filePreviewRequestsBySession[uiSessionId] ?? null}
 										sessionId={session.id}
 										split={filesSplit}
 									/>
