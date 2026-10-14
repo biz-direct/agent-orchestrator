@@ -2250,6 +2250,20 @@ describe("ProjectSettingsForm", () => {
 			expect(postMock).not.toHaveBeenCalled();
 		});
 
+		it("does not block saving when saved project worker rules exceed the global 32 KiB limit", async () => {
+			withPromptApis();
+			mockProject({ ...project, config: { ...project.config, agentRules: "x".repeat(32 * 1024 + 1) } });
+			const base = getMock.getMockImplementation()!;
+			getMock.mockImplementation(async (path: string, init?: unknown) =>
+				path === "/api/v1/projects/{id}/agent-rules-file" || path === "/api/v1/projects/{id}/effective-prompt" || path === "/api/v1/prompts/sessions"
+					? { data: path.endsWith("sessions") ? { sessions: [] } : { path: "docs/worker.md", content: "x", sections: [], text: "", role: "worker", mode: "tui" }, error: undefined }
+					: base(path, init as never));
+			renderSettings("proj-1", undefined, "prompts");
+			await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "Be terse.");
+			expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+			expect(screen.queryByText("Too large: the limit is 32 KiB.")).not.toBeInTheDocument();
+		});
+
 		it("discards worker edits", async () => {
 			withPromptApis();
 			renderSettings("proj-1", undefined, "prompts");

@@ -32,6 +32,7 @@ function RolePromptFields({
 	onEdit,
 	rulesFileError,
 	refreshKey,
+	limitBytes,
 }: {
 	role: PromptRole;
 	projectId: string;
@@ -44,6 +45,8 @@ function RolePromptFields({
 	onEdit: (patch: { rules?: string; rulesFile?: string; skipGlobal?: boolean }) => void;
 	rulesFileError?: string | null;
 	refreshKey: number;
+	/** The daemon's size cap for this value; undefined when it enforces none (project worker rules). */
+	limitBytes?: number;
 }) {
 	const { t } = useTranslation();
 	const worker = role === "worker";
@@ -62,7 +65,7 @@ function RolePromptFields({
 		retry: false,
 	});
 	const fileMessage = rulesFileError ?? (previewPath === trimmedFile && filePreview.error instanceof Error ? filePreview.error.message : null);
-	const tooLarge = orchestratorRulesBytes(rules) > MAX_ORCHESTRATOR_RULES_BYTES;
+	const tooLarge = limitBytes !== undefined && orchestratorRulesBytes(rules) > limitBytes;
 	const trimmedGlobal = globalRules.trim();
 	return (
 		<div className="flex flex-col gap-4" role="group" aria-label={t(worker ? "settings.prompts.project.workerHeading" : "settings.prompts.project.orchestratorHeading")}>
@@ -204,8 +207,8 @@ export function ProjectPromptsSettings({
 	};
 	const { settings, isLoading, error } = useSettings(hostId);
 	const globalState = isLoading ? "loading" : error || !settings ? "failed" : "ready";
-	const tooLarge =
-		orchestratorRulesBytes(orchestratorRules) > MAX_ORCHESTRATOR_RULES_BYTES || orchestratorRulesBytes(agentRules) > MAX_ORCHESTRATOR_RULES_BYTES;
+	// Only orchestrator rules are capped per project; project worker rules have no daemon limit.
+	const tooLarge = orchestratorRulesBytes(orchestratorRules) > MAX_ORCHESTRATOR_RULES_BYTES;
 	const save = () => {
 		if (!dirty || saving || tooLarge || edits === null) return;
 		setSaving(true);
@@ -257,6 +260,7 @@ export function ProjectPromptsSettings({
 				})}
 				rulesFileError={orchestratorFileError}
 				refreshKey={savedCount}
+				limitBytes={MAX_ORCHESTRATOR_RULES_BYTES}
 			/>
 			<RolePromptFields
 				role="worker"

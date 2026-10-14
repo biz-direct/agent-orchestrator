@@ -1,23 +1,25 @@
 import { useRouter } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { useRolePromptSessions, type PromptRole, type PromptSession } from "../../hooks/usePromptViews";
+import { sessionNavigateTarget } from "../../lib/navigate-to-session";
 import { useUiStore } from "../../stores/ui-store";
 import { Button } from "../ui/button";
 
 /** Opens a session and closes Settings; undefined when there is no router (tests, isolated renders). */
-function useOpenSession() {
+function useOpenSession(hostId?: string) {
 	const router = useRouter({ warn: false });
 	const closeSettings = useUiStore((state) => state.closeSettings);
 	if (!router) return undefined;
-	return (projectId: string, sessionId: string) => {
+	return (projectId: string | undefined, sessionId: string) => {
 		closeSettings();
-		void router.navigate({ to: "/projects/$projectId/sessions/$sessionId", params: { projectId, sessionId } });
+		// Keeps the owning host for remote sessions and uses the standalone route when there is no project.
+		void router.navigate(sessionNavigateTarget(projectId || undefined, sessionId, hostId));
 	};
 }
 
-function SessionList({ role, sessions }: { role: PromptRole; sessions: PromptSession[] }) {
+function SessionList({ role, sessions, hostId }: { role: PromptRole; sessions: PromptSession[]; hostId?: string }) {
 	const { t } = useTranslation();
-	const openSession = useOpenSession();
+	const openSession = useOpenSession(hostId);
 	return (
 		<div className="flex flex-col gap-1" data-testid={`apply-${role}`}>
 			<p className="text-xs font-medium text-foreground">{t(role === "orchestrator" ? "settings.prompts.apply.orchestrators" : "settings.prompts.apply.workers")}</p>
@@ -68,7 +70,7 @@ export function PromptApplyNotice({ roles, projectId, hostId }: { roles: PromptR
 			{failed ? <p className="text-xs text-destructive">{t("settings.prompts.apply.loadFailed")}</p> : null}
 			{!loading && !failed && !any ? <p className="text-xs text-muted-foreground">{t("settings.prompts.apply.none")}</p> : null}
 			{affected.filter((entry) => entry.sessions.length > 0).map((entry) => (
-				<SessionList key={entry.role} role={entry.role} sessions={entry.sessions} />
+				<SessionList key={entry.role} role={entry.role} sessions={entry.sessions} hostId={hostId} />
 			))}
 		</div>
 	);

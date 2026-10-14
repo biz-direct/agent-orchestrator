@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
+import { aoBridge } from "../../lib/bridge";
 import { PromptsSettingsSection } from "./PromptsSettingsSection";
 
 const { getMock, patchMock } = vi.hoisted(() => ({ getMock: vi.fn(), patchMock: vi.fn() }));
@@ -191,7 +192,7 @@ it("says so when no running session uses the previous rules", async () => {
 });
 
 it("shows AO's built-in prompts read-only, labelled as sample, with Copy", async () => {
-	const writeText = vi.spyOn(window.ao.clipboard, "writeText");
+	const writeText = vi.spyOn(aoBridge.clipboard, "writeText");
 	renderSection();
 	expect(screen.queryByTestId("builtin-orchestrator")).not.toBeInTheDocument();
 	await userEvent.click(screen.getByRole("button", { name: "Built-in prompts" }));
