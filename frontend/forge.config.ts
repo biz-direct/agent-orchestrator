@@ -296,16 +296,11 @@ const config: ForgeConfig = {
 		new MakerNSIS(
 			{
 				appId: "dev.agent-orchestrator.desktop",
-				// The name shown in the installer, the updater, the shortcuts, and
-				// Windows Apps. It matches the app's display name in main.ts.
-				productName: "Orchestrator.inc",
+				productName: "Agent Orchestrator",
 				// Match the packaged binary name so the Start menu shortcut targets
 				// the real "agent-orchestrator.exe" (not "Agent Orchestrator.exe").
 				executableName: EXECUTABLE_NAME,
 				icon: "assets/icon.ico",
-				// Keep the installer filename unchanged. electron-builder names it
-				// after productName by default.
-				nsis: { artifactName: "Agent Orchestrator Setup ${version}.${ext}" },
 			},
 			["win32"],
 		),
