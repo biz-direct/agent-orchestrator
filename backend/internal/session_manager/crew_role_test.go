@@ -365,4 +365,7 @@ func TestStartCrewRoleDoesNotStartAProviderForARoleRemovedDuringCreation(t *test
 	if !errors.Is(err, ports.ErrCrewRoleNotFound) || len(launcher.started) != 0 {
 		t.Fatalf("a role removed mid-creation must not get a provider: err=%v started=%d", err, len(launcher.started))
 	}
+	if _, found := st.forAttempt[domain.CrewRoleMarker(owner.ID, "builder")]; found {
+		t.Fatal("the failed creation must release the role's claim so it can be added again")
+	}
 }
