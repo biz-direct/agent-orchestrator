@@ -12,6 +12,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/pipeline"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/workgate"
 )
 
 // Handoff pause reasons. Each is operational: none consumes the repair budget,
@@ -22,7 +23,7 @@ const (
 	PauseHandoffUncertain domain.PipelinePauseReason = "handoff_uncertain"
 	// PauseUnexpectedChanges: the worktree no longer matches the accepted
 	// checkpoint once the source stopped.
-	PauseUnexpectedChanges domain.PipelinePauseReason = "unexpected_changes"
+	PauseUnexpectedChanges domain.PipelinePauseReason = workgate.ReasonUnexpectedChanges
 	// PauseStageUnsupported: the stage's harness/mode cannot run as a Chat
 	// specialist. There is no Terminal fallback.
 	PauseStageUnsupported domain.PipelinePauseReason = "stage_unsupported"
