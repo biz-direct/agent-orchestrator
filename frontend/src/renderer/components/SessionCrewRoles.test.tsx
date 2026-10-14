@@ -11,8 +11,8 @@ vi.mock("../lib/host-clients", () => ({
 	clientForSessionHost: () => ({ GET: getMock, POST: postMock, DELETE: deleteMock }),
 }));
 vi.mock("./chat/SessionChatSurface", () => ({
-	SessionChatSurface: ({ session, sideChatsDisabled, assetBaseUrl, hostId }: { session: { id: string }; sideChatsDisabled?: boolean; assetBaseUrl?: string; hostId?: string }) => (
-		<div data-asset-base={assetBaseUrl ?? ""} data-host={hostId ?? ""} data-side-disabled={String(Boolean(sideChatsDisabled))} data-testid="role-chat">{session.id}</div>
+	SessionChatSurface: ({ session, sideChatsDisabled, assetBaseUrl, hostId, browserSession }: { session: { id: string; hostId?: string }; sideChatsDisabled?: boolean; assetBaseUrl?: string; hostId?: string; browserSession?: { id: string } }) => (
+		<div data-browser-session={browserSession?.id ?? ""} data-session-host={session.hostId ?? ""} data-asset-base={assetBaseUrl ?? ""} data-host={hostId ?? ""} data-side-disabled={String(Boolean(sideChatsDisabled))} data-testid="role-chat">{session.id}</div>
 	),
 }));
 
@@ -122,5 +122,14 @@ describe("crew role tabs", () => {
 			</QueryClientProvider>,
 		);
 		expect(screen.getByTestId("role-chat")).toHaveAttribute("data-asset-base", "");
+	});
+
+	it("addresses messages to the role but opens browser links in the task's own pane", () => {
+		const remoteOwner = { ...owner, hostId: "remote-1" } as WorkspaceSession;
+		wrap(<CrewRoleChat hostId="remote-1" owner={remoteOwner} role={builder} />);
+		const chat = screen.getByTestId("role-chat");
+		expect(chat).toHaveTextContent("w-att-2");
+		expect(chat).toHaveAttribute("data-browser-session", "w-1");
+		expect(chat).toHaveAttribute("data-session-host", "remote-1");
 	});
 });

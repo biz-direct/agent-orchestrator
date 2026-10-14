@@ -2105,7 +2105,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 							</div>
 							{roleActive && activeRole && session ? (
 								<div className="absolute inset-0 bg-background">
-									<CrewRoleChat assetBaseUrl={remoteBase} hostId={hostId} owner={session} role={activeRole} />
+									<CrewRoleChat assetBaseUrl={remoteBase} hostId={hostId} onOpenLinkInBrowser={browserView.openLink} owner={session} role={activeRole} />
 								</div>
 							) : null}
 							{fileTabs.activePath ? (

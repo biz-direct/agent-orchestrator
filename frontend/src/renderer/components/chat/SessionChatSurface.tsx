@@ -132,6 +132,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceFileActive,
 	hideHeader,
 	sideChatsDisabled,
+	browserSession,
 	auxiliaryTabOrder,
 	onAuxiliaryTabOrderChange,
 	controllerTransitioning,
@@ -186,6 +187,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	hideHeader?: boolean;
 	/** No side-chat panel is mounted for this surface, so /btw, /side and "Add to side chat" must not be offered. */
 	sideChatsDisabled?: boolean;
+	/** The session whose visible Browser pane links open in, when it is not this conversation's own (a crew role opens links in its task's pane). */
+	browserSession?: WorkspaceSession;
 	/** Session-owned order shared with the terminal UI surface. */
 	auxiliaryTabOrder?: string[];
 	onAuxiliaryTabOrderChange?: (keys: string[]) => void;
@@ -423,7 +426,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 		}
 	};
 
-	const openLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths);
+	const openLinkInBrowser = useSessionBrowserLink(browserSession ?? session, onOpenLinkInBrowser, paths);
 	const openSessionLink = useSessionLinkNavigation(hostId);
 	const conversationLinkBaselines = useRef(new Map<string, ConversationLinkBaseline>());
 	useEffect(() => {

@@ -188,9 +188,12 @@ export function AddCrewRoleMenu({
 export function CrewRoleChat({
 	assetBaseUrl,
 	hostId,
+	onOpenLinkInBrowser,
 	owner,
 	role,
 }: {
+	/** Opens a link in the task's visible Browser pane. */
+	onOpenLinkInBrowser?: (uri: string) => Promise<void>;
 	/** The connected remote host's proxy base; absent while disconnected, so assets never fall back to the local daemon. */
 	assetBaseUrl?: string;
 	hostId?: string;
@@ -201,11 +204,12 @@ export function CrewRoleChat({
 		id: role.sessionId,
 		workspaceId: owner.workspaceId,
 		workspaceName: owner.workspaceName,
+		hostId: owner.hostId,
 		title: role.role,
 		provider: (role.harness || owner.provider) as WorkspaceSession["provider"],
 		kind: "worker",
 		mode: "chat",
 		status: "working",
 	} as WorkspaceSession;
-	return <SessionChatSurface assetBaseUrl={assetBaseUrl} hideHeader sideChatsDisabled hostId={hostId} key={role.sessionId} session={session} daemonReady />;
+	return <SessionChatSurface assetBaseUrl={assetBaseUrl} browserSession={owner} hideHeader onOpenLinkInBrowser={onOpenLinkInBrowser} sideChatsDisabled hostId={hostId} key={role.sessionId} session={session} daemonReady />;
 }
