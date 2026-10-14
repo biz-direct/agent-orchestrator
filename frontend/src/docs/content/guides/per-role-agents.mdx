@@ -75,7 +75,7 @@ Model, reasoning effort, permissions, and provider execution modes depend on the
 
 Use `agentRules` and `agentRulesFile` for worker instructions. Use `orchestratorRules` for supervision-specific guidance. These are stored in the typed project config and injected into the appropriate session role.
 
-### Orchestrator prompts
+### Orchestrator and worker prompts
 
 Orchestrators get two optional layers of your own instructions on top of AO's built-in orchestrator prompt:
 
@@ -83,6 +83,18 @@ Orchestrators get two optional layers of your own instructions on top of AO's bu
 2. **Project orchestrator prompt** (project **Settings → Prompts**, stored as `orchestratorRules`): applies to that project only and comes after the global layer. It can also point at a repository-relative rules file (`orchestratorRulesFile`), whose contents follow the inline text.
 
 The layers only add; they cannot remove AO's built-in instructions. Each value is plain text up to 32 KiB. Edits reach an orchestrator the next time it is spawned or restored, not while it is running. The global prompt is stored per AO daemon, so remote hosts keep their own, and AO Cloud and Coder sessions do not use it yet.
+
+Workers are layered the same way on top of AO's built-in worker prompt:
+
+1. **Global worker prompt** (**Settings → Prompts**): applies to every worker on this computer, including standalone workers. A project can opt out with **Skip global worker prompt**.
+2. **Project worker prompt** (project **Settings → Prompts → Worker**, stored as `agentRules`): applies to that project's workers and comes after the global layer.
+3. **Worker rules file** (`agentRulesFile`): a repository-relative file whose contents follow the inline text. The page previews the file and checks the path before saving.
+
+AO's native review sessions run their own reviewer prompt and do not use these layers.
+
+**See what AO sends.** **Settings → Prompts → Built-in prompts** shows AO's fixed orchestrator, worker, and standalone worker prompts, rendered with sample project values, with a **Copy** button on each part. They cannot be edited; start your own rules from them. In a project's **Prompts** page, **Effective orchestrator prompt** and **Effective worker prompt** show the full prompt a new session would get right now, with each part labelled built-in, global, project, rules file, or added per session. They reflect saved settings, not unsaved edits.
+
+**After saving.** Running sessions keep their old rules until they are next spawned or restored. After a save, the page lists the running sessions that still use the previous rules, each linking to the session. AO does not restart running sessions for you.
 
 <Callout type="info">
 	Orchestrator uses the provider CLI already installed and authenticated on your machine. Run `ao doctor` if a configured harness fails preflight.
