@@ -1,6 +1,6 @@
 //go:build windows
 
-package pipelineruns
+package workgate
 
 import "os/exec"
 

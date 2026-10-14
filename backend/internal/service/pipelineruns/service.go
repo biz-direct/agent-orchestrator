@@ -28,6 +28,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/pipeline"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/workgate"
 )
 
 // Execution facts recorded in pipeline_events.
@@ -682,28 +683,26 @@ func (s *Service) acceptFailure(ctx context.Context, run domain.PipelineRun, att
 }
 
 func (s *Service) acceptCommitted(ctx context.Context, run domain.PipelineRun, attempt domain.PipelineStageAttempt, session domain.SessionRecord, in SubmitInput) (SubmitResult, error) {
-	state, err := s.git.Inspect(ctx, session.Metadata.WorkspacePath)
-	if err != nil {
-		return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_WORKSPACE_UNREADABLE", fmt.Sprintf("The workspace could not be inspected: %v", err), nil)
-	}
-	switch {
-	case state.Branch != run.ExpectedBranch:
-		return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_BRANCH_CHANGED", fmt.Sprintf("The workspace is on %q but the run expects branch %q; check out the task branch and submit again", branchLabel(state.Branch), run.ExpectedBranch), nil)
-	case state.DirtyTotal > 0:
-		return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_DIRTY_WORKSPACE", fmt.Sprintf("The workspace has %d uncommitted path(s). Commit or discard them yourself, then submit again; AO never resets your worktree", state.DirtyTotal), state.Dirty)
-	case !strings.HasPrefix(state.Head, in.OutputCommit):
-		return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_STALE_REVISION", fmt.Sprintf("The result reports output commit %s but the workspace HEAD is %s", shortCommit(in.OutputCommit), shortCommit(state.Head)), nil)
-	}
-	noChange := state.Head == attempt.InputCommit
-	if !noChange {
-		descends, err := s.git.IsAncestor(ctx, session.Metadata.WorkspacePath, attempt.InputCommit, state.Head)
-		if err != nil {
-			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_WORKSPACE_UNREADABLE", fmt.Sprintf("History could not be verified: %v", err), nil)
-		}
-		if !descends {
+	state, mismatch := workgate.VerifyCheckpoint(ctx, s.git, session.Metadata.WorkspacePath, workgate.Checkpoint{
+		Branch: run.ExpectedBranch, Head: in.OutputCommit, Input: attempt.InputCommit, Clean: workgate.CleanAll,
+	})
+	if mismatch != nil {
+		switch mismatch.Kind {
+		case workgate.MismatchUnreadable:
+			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_WORKSPACE_UNREADABLE", fmt.Sprintf("The workspace could not be inspected: %v", mismatch.Err), nil)
+		case workgate.MismatchBranch:
+			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_BRANCH_CHANGED", fmt.Sprintf("The workspace is on %q but the run expects branch %q; check out the task branch and submit again", branchLabel(state.Branch), run.ExpectedBranch), nil)
+		case workgate.MismatchDirty:
+			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_DIRTY_WORKSPACE", fmt.Sprintf("The workspace has %d uncommitted path(s). Commit or discard them yourself, then submit again; AO never resets your worktree", state.DirtyTotal), state.Dirty)
+		case workgate.MismatchHead:
+			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_STALE_REVISION", fmt.Sprintf("The result reports output commit %s but the workspace HEAD is %s", shortCommit(in.OutputCommit), shortCommit(state.Head)), nil)
+		case workgate.MismatchHistoryUnreadable:
+			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_WORKSPACE_UNREADABLE", fmt.Sprintf("History could not be verified: %v", mismatch.Err), nil)
+		default:
 			return SubmitResult{}, s.reject(ctx, run, attempt, "PIPELINE_NON_LINEAR_HANDOFF", fmt.Sprintf("Commit %s does not descend from the stage's input commit %s; history was rewritten", shortCommit(state.Head), shortCommit(attempt.InputCommit)), nil)
 		}
 	}
+	noChange := state.Head == attempt.InputCommit
 	// A specialist's whole stage-owned diff (every commit since its input
 	// checkpoint, including deletions, renames, and symlinks) must stay inside
 	// the scope snapshotted at start. Violations are preserved and explained;
@@ -724,7 +723,7 @@ func (s *Service) acceptCommitted(ctx context.Context, run domain.PipelineRun, a
 		return s.beginValidation(ctx, run, attempt, in, state.Head, noChange)
 	}
 	now := s.clock()
-	err = s.commitAcceptance(ctx, run, attempt, snap, &domain.PipelineAttemptFinish{
+	err := s.commitAcceptance(ctx, run, attempt, snap, &domain.PipelineAttemptFinish{
 		ID: attempt.ID, State: domain.PipelineAttemptAccepted, OutputCommit: state.Head, NoChange: noChange,
 		Outcome: OutcomeSucceeded, Summary: in.Summary, ResultKey: in.IdempotencyKey, ResultJSON: reportJSON(in.Report), FinishedAt: now,
 	})
@@ -1019,22 +1018,9 @@ func (s *Service) ReconcileAll(ctx context.Context) error {
 	return firstErr
 }
 
-func shortCommit(c string) string {
-	if len(c) > 10 {
-		return c[:10]
-	}
-	if c == "" {
-		return "(none)"
-	}
-	return c
-}
+func shortCommit(c string) string { return workgate.ShortCommit(c) }
 
-func branchLabel(b string) string {
-	if b == "" {
-		return "a detached HEAD"
-	}
-	return b
-}
+func branchLabel(b string) string { return workgate.BranchLabel(b) }
 
 // UnfinishedRunChecker is the single store query the guard needs.
 type UnfinishedRunChecker interface {

@@ -14,7 +14,7 @@ import (
 
 const getAppSettings = `-- name: GetAppSettings :one
 
-SELECT id, default_session_mode, updated_at, cloud_offering, global_orchestrator_rules FROM app_settings WHERE id = 1
+SELECT id, default_session_mode, updated_at, cloud_offering, global_orchestrator_rules, global_worker_rules FROM app_settings WHERE id = 1
 `
 
 // Daemon-owned user preferences. One row, seeded by migration 0042, so a read
@@ -28,6 +28,7 @@ func (q *Queries) GetAppSettings(ctx context.Context) (AppSetting, error) {
 		&i.UpdatedAt,
 		&i.CloudOffering,
 		&i.GlobalOrchestratorRules,
+		&i.GlobalWorkerRules,
 	)
 	return i, err
 }
@@ -71,5 +72,19 @@ type SetGlobalOrchestratorRulesParams struct {
 
 func (q *Queries) SetGlobalOrchestratorRules(ctx context.Context, arg SetGlobalOrchestratorRulesParams) error {
 	_, err := q.db.ExecContext(ctx, setGlobalOrchestratorRules, arg.GlobalOrchestratorRules, arg.UpdatedAt)
+	return err
+}
+
+const setGlobalWorkerRules = `-- name: SetGlobalWorkerRules :exec
+UPDATE app_settings SET global_worker_rules = ?, updated_at = ? WHERE id = 1
+`
+
+type SetGlobalWorkerRulesParams struct {
+	GlobalWorkerRules string
+	UpdatedAt         time.Time
+}
+
+func (q *Queries) SetGlobalWorkerRules(ctx context.Context, arg SetGlobalWorkerRulesParams) error {
+	_, err := q.db.ExecContext(ctx, setGlobalWorkerRules, arg.GlobalWorkerRules, arg.UpdatedAt)
 	return err
 }

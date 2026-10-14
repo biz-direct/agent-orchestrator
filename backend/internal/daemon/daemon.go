@@ -977,6 +977,7 @@ func Run() error {
 		GitHub:             githubpat.New(cfg.DataDir),
 		Conversations:      chatSvc,
 		Settings:           settingsSvc,
+		Prompts:            promptService(sessMgr),
 		CDC:                store,
 		Events:             cdcPipe.Broadcaster,
 		Activity:           lcStack.LCM,
@@ -1306,5 +1307,12 @@ func crewRoleService(svc *crewssvc.Service, store crewssvc.SessionStore, sessMgr
 	if host, ok := sessMgr.(ports.CrewRoleHost); ok {
 		return svc.WithRoleSessions(store, host)
 	}
+	return svc
+}
+
+// promptService narrows the session manager to the prompt-preview surface; nil
+// when it does not provide one, so the routes answer 501 instead of panicking.
+func promptService(mgr sessionLifecycle) controllers.PromptService {
+	svc, _ := mgr.(controllers.PromptService)
 	return svc
 }

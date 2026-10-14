@@ -2966,6 +2966,53 @@ paths:
       summary: Atomically replace a project's display name and config
       tags:
       - projects
+  /api/v1/projects/{id}/agent-rules-file:
+    get:
+      operationId: previewAgentRulesFile
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Repo-relative candidate path to read. Omit to read the project's
+          saved agentRulesFile.
+        in: query
+        name: path
+        schema:
+          description: Repo-relative candidate path to read. Omit to read the project's
+            saved agentRulesFile.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOrchestratorRulesFilePreview'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Read a project's worker rules file (or a candidate path) without saving
+      tags:
+      - projects
   /api/v1/projects/{id}/config:
     put:
       operationId: setProjectConfig
@@ -3123,6 +3170,71 @@ paths:
         project settings
       tags:
       - projects
+  /api/v1/projects/{id}/effective-prompt:
+    get:
+      operationId: getEffectivePrompt
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      - description: Which role's prompt to assemble.
+        in: query
+        name: role
+        schema:
+          description: Which role's prompt to assemble.
+          enum:
+          - orchestrator
+          - worker
+          type: string
+      - description: Interface to assemble for. Omit to use the default a new session
+          would get.
+        in: query
+        name: mode
+        schema:
+          description: Interface to assemble for. Omit to use the default a new session
+            would get.
+          enum:
+          - chat
+          - tui
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersEffectivePromptResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read the prompt a new session of a role would get in this project
+      tags:
+      - prompts
   /api/v1/projects/{id}/orchestrator-rules-file:
     get:
       operationId: previewOrchestratorRulesFile
@@ -3658,6 +3770,73 @@ paths:
       summary: Initialize a selected folder as a Git repository with an initial commit
       tags:
       - projects
+  /api/v1/prompts/builtin:
+    get:
+      operationId: getBuiltinPrompts
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersBuiltinPromptsResponse'
+          description: OK
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read AO's built-in orchestrator and worker prompts, rendered with sample
+        project values
+      tags:
+      - prompts
+  /api/v1/prompts/sessions:
+    get:
+      operationId: listPromptSessions
+      parameters:
+      - description: Which role's sessions to list.
+        in: query
+        name: role
+        schema:
+          description: Which role's sessions to list.
+          enum:
+          - orchestrator
+          - worker
+          type: string
+      - description: Limit to one project. Omit to list every project's sessions.
+        in: query
+        name: projectId
+        schema:
+          description: Limit to one project. Omit to list every project's sessions.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersPromptSessionsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List live sessions of a role and whether each still uses an older prompt
+      tags:
+      - prompts
   /api/v1/prs/{id}/merge:
     post:
       operationId: mergePR
@@ -10455,6 +10634,43 @@ paths:
       summary: Set the global orchestrator rules for this daemon
       tags:
       - settings
+  /api/v1/settings/global-worker-rules:
+    patch:
+      operationId: updateGlobalWorkerRules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersUpdateGlobalWorkerRulesRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Set the global worker rules for this daemon
+      tags:
+      - settings
   /api/v1/settings/session-interface:
     patch:
       operationId: updateSessionInterface
@@ -12558,6 +12774,52 @@ components:
         disabled:
           type: boolean
       type: object
+    ControllersBuiltinPromptsResponse:
+      properties:
+        orchestrator:
+          items:
+            $ref: '#/components/schemas/SessionManagerPromptSection'
+          type: array
+        sample:
+          $ref: '#/components/schemas/SessionManagerPromptSample'
+        standaloneWorker:
+          items:
+            $ref: '#/components/schemas/SessionManagerPromptSection'
+          type: array
+        worker:
+          items:
+            $ref: '#/components/schemas/SessionManagerPromptSection'
+          type: array
+      required:
+      - sample
+      - orchestrator
+      - worker
+      - standaloneWorker
+      type: object
+    ControllersEffectivePromptResponse:
+      properties:
+        mode:
+          enum:
+          - chat
+          - tui
+          type: string
+        role:
+          enum:
+          - orchestrator
+          - worker
+          type: string
+        sections:
+          items:
+            $ref: '#/components/schemas/SessionManagerPromptSection'
+          type: array
+        text:
+          type: string
+      required:
+      - role
+      - mode
+      - sections
+      - text
+      type: object
     ControllersKeepAwakeStatus:
       properties:
         active:
@@ -12573,6 +12835,15 @@ components:
       - enabled
       - active
       - hasBattery
+      type: object
+    ControllersPromptSessionsResponse:
+      properties:
+        sessions:
+          items:
+            $ref: '#/components/schemas/SessionManagerPromptSession'
+          type: array
+      required:
+      - sessions
       type: object
     ControllersRemoteHostAccountTokenResponse:
       properties:
@@ -12938,6 +13209,15 @@ components:
           - string
       required:
       - globalOrchestratorRules
+      type: object
+    ControllersUpdateGlobalWorkerRulesRequest:
+      properties:
+        globalWorkerRules:
+          type:
+          - "null"
+          - string
+      required:
+      - globalWorkerRules
       type: object
     ConversationAccountPayload:
       properties:
@@ -16666,6 +16946,8 @@ components:
           type: string
         skipGlobalOrchestratorRules:
           type: boolean
+        skipGlobalWorkerRules:
+          type: boolean
         symlinks:
           items:
             type: string
@@ -17538,6 +17820,69 @@ components:
       - supported
       - targetMode
       type: object
+    SessionManagerPromptSample:
+      properties:
+        defaultBranch:
+          type: string
+        orchestratorSessionId:
+          type: string
+        path:
+          type: string
+        projectId:
+          type: string
+        projectName:
+          type: string
+        repo:
+          type: string
+      required:
+      - projectId
+      - projectName
+      - repo
+      - defaultBranch
+      - path
+      - orchestratorSessionId
+      type: object
+    SessionManagerPromptSection:
+      properties:
+        layer:
+          enum:
+          - builtin
+          - global
+          - project
+          - file
+          - runtime
+          type: string
+        text:
+          type: string
+        title:
+          type: string
+      required:
+      - layer
+      - text
+      type: object
+    SessionManagerPromptSession:
+      properties:
+        freshness:
+          enum:
+          - current
+          - stale
+          - unknown
+          type: string
+        projectId:
+          type: string
+        role:
+          enum:
+          - orchestrator
+          - worker
+          type: string
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - projectId
+      - role
+      - freshness
+      type: object
     SessionMemoryProcessResponse:
       properties:
         command:
@@ -18329,6 +18674,8 @@ components:
           type: string
         globalOrchestratorRules:
           type: string
+        globalWorkerRules:
+          type: string
         localEnabled:
           type: boolean
         trackerIntakeEnabled:
@@ -18344,6 +18691,7 @@ components:
       - cloudControlPlaneUrl
       - trackerIntakeEnabled
       - globalOrchestratorRules
+      - globalWorkerRules
       type: object
     ShellTerminalEnvelope:
       properties:
