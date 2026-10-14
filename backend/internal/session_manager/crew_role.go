@@ -138,6 +138,17 @@ func (m *Manager) StartCrewRole(ctx context.Context, start ports.CrewRoleStart) 
 		}
 		return domain.SessionRecord{}, fmt.Errorf("create crew role session: %w", err)
 	}
+	// Reserve the role's own lifecycle operation for the rest of creation, so a
+	// removal or direct kill cannot interleave between the row existing and its
+	// provider being confirmed started. A removal that won the narrow gap before
+	// this reservation has already ended the row; never start a provider for it.
+	if err := m.beginAgentOperation(ctx, rec.ID, agentOperationCrewRole); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("%w: reserve role %s: %w", ports.ErrCrewOwnerBusy, rec.ID, err)
+	}
+	defer m.endAgentOperation(rec.ID, agentOperationCrewRole)
+	if current, err := m.getRecord(ctx, rec.ID); err != nil || current.IsTerminated {
+		return domain.SessionRecord{}, fmt.Errorf("%w: role %s was removed while starting", ports.ErrCrewRoleNotFound, rec.ID)
+	}
 	fail := func(cause error) (domain.SessionRecord, error) {
 		m.stopChatBestEffort(ctx, rec.ID)
 		_ = m.lcm.MarkTerminated(context.WithoutCancel(ctx), rec.ID)

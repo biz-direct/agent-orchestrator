@@ -333,3 +333,36 @@ func TestRoleRemovalAndOwnerKillRefuseWhileTheRoleIsBeingResumed(t *testing.T) {
 		t.Fatalf("removal succeeds once the resume is over: %v", err)
 	}
 }
+
+// Removal and a direct kill of the role are refused while the role is still
+// being created, and no provider starts for a role that was removed.
+func TestRoleRemovalAndDirectKillAreRefusedWhileTheRoleIsStarting(t *testing.T) {
+	m, st, launcher, ws, owner := newCrewRoleManager(t)
+	var removeErr, killErr error
+	var roleID domain.SessionID
+	launcher.beforeStart = func(cfg ChatStart) {
+		roleID = cfg.SessionID
+		removeErr = m.StopCrewRole(context.Background(), owner.ID, "builder")
+		_, killErr = m.Kill(context.Background(), cfg.SessionID)
+	}
+	role := startRole(t, m, owner, "builder")
+
+	if !errors.Is(removeErr, ErrSwitchInProgress) || !errors.Is(killErr, ErrSwitchInProgress) {
+		t.Fatalf("both must be refused mid-creation: remove=%v kill=%v", removeErr, killErr)
+	}
+	if role.ID != roleID || st.sessions[role.ID].IsTerminated || len(launcher.started) != 1 || ws.destroyed != 0 {
+		t.Fatalf("the role survives and starts exactly once: terminated=%v started=%d", st.sessions[role.ID].IsTerminated, len(launcher.started))
+	}
+}
+
+func TestStartCrewRoleDoesNotStartAProviderForARoleRemovedDuringCreation(t *testing.T) {
+	m, st, launcher, _, owner := newCrewRoleManager(t)
+	st.afterAttachedCreate = func(rec domain.SessionRecord) {
+		rec.IsTerminated = true
+		st.sessions[rec.ID] = rec
+	}
+	_, err := m.StartCrewRole(context.Background(), ports.CrewRoleStart{Owner: owner.ID, RoleID: "builder", Harness: domain.HarnessClaudeCode})
+	if !errors.Is(err, ports.ErrCrewRoleNotFound) || len(launcher.started) != 0 {
+		t.Fatalf("a role removed mid-creation must not get a provider: err=%v started=%d", err, len(launcher.started))
+	}
+}
