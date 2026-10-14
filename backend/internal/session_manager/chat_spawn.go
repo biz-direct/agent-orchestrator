@@ -416,6 +416,13 @@ type GlobalOrchestratorRulesReader interface {
 	GlobalOrchestratorRules(ctx context.Context) (string, error)
 }
 
+// GlobalWorkerRulesReader supplies the daemon-wide worker rules added to every
+// worker prompt, standalone workers included. A read error fails the prompt
+// build instead of silently dropping the layer.
+type GlobalWorkerRulesReader interface {
+	GlobalWorkerRules(ctx context.Context) (string, error)
+}
+
 // resolveSessionMode applies the precedence for a spawn:
 //
 //  1. the mode the caller explicitly requested;
@@ -471,7 +478,8 @@ func (m *Manager) resumeChatController(
 
 	// Recomputed rather than persisted, matching the terminal path: a restored
 	// session keeps its standing instructions across the relaunch.
-	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.ID, rec.RequestedOutput, true)
+	// A reconnect to a live provider applies no new prompt, so it records no rules.
+	systemPrompt, err := m.buildSessionPrompt(ctx, rec.Kind, rec.ProjectID, rec.ID, rec.RequestedOutput, true, !reconnectOnly)
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("%s %s: system prompt: %w", operation, rec.ID, err)
 	}
@@ -654,13 +662,19 @@ func (m *Manager) markChatControllerSpawned(
 		if providerBoundary != nil {
 			return domain.ConversationRecord{}, errors.New("live Chat reconnect cannot replace the provider boundary")
 		}
+		// A live reconnect applies no new prompt: drop what the build staged.
+		m.pendingRules.Delete(id)
 		return conversation, m.lcm.MarkChatReconnected(ctx, id, metadata)
 	}
 	if handoff != nil && (providerBoundary == nil || commitProviderHistory == nil) {
 		return domain.ConversationRecord{}, errors.New("native Chat handoff requires atomic history publication")
 	}
 	if providerBoundary == nil {
-		return conversation, m.lcm.MarkSpawned(ctx, id, metadata)
+		if err := m.lcm.MarkSpawned(ctx, id, metadata); err != nil {
+			return conversation, err
+		}
+		m.commitAppliedRules(id)
+		return conversation, nil
 	}
 	var err error
 	if commitProviderHistory == nil {
@@ -688,6 +702,7 @@ func (m *Manager) markChatControllerSpawned(
 	if err != nil {
 		return domain.ConversationRecord{}, err
 	}
+	m.commitAppliedRules(id)
 	conversation.ActiveBranchID = providerBoundary.ID
 	conversation.SessionID = id
 	conversation.UpdatedAt = providerBoundary.CreatedAt

@@ -478,6 +478,9 @@ func (m *Manager) executeChatAgentSwitch(
 				ctx,
 				activation,
 			)
+			if activationErr == nil && activated {
+				m.commitAppliedRules(rec.ID)
+			}
 			if activationErr != nil || !activated {
 				recorder.failurePoint = domain.AgentSwitchFailureChatTargetActivationReadback
 				activationCtx, cancelActivation := switchDurableContext(ctx)
@@ -485,6 +488,7 @@ func (m *Manager) executeChatAgentSwitch(
 					activationCtx, store, rec, activation)
 				cancelActivation()
 				if committed {
+					m.commitAppliedRules(rec.ID)
 					recorder.callOutcome = domain.AgentSwitchCallCommittedResponseLost
 					result = current
 					targetOwnerCommitted = true

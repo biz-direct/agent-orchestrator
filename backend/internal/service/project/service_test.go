@@ -2384,3 +2384,50 @@ func TestEmptyCloneOnboardingCreatesFirstWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestPreviewRulesFiles(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepo(t)
+	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("ao")}); err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("x", domain.MaxOrchestratorRulesBytes+10)
+	for name, content := range map[string]string{"worker.md": "Worker file.\n", "big.md": big} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: domain.ProjectConfig{AgentRulesFile: "worker.md"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Saved path is used when no candidate is given.
+	got, err := m.PreviewAgentRulesFile(ctx, "ao", "")
+	if err != nil || got.Path != "worker.md" || got.Content != "Worker file.\n" {
+		t.Fatalf("saved preview = %+v, %v", got, err)
+	}
+	// A worker rules file has no size cap at spawn, so none in the preview;
+	// the orchestrator one keeps its cap.
+	if got, err := m.PreviewAgentRulesFile(ctx, "ao", "big.md"); err != nil || len(got.Content) != len(big) {
+		t.Fatalf("big worker file: len=%d err=%v", len(got.Content), err)
+	}
+	if _, err := m.PreviewOrchestratorRulesFile(ctx, "ao", "big.md"); err == nil {
+		t.Fatal("orchestrator rules file over the cap must be rejected")
+	}
+	// Same validation as the orchestrator preview: escape, missing, nothing to read.
+	for _, candidate := range []string{"../outside.md", "/etc/passwd", "missing.md"} {
+		_, err := m.PreviewAgentRulesFile(ctx, "ao", candidate)
+		var apiErr *apierr.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != "AGENT_RULES_FILE_INVALID" {
+			t.Fatalf("%q: err = %v, want AGENT_RULES_FILE_INVALID", candidate, err)
+		}
+	}
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: domain.ProjectConfig{}}); err != nil {
+		t.Fatal(err)
+	}
+	var apiErr *apierr.Error
+	if _, err := m.PreviewAgentRulesFile(ctx, "ao", ""); !errors.As(err, &apiErr) || apiErr.Code != "AGENT_RULES_FILE_REQUIRED" {
+		t.Fatalf("err = %v, want AGENT_RULES_FILE_REQUIRED", err)
+	}
+}

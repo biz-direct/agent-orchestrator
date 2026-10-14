@@ -54,6 +54,8 @@ type APIDeps struct {
 	// Conversations is nil until a Chat driver is wired; the controller then
 	// answers 501 rather than panicking, matching the other optional surfaces.
 	Conversations controllers.ConversationService
+	// Prompts renders the built-in and effective agent prompts. Nil answers 501.
+	Prompts controllers.PromptService
 	// Settings is the daemon-owned preference surface.
 	Settings                 controllers.SettingsService
 	DevImport                controllers.DevImportService
@@ -144,6 +146,7 @@ type API struct {
 	cues          *controllers.CuesController
 	conversations *controllers.ConversationsController
 	settings      *controllers.SettingsController
+	prompts       *controllers.PromptsController
 	dev           *controllers.DevController
 	browser       *controllers.BrowserController
 	system        *controllers.SystemController
@@ -206,6 +209,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 		cues:          &controllers.CuesController{Svc: deps.Cues},
 		conversations: &controllers.ConversationsController{Svc: deps.Conversations, Renders: attachmentstore.New(cfg.DataDir)},
 		settings:      &controllers.SettingsController{Svc: deps.Settings},
+		prompts:       &controllers.PromptsController{Svc: deps.Prompts},
 		dev:           &controllers.DevController{Import: deps.DevImport},
 		browser:       &controllers.BrowserController{Svc: deps.Browser},
 		system:        &controllers.SystemController{Checks: deps.SystemChecks},
@@ -269,6 +273,7 @@ func (a *API) Register(root chi.Router) {
 			a.cues.Register(r)
 			a.conversations.Register(r)
 			a.settings.Register(r)
+			a.prompts.Register(r)
 			a.dev.Register(r)
 			a.browser.Register(r)
 			a.system.Register(r)

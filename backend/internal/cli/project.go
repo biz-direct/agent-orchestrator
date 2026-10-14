@@ -120,6 +120,7 @@ type projectConfig struct {
 	OrchestratorRules           string               `json:"orchestratorRules,omitempty"`
 	OrchestratorRulesFile       string               `json:"orchestratorRulesFile,omitempty"`
 	SkipGlobalOrchestratorRules bool                 `json:"skipGlobalOrchestratorRules,omitempty"`
+	SkipGlobalWorkerRules       bool                 `json:"skipGlobalWorkerRules,omitempty"`
 	AgentConfig                 agentConfig          `json:"agentConfig,omitempty"`
 	Worker                      roleOverride         `json:"worker,omitempty"`
 	Orchestrator                roleOverride         `json:"orchestrator,omitempty"`
@@ -161,6 +162,8 @@ type projectSetConfigOptions struct {
 	// skipGlobalOrchestratorRulesSet records an explicit flag, so an explicit
 	// false still counts as a config flag.
 	skipGlobalOrchestratorRulesSet bool
+	skipGlobalWorkerRules          bool
+	skipGlobalWorkerRulesSet       bool
 	env                            []string
 	symlink                        []string
 	postCreate                     []string
@@ -328,6 +331,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
 			opts.skipGlobalOrchestratorRulesSet = cmd.Flags().Changed("skip-global-orchestrator-rules")
+			opts.skipGlobalWorkerRulesSet = cmd.Flags().Changed("skip-global-worker-rules")
 			config, err := buildProjectConfig(opts)
 			if err != nil {
 				return err
@@ -356,6 +360,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.agentRulesFile, "agent-rules-file", "", "Repo-relative file containing worker standing instructions")
 	f.StringVar(&opts.orchestratorRules, "orchestrator-rules", "", "Project-specific standing instructions for orchestrator sessions")
 	f.StringVar(&opts.orchestratorRulesFile, "orchestrator-rules-file", "", "Repo-relative file containing orchestrator standing instructions")
+	f.BoolVar(&opts.skipGlobalWorkerRules, "skip-global-worker-rules", false, "Leave the daemon's global worker rules out of this project's worker prompts")
 	f.BoolVar(&opts.skipGlobalOrchestratorRules, "skip-global-orchestrator-rules", false, "Leave the daemon's global orchestrator rules out of this project's orchestrator prompt")
 	f.StringArrayVar(&opts.env, "env", nil, "Env var KEY=VALUE forwarded into sessions (repeatable)")
 	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable)")
@@ -402,6 +407,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 		OrchestratorRules:           opts.orchestratorRules,
 		OrchestratorRulesFile:       opts.orchestratorRulesFile,
 		SkipGlobalOrchestratorRules: opts.skipGlobalOrchestratorRules,
+		SkipGlobalWorkerRules:       opts.skipGlobalWorkerRules,
 		AgentConfig:                 agentConfig{Model: opts.model, Permissions: opts.permission},
 		Worker:                      roleOverride{Agent: opts.workerAgent},
 		Orchestrator:                roleOverride{Agent: opts.orchestratorAgent},
@@ -412,7 +418,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (projectConfig, error) {
 		},
 		Reviewers: reviewersForFlags(opts.reviewers),
 	}
-	if reflect.DeepEqual(cfg, projectConfig{}) && !opts.skipGlobalOrchestratorRulesSet {
+	if reflect.DeepEqual(cfg, projectConfig{}) && !opts.skipGlobalOrchestratorRulesSet && !opts.skipGlobalWorkerRulesSet {
 		return projectConfig{}, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}
 	}
 	return cfg, nil

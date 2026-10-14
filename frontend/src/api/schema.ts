@@ -1124,6 +1124,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/agent-rules-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a project's worker rules file (or a candidate path) without saving */
+        get: operations["previewAgentRulesFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/config": {
         parameters: {
             query?: never;
@@ -1169,6 +1186,23 @@ export interface paths {
         get: operations["getProjectDefaultCrew"];
         /** Save or clear the project-default crew workflow without replacing other project settings */
         put: operations["setProjectDefaultCrew"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/effective-prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the prompt a new session of a role would get in this project */
+        get: operations["getEffectivePrompt"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1359,6 +1393,40 @@ export interface paths {
         put?: never;
         /** Initialize a selected folder as a Git repository with an initial commit */
         post: operations["initializeProjectRepository"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prompts/builtin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read AO's built-in orchestrator and worker prompts, rendered with sample project values */
+        get: operations["getBuiltinPrompts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prompts/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List live sessions of a role and whether each still uses an older prompt */
+        get: operations["listPromptSessions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3374,6 +3442,23 @@ export interface paths {
         patch: operations["updateGlobalOrchestratorRules"];
         trace?: never;
     };
+    "/api/v1/settings/global-worker-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set the global worker rules for this daemon */
+        patch: operations["updateGlobalWorkerRules"];
+        trace?: never;
+    };
     "/api/v1/settings/session-interface": {
         parameters: {
             query?: never;
@@ -4185,11 +4270,28 @@ export interface components {
         ContainerReapConfig: {
             disabled?: boolean;
         };
+        ControllersBuiltinPromptsResponse: {
+            orchestrator: components["schemas"]["SessionManagerPromptSection"][];
+            sample: components["schemas"]["SessionManagerPromptSample"];
+            standaloneWorker: components["schemas"]["SessionManagerPromptSection"][];
+            worker: components["schemas"]["SessionManagerPromptSection"][];
+        };
+        ControllersEffectivePromptResponse: {
+            /** @enum {string} */
+            mode: "chat" | "tui";
+            /** @enum {string} */
+            role: "orchestrator" | "worker";
+            sections: components["schemas"]["SessionManagerPromptSection"][];
+            text: string;
+        };
         ControllersKeepAwakeStatus: {
             active: boolean;
             enabled: boolean;
             hasBattery: boolean;
             supported: boolean;
+        };
+        ControllersPromptSessionsResponse: {
+            sessions: components["schemas"]["SessionManagerPromptSession"][];
         };
         ControllersRemoteHostAccountTokenResponse: {
             hostId: string;
@@ -4308,6 +4410,9 @@ export interface components {
         };
         ControllersUpdateGlobalOrchestratorRulesRequest: {
             globalOrchestratorRules: null | string;
+        };
+        ControllersUpdateGlobalWorkerRulesRequest: {
+            globalWorkerRules: null | string;
         };
         ConversationAccountPayload: {
             authFailureId?: string;
@@ -5674,6 +5779,7 @@ export interface components {
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
             skipGlobalOrchestratorRules?: boolean;
+            skipGlobalWorkerRules?: boolean;
             symlinks?: string[];
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
             trustPipelineCommands?: boolean;
@@ -6021,6 +6127,28 @@ export interface components {
             targetMode: "chat" | "tui";
             transition?: components["schemas"]["SessionInterfaceTransition"];
         };
+        SessionManagerPromptSample: {
+            defaultBranch: string;
+            orchestratorSessionId: string;
+            path: string;
+            projectId: string;
+            projectName: string;
+            repo: string;
+        };
+        SessionManagerPromptSection: {
+            /** @enum {string} */
+            layer: "builtin" | "global" | "project" | "file" | "runtime";
+            text: string;
+            title?: string;
+        };
+        SessionManagerPromptSession: {
+            /** @enum {string} */
+            freshness: "current" | "stale" | "unknown";
+            projectId: string;
+            /** @enum {string} */
+            role: "orchestrator" | "worker";
+            sessionId: string;
+        };
         SessionMemoryProcessResponse: {
             command: string;
             /**
@@ -6340,6 +6468,7 @@ export interface components {
             /** @enum {string} */
             defaultSessionMode: "chat" | "tui";
             globalOrchestratorRules: string;
+            globalWorkerRules: string;
             localEnabled: boolean;
             trackerIntakeEnabled: boolean;
         };
@@ -10966,6 +11095,59 @@ export interface operations {
             };
         };
     };
+    previewAgentRulesFile: {
+        parameters: {
+            query?: {
+                /** @description Repo-relative candidate path to read. Omit to read the project's saved agentRulesFile. */
+                path?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOrchestratorRulesFilePreview"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     setProjectConfig: {
         parameters: {
             query?: never;
@@ -11147,6 +11329,70 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getEffectivePrompt: {
+        parameters: {
+            query?: {
+                /** @description Which role's prompt to assemble. */
+                role?: "orchestrator" | "worker";
+                /** @description Interface to assemble for. Omit to use the default a new session would get. */
+                mode?: "chat" | "tui";
+            };
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersEffectivePromptResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11827,6 +12073,87 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getBuiltinPrompts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersBuiltinPromptsResponse"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listPromptSessions: {
+        parameters: {
+            query?: {
+                /** @description Which role's sessions to list. */
+                role?: "orchestrator" | "worker";
+                /** @description Limit to one project. Omit to list every project's sessions. */
+                projectId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersPromptSessionsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19699,6 +20026,57 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ControllersUpdateGlobalOrchestratorRulesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    updateGlobalWorkerRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersUpdateGlobalWorkerRulesRequest"];
             };
         };
         responses: {

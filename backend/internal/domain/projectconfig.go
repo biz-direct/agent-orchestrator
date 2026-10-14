@@ -52,6 +52,9 @@ type ProjectConfig struct {
 	// SkipGlobalOrchestratorRules leaves the daemon's global orchestrator rules
 	// out of this project's orchestrator prompt.
 	SkipGlobalOrchestratorRules bool `json:"skipGlobalOrchestratorRules,omitempty"`
+	// SkipGlobalWorkerRules leaves the daemon's global worker rules out of this
+	// project's worker prompts.
+	SkipGlobalWorkerRules bool `json:"skipGlobalWorkerRules,omitempty"`
 
 	// AgentConfig is the default agent config for the project.
 	AgentConfig AgentConfig `json:"agentConfig,omitempty"`
@@ -451,6 +454,22 @@ var ErrOrchestratorRulesTooLarge = fmt.Errorf("orchestrator rules exceed %d byte
 func ValidateOrchestratorRulesSize(rules string) error {
 	if len(strings.TrimSpace(rules)) > MaxOrchestratorRulesBytes {
 		return ErrOrchestratorRulesTooLarge
+	}
+	return nil
+}
+
+// MaxWorkerRulesBytes caps the global worker rules value; same limit as
+// MaxOrchestratorRulesBytes.
+const MaxWorkerRulesBytes = MaxOrchestratorRulesBytes
+
+// ErrWorkerRulesTooLarge is returned when a new global worker rules value
+// exceeds MaxWorkerRulesBytes.
+var ErrWorkerRulesTooLarge = fmt.Errorf("worker rules exceed %d bytes", MaxWorkerRulesBytes)
+
+// ValidateWorkerRulesSize rejects a value above the size limit.
+func ValidateWorkerRulesSize(rules string) error {
+	if len(strings.TrimSpace(rules)) > MaxWorkerRulesBytes {
+		return ErrWorkerRulesTooLarge
 	}
 	return nil
 }

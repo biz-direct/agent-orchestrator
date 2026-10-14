@@ -58,6 +58,7 @@ type Manager interface {
 	// (or the repo-relative candidate path, when non-empty) with the same
 	// symlink-safe reader the prompt builder uses. It never writes.
 	PreviewOrchestratorRulesFile(ctx context.Context, id domain.ProjectID, candidate string) (OrchestratorRulesFilePreview, error)
+	PreviewAgentRulesFile(ctx context.Context, id domain.ProjectID, candidate string) (OrchestratorRulesFilePreview, error)
 
 	// SetConfig replaces a project's per-project config, returning the updated
 	// read-model.
@@ -1118,6 +1119,20 @@ func invalidConfigError(err error) error {
 
 // PreviewOrchestratorRulesFile implements Manager.
 func (m *Service) PreviewOrchestratorRulesFile(ctx context.Context, id domain.ProjectID, candidate string) (OrchestratorRulesFilePreview, error) {
+	return m.previewRulesFile(ctx, id, candidate, rulesfile.FieldOrchestratorRulesFile, domain.MaxOrchestratorRulesBytes,
+		func(c domain.ProjectConfig) string { return c.OrchestratorRulesFile },
+		"ORCHESTRATOR_RULES_FILE_REQUIRED", "No orchestrator rules file path to preview")
+}
+
+// PreviewAgentRulesFile implements Manager. Worker rules files have no size cap
+// at spawn, so the preview applies none either.
+func (m *Service) PreviewAgentRulesFile(ctx context.Context, id domain.ProjectID, candidate string) (OrchestratorRulesFilePreview, error) {
+	return m.previewRulesFile(ctx, id, candidate, rulesfile.FieldAgentRulesFile, 0,
+		func(c domain.ProjectConfig) string { return c.AgentRulesFile },
+		"AGENT_RULES_FILE_REQUIRED", "No worker rules file path to preview")
+}
+
+func (m *Service) previewRulesFile(ctx context.Context, id domain.ProjectID, candidate, field string, limit int, saved func(domain.ProjectConfig) string, requiredCode, requiredMsg string) (OrchestratorRulesFilePreview, error) {
 	if err := validateProjectID(id); err != nil {
 		return OrchestratorRulesFilePreview{}, err
 	}
@@ -1130,12 +1145,12 @@ func (m *Service) PreviewOrchestratorRulesFile(ctx context.Context, id domain.Pr
 	}
 	rel := strings.TrimSpace(candidate)
 	if rel == "" {
-		rel = strings.TrimSpace(row.Config.OrchestratorRulesFile)
+		rel = strings.TrimSpace(saved(row.Config))
 	}
 	if rel == "" {
-		return OrchestratorRulesFilePreview{}, apierr.Invalid("ORCHESTRATOR_RULES_FILE_REQUIRED", "No orchestrator rules file path to preview", nil)
+		return OrchestratorRulesFilePreview{}, apierr.Invalid(requiredCode, requiredMsg, nil)
 	}
-	data, err := rulesfile.Read(rulesfile.FieldOrchestratorRulesFile, row.Path, rel, domain.MaxOrchestratorRulesBytes)
+	data, err := rulesfile.Read(field, row.Path, rel, limit)
 	if err != nil {
 		var rfe *rulesfile.Error
 		if errors.As(err, &rfe) {
