@@ -945,6 +945,16 @@ func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key,
 	if m.guard == nil {
 		return sendOnceAccounted, nil
 	}
+	// Automatic work for the task goes only to the crew's baton holder. A nudge
+	// held back is suppressed, not accounted, so it fires once the baton moves.
+	target, deliver, err := m.batonNudgeTarget(ctx, id)
+	if err != nil {
+		return sendOnceSuppressed, err
+	}
+	if !deliver {
+		return sendOnceSuppressed, nil
+	}
+	id = target
 	m.react.mu.Lock()
 	defer m.react.mu.Unlock()
 
@@ -1072,4 +1082,18 @@ func reactionKeyTargetsPR(key, prURL string) bool {
 	}
 	rest := parts[1]
 	return rest == prURL || strings.HasPrefix(rest, prURL+":")
+}
+
+// batonNudgeRouter is the optional store capability that resolves which session
+// holds the crew write baton for a task. Stores without it route to the worker.
+type batonNudgeRouter interface {
+	ResolveNudgeTarget(ctx context.Context, owner domain.SessionID) (domain.SessionID, bool, error)
+}
+
+func (m *Manager) batonNudgeTarget(ctx context.Context, id domain.SessionID) (domain.SessionID, bool, error) {
+	router, ok := m.store.(batonNudgeRouter)
+	if !ok {
+		return id, true, nil
+	}
+	return router.ResolveNudgeTarget(ctx, id)
 }

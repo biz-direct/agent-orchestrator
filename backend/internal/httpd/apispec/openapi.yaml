@@ -7271,6 +7271,96 @@ paths:
       summary: Promote a queued message into the in-flight turn
       tags:
       - conversations
+  /api/v1/sessions/{sessionId}/crew/baton:
+    get:
+      operationId: getSessionCrewBaton
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewBatonStatus'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Show who holds the task's write baton and every recorded move
+      tags:
+      - sessions
+    put:
+      operationId: moveSessionCrewBaton
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveCrewBatonInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewBatonStatus'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: 'Human override: give the write baton to the worker, a live role, or
+        the human'
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/crew/roles:
     get:
       operationId: listSessionCrewRoles
@@ -13992,6 +14082,61 @@ components:
       required:
       - id
       type: object
+    CrewBatonEvent:
+      properties:
+        actor:
+          enum:
+          - human
+          - system
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        from:
+          $ref: '#/components/schemas/CrewBatonHolder'
+        id:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        to:
+          $ref: '#/components/schemas/CrewBatonHolder'
+      required:
+      - id
+      - from
+      - to
+      - actor
+      - reason
+      - createdAt
+      type: object
+    CrewBatonHolder:
+      properties:
+        kind:
+          enum:
+          - worker
+          - role
+          - human
+          type: string
+        role:
+          type: string
+      required:
+      - kind
+      type: object
+    CrewBatonStatus:
+      properties:
+        history:
+          items:
+            $ref: '#/components/schemas/CrewBatonEvent'
+          type: array
+        holder:
+          $ref: '#/components/schemas/CrewBatonHolder'
+        ownerSessionId:
+          type: string
+      required:
+      - ownerSessionId
+      - holder
+      - history
+      type: object
     CrewDiagnostic:
       properties:
         field:
@@ -15650,6 +15795,15 @@ components:
       - hostname
       - location
       - lastError
+      type: object
+    MoveCrewBatonInput:
+      properties:
+        reason:
+          type: string
+        to:
+          $ref: '#/components/schemas/CrewBatonHolder'
+      required:
+      - to
       type: object
     MuteDeviceRequest:
       properties:

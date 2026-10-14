@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/crew"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -50,6 +51,10 @@ type Manager interface {
 	ListRoles(ctx context.Context, owner domain.SessionID) ([]RoleSession, error)
 	// RemoveRole ends only the role's conversation.
 	RemoveRole(ctx context.Context, owner domain.SessionID, role string) error
+	// GetBaton returns who holds the task's write baton and the move history.
+	GetBaton(ctx context.Context, owner domain.SessionID) (BatonStatus, error)
+	// MoveBaton is the human override that hands the baton to any holder.
+	MoveBaton(ctx context.Context, owner domain.SessionID, in MoveBatonInput) (BatonStatus, error)
 }
 
 // CatalogResponse is the body of GET /projects/{id}/crew.
@@ -77,9 +82,12 @@ type SetDefaultInput struct {
 
 // Service implements Manager.
 type Service struct {
-	store    Store
-	sessions SessionStore
-	host     ports.CrewRoleHost
+	store     Store
+	sessions  SessionStore
+	host      ports.CrewRoleHost
+	baton     BatonStore
+	messenger Messenger
+	now       func() time.Time
 }
 
 var _ Manager = (*Service)(nil)

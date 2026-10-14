@@ -179,7 +179,9 @@ func (s *Service) RemoveRole(ctx context.Context, ownerID domain.SessionID, role
 	} else if !ok {
 		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
-	if err := s.host.StopCrewRole(ctx, ownerID, strings.TrimSpace(role)); err != nil {
+	role = strings.TrimSpace(role)
+	s.handBackBaton(ctx, ownerID, role)
+	if err := s.host.StopCrewRole(ctx, ownerID, role); err != nil {
 		return roleError(err)
 	}
 	return nil

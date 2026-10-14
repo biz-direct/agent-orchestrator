@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UserPlus, X } from "lucide-react";
+import { Check, PencilLine, UserPlus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { components } from "../../api/schema";
 import { apiErrorMessage } from "../lib/api-client";
@@ -8,10 +8,11 @@ import type { WorkspaceSession } from "../types/workspace";
 import { SessionChatSurface } from "./chat/SessionChatSurface";
 import { TerminalTabFrame } from "./TerminalTabFrame";
 import { TopbarButton } from "./TopbarButton";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export type CrewRoleSession = components["schemas"]["CrewRoleSession"];
+export type CrewBatonHolder = components["schemas"]["CrewBatonHolder"];
 
 export const roleTabKey = (sessionId: string) => `role:${sessionId}`;
 
@@ -53,6 +54,81 @@ export function useRemoveCrewRole(sessionId: string, hostId?: string) {
 		},
 		onSettled: () => queryClient.invalidateQueries({ queryKey: sessionCrewRolesQueryKey(sessionId, hostId) }),
 	});
+}
+
+export const sessionCrewBatonQueryKey = (sessionId: string, hostId?: string) =>
+	hostId ? (["session-crew-baton", hostId, sessionId] as const) : (["session-crew-baton", sessionId] as const);
+
+const sameHolder = (a: CrewBatonHolder, b: CrewBatonHolder) => a.kind === b.kind && (a.role ?? "") === (b.role ?? "");
+
+/**
+ * The task's write baton: exactly one holder (the worker, one role, or the
+ * person) may change code and everyone else is read-only. The menu is the
+ * person's override: it gives the baton to the worker or any live role, or
+ * takes it for the person.
+ */
+export function CrewBatonMenu({ hostId, roles, session }: { hostId?: string; roles: CrewRoleSession[]; session: WorkspaceSession }) {
+	const { t } = useTranslation();
+	const queryClient = useQueryClient();
+	const client = clientForSessionHost(hostId);
+	const queryKey = sessionCrewBatonQueryKey(session.id, hostId);
+	const baton = useQuery({
+		queryKey,
+		refetchInterval: 5000,
+		queryFn: async () => {
+			const { data, error } = await client.GET("/api/v1/sessions/{sessionId}/crew/baton", { params: { path: { sessionId: session.id } } });
+			if (error) throw new Error(apiErrorMessage(error));
+			return data;
+		},
+	});
+	const move = useMutation({
+		mutationFn: async (to: CrewBatonHolder) => {
+			const { data, error } = await client.PUT("/api/v1/sessions/{sessionId}/crew/baton", {
+				params: { path: { sessionId: session.id } },
+				body: { to },
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data;
+		},
+		onSuccess: (data) => queryClient.setQueryData(queryKey, data),
+		onSettled: () => queryClient.invalidateQueries({ queryKey }),
+	});
+	const holder = baton.data?.holder;
+	const describe = (h: CrewBatonHolder) => (h.kind === "role" ? (h.role ?? "") : t(`session.crew.baton.${h.kind}`));
+	const options: CrewBatonHolder[] = [{ kind: "worker" }, ...roles.map((r) => ({ kind: "role" as const, role: r.role })), { kind: "human" }];
+	const label = holder ? t("session.crew.baton.holder", { holder: describe(holder) }) : t("session.crew.baton.title");
+	return (
+		<DropdownMenu>
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<DropdownMenuTrigger asChild>
+						<TopbarButton aria-label={label} type="button" variant="icon">
+							<PencilLine aria-hidden="true" className="size-icon-md" />
+						</TopbarButton>
+					</DropdownMenuTrigger>
+				</TooltipTrigger>
+				<TooltipContent side="bottom">{move.error ? apiErrorMessage(move.error) : label}</TooltipContent>
+			</Tooltip>
+			<DropdownMenuContent align="end">
+				<DropdownMenuLabel>{label}</DropdownMenuLabel>
+				<DropdownMenuSeparator />
+				{options.map((option) => {
+					const held = Boolean(holder) && sameHolder(holder as CrewBatonHolder, option);
+					return (
+						<DropdownMenuItem disabled={held || move.isPending || !holder} key={`${option.kind}:${option.role ?? ""}`} onSelect={() => move.mutate(option)}>
+							{held ? <Check aria-hidden="true" className="size-icon-sm" /> : null}
+							{option.kind === "human" ? t("session.crew.baton.take") : t("session.crew.baton.giveTo", { holder: describe(option) })}
+						</DropdownMenuItem>
+					);
+				})}
+				{move.error ? (
+					<DropdownMenuItem disabled role="alert">
+						{apiErrorMessage(move.error)}
+					</DropdownMenuItem>
+				) : null}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
 }
 
 /** A role's tab: selecting it shows the role's conversation; the cross ends only that conversation. */

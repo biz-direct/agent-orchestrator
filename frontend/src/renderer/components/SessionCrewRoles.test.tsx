@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceSession } from "../types/workspace";
 import { TooltipProvider } from "./ui/tooltip";
 
-const { getMock, postMock, deleteMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn(), deleteMock: vi.fn() }));
+const { getMock, postMock, putMock, deleteMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn(), putMock: vi.fn(), deleteMock: vi.fn() }));
 
 vi.mock("../lib/host-clients", () => ({
-	clientForSessionHost: () => ({ GET: getMock, POST: postMock, DELETE: deleteMock }),
+	clientForSessionHost: () => ({ GET: getMock, POST: postMock, PUT: putMock, DELETE: deleteMock }),
 }));
 vi.mock("./chat/SessionChatSurface", () => ({
 	SessionChatSurface: ({ session, sideChatsDisabled, assetBaseUrl, hostId, browserSession }: { session: { id: string; hostId?: string }; sideChatsDisabled?: boolean; assetBaseUrl?: string; hostId?: string; browserSession?: { id: string } }) => (
@@ -16,7 +16,7 @@ vi.mock("./chat/SessionChatSurface", () => ({
 	),
 }));
 
-import { AddCrewRoleMenu, CrewRoleChat, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
+import { AddCrewRoleMenu, CrewBatonMenu, CrewRoleChat, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
 
 const owner = { id: "w-1", workspaceId: "proj-1", workspaceName: "Proj", kind: "worker", provider: "claude-code" } as WorkspaceSession;
 const builder = { sessionId: "w-att-2", ownerSessionId: "w-1", role: "builder", harness: "codex", controllerActive: true, createdAt: "2026-01-01T00:00:00Z" };
@@ -49,6 +49,7 @@ describe("crew role tabs", () => {
 	beforeEach(() => {
 		getMock.mockReset();
 		postMock.mockReset();
+		putMock.mockReset();
 		deleteMock.mockReset().mockResolvedValue({ error: undefined });
 	});
 
@@ -101,6 +102,26 @@ describe("crew role tabs", () => {
 				body: { role: "tester" },
 			}),
 		);
+	});
+
+	it("shows who holds the write baton and lets the person give or take it", async () => {
+		getMock.mockResolvedValue({ data: { ownerSessionId: "w-1", holder: { kind: "worker" }, history: [] }, error: undefined });
+		putMock.mockImplementation(async () => {
+			getMock.mockResolvedValue({ data: { ownerSessionId: "w-1", holder: { kind: "role", role: "builder" }, history: [] }, error: undefined });
+			return { data: { ownerSessionId: "w-1", holder: { kind: "role", role: "builder" }, history: [] }, error: undefined };
+		});
+		wrap(<CrewBatonMenu roles={[builder]} session={owner} />);
+		await userEvent.click(await screen.findByRole("button", { name: "Write baton: worker" }));
+		// The current holder cannot be picked again; every other holder can.
+		expect(await screen.findByRole("menuitem", { name: "Give baton to worker" })).toHaveAttribute("aria-disabled", "true");
+		await userEvent.click(screen.getByRole("menuitem", { name: "Give baton to builder" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/crew/baton", {
+				params: { path: { sessionId: "w-1" } },
+				body: { to: { kind: "role", role: "builder" } },
+			}),
+		);
+		expect(await screen.findByRole("button", { name: "Write baton: builder" })).toBeInTheDocument();
 	});
 
 	it("opens the role's own Chat conversation, never a terminal", () => {
