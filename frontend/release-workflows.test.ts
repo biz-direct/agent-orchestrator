@@ -293,6 +293,10 @@ run: |
     // One agent dispatch per sync, finished passes are not repeated.
     expect(sync.match(/gh workflow run pullfrog\.yml/g)).toHaveLength(1);
     expect(sync).toMatch(/sync-triage:done/);
+    // The marker check must not pipe into an early-exiting grep (SIGPIPE under pipefail).
+    expect(sync).not.toMatch(/\|\s*grep -q/);
+    // The upstream endpoint is the pinned sha, not the branch tip's second parent.
+    expect(prompt).not.toMatch(/\^2\b/);
   });
 
   it("leaves the upstream sync schedule untouched", async () => {

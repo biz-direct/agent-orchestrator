@@ -162,7 +162,8 @@ jobs:
           fi
           # Pullfrog replaces the pending marker once conflicts are resolved and the
           # triage list is written; a PR without it has no finished pass yet.
-          if gh pr view "$PR" --json body --jq .body | grep -q 'sync-triage:done'; then
+          body="$(gh pr view "$PR" --json body --jq .body)"
+          if grep -q 'sync-triage:done' <<<"$body"; then
             echo "PR #$PR is already triaged; nothing for Pullfrog to do."
             exit 0
           fi

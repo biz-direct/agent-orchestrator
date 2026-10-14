@@ -23,9 +23,9 @@ The branch holds a commit with the conflict markers still in the files. Do not r
 5. Keep the inventory in the description and add a short list of how each conflicted file was resolved, plus anything you are unsure about.
 
 Part B - the triage list (always)
-1. Fetch enough history: git fetch --no-tags origin main sync/upstream-$sha, deepening or unshallowing if needed. The upstream changes in this sync are: git log --first-parent --format='%h %s' origin/main..origin/sync/upstream-$sha^2 (use --no-merges if first-parent is too coarse). One upstream PR is usually one commit, with its number in the subject as (#NNNN).
+1. Fetch enough history: git fetch --no-tags origin main sync/upstream-$sha, deepening or unshallowing if needed. The upstream changes in this sync are: git log --first-parent --format='%h %s' origin/main..\$(git rev-parse $sha) (the pinned upstream commit $sha is in the branch history even after resolution commits were pushed, so never derive it from the branch tip's parents; use --no-merges if first-parent is too coarse). One upstream PR is usually one commit, with its number in the subject as (#NNNN).
 2. Read FORK_DECISIONS.md. It records decisions already made about upstream changes (columns: upstream ref, area, decision, fork commit, reason, date, re-check).
-3. Compute the paths the fork changed since it diverged: git diff --name-only \$(git merge-base origin/main origin/sync/upstream-$sha^2) origin/main. An upstream commit that touches any of those paths touches a file covered by a fork override.
+3. Compute the paths the fork changed since it diverged: git diff --name-only \$(git merge-base origin/main \$(git rev-parse $sha)) origin/main. An upstream commit that touches any of those paths touches a file covered by a fork override.
 4. Replace the line "<!-- sync-triage:pending -->" under the "## Triage" heading of the description with the triage list, using gh pr edit. One checkbox line per upstream PR or commit, newest first, in exactly this form:
    - [ ] #NNNN or <short sha> | area | one-line summary | risk: low/med/high | recommend: take/override/revert
    Leave every box unticked. The user ticks a box to REJECT an item; a ticked box means a worker adds a revert or override for it.
