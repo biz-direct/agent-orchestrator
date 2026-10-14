@@ -1,4 +1,4 @@
-import posthog, { PostHog } from "posthog-js/dist/module.full.no-external";
+import type posthogModule from "posthog-js/dist/module.full.no-external";
 import { aoBridge } from "./bridge";
 import { isLoopbackHostname } from "./loopback";
 import { ORCHESTRATOR_SPAWN_SOURCES } from "./orchestrator-spawn-sources";
@@ -870,7 +870,15 @@ function bindErrorHandlers() {
 	});
 }
 
-type PostHogInitOptions = NonNullable<Parameters<typeof posthog.init>[1]>;
+type PostHogClient = typeof posthogModule;
+type PostHogInitOptions = NonNullable<Parameters<PostHogClient["init"]>[1]>;
+
+// The SDK (~650 KB) is loaded inside initTelemetry instead of at module load, so
+// it stays off the renderer's first-paint path. Every use of `client` runs after
+// initTelemetry() resolved true, which is where it is assigned.
+async function loadPostHogModule() {
+	return import("posthog-js/dist/module.full.no-external");
+}
 
 export function buildPostHogConfig(distinctId: string): PostHogInitOptions {
 	return {
@@ -927,11 +935,14 @@ export async function initTelemetry(): Promise<boolean> {
 		// Consent may have been revoked while the settings read was in flight.
 		if (epoch !== consentEpoch) return false;
 		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform, channel);
+		const sdk = sdkCreated ? undefined : await loadPostHogModule();
+		// Consent may have been revoked while the SDK was loading.
+		if (epoch !== consentEpoch) return false;
 		captureActive = true;
-		if (!sdkCreated) {
+		if (sdk) {
 			// A revoked client is never reused: requests it still has in flight
 			// (and their retries) belong to the revoked consent and must stay dead.
-			client = clientsCreated === 0 ? posthog : new PostHog();
+			client = clientsCreated === 0 ? sdk.default : new sdk.PostHog();
 			clientsCreated += 1;
 			client.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
 			killTransport = installTransportGuard(client);
@@ -1002,7 +1013,7 @@ export async function initTelemetry(): Promise<boolean> {
 // (reset() would clear the consent store and let capture resume).
 let sdkCreated = false;
 let clientsCreated = 0;
-let client: typeof posthog = posthog;
+let client!: PostHogClient; // assigned by the first consented initTelemetry()
 let killTransport: (() => void) | null = null;
 let captureActive = true; // no SDK exists until consented init; revocation sets false
 let consentEpoch = 0;

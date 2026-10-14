@@ -131,3 +131,35 @@ func TestChatHistoryRepairPreservesForkGlobalRulesVersion(t *testing.T) {
 		t.Fatalf("fork 179 rows = %d, hibernation 190 rows = %d", kept, moved)
 	}
 }
+
+// Upstream shipped artifact versioning as 0196, which the fork uses for the
+// conversation sender columns. A database that ran upstream's 0196 keeps its
+// table, records the fork's 0251, and still gets the sender columns.
+func TestMigrateUpstreamArtifactVersionsMovesTo0251(t *testing.T) {
+	db := openMigratedDatabaseCopy(t, 195)
+	body, err := migrationsFS.ReadFile("migrations/0251_session_artifact_versions.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(strings.Split(string(body), "-- +goose Down")[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (196, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := migrate(db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, version := range []int{196, 251} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM goose_db_version WHERE version_id = ? AND is_applied = 1`, version).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("version %d: applied rows = %d, err = %v", version, count, err)
+		}
+	}
+	var sender int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversation_messages') WHERE name = 'sender_session_id'`).Scan(&sender); err != nil || sender != 1 {
+		t.Fatalf("sender column count = %d, err = %v", sender, err)
+	}
+}

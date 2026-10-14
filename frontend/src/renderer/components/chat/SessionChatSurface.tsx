@@ -35,6 +35,7 @@ import {
 	useWorkspaceFilePaths,
 } from "../../hooks/useConversation";
 import { useAgentSwitchProviderCatalogs } from "../../hooks/useAgentSwitchProviderCatalogs";
+import { useConversationPromptSuggestion } from "../../hooks/useConversationPromptSuggestion";
 import { useRememberProjectPermissions } from "../../hooks/useRememberProjectPermissions";
 import { useSessionBrowserLink } from "../../hooks/useSessionBrowserLink";
 import { isWebLink, isWorkspaceHtmlLink } from "../../lib/external-link-policy";
@@ -401,6 +402,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	const [annotationNavigationRequest, setAnnotationNavigationRequest] = useState<{ id: string; text: string; messageId?: string; revision?: number }>();
 	const sideAvailable = useSideChatsAvailable(session, hostId);
 	const sideEnabled = sideAvailable && !unavailable && !sideChatsDisabled;
+	const sideCreationEnabled = sideEnabled && Boolean(snapshot && can(snapshot, "resume"));
 	const openSideInspector = () => {
 		const ui = useUiStore.getState();
 		ui.setInspectorView(uiSessionId, "sideChat");
@@ -413,6 +415,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 			setAnnotationNavigationRequest({ ...annotation, id: crypto.randomUUID() });
 		},
 		() => useUiStore.getState().setInspectorOpen(uiSessionId, false),
+		sideCreationEnabled,
 	);
 	useEffect(() => { if (sideChatContainer) sideChats.show(); }, [sideChatContainer]);
 	useEffect(() => setSideWork(sideChats.sides.some((side) => side.hasWork)), [sideChats.sides]);
@@ -426,7 +429,10 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 		}
 	};
 
-	const openLinkInBrowser = useSessionBrowserLink(browserSession ?? session, onOpenLinkInBrowser, paths);
+	const openLinkInBrowser = useSessionBrowserLink(browserSession ?? session, onOpenLinkInBrowser, paths, onOpenFile);
+	// Links opened on the user's behalf stay quiet about a file the session does
+	// not own; only a click earns the explanation in the file pane.
+	const autoOpenLinkInBrowser = useSessionBrowserLink(browserSession ?? session, onOpenLinkInBrowser, paths);
 	const openSessionLink = useSessionLinkNavigation(hostId);
 	const conversationLinkBaselines = useRef(new Map<string, ConversationLinkBaseline>());
 	useEffect(() => {
@@ -479,11 +485,11 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 			if (url) {
 				autoOpenedLinkSessions.add(uiSessionId);
 				pendingCompleted.delete(item.id);
-				openLinkInBrowser(url);
+				autoOpenLinkInBrowser(url);
 				break;
 			}
 		}
-	}, [isLoading, openLinkInBrowser, paths, snapshot, uiSessionId]);
+	}, [autoOpenLinkInBrowser, isLoading, paths, snapshot, uiSessionId]);
 	const observedSuccessfulSwitch = Boolean(
 		agentSwitch &&
 			observedSettledSwitchId === agentSwitch.id &&
@@ -504,6 +510,15 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	const switchLocksChat = Boolean(
 		switchPresentation?.lockAgentTerminal && !switchPresentation.allowSourceInput,
 	);
+	const promptSuggestion = useConversationPromptSuggestion(snapshot, Boolean(
+		targetChatControllerReady && !controllerBusy && !localEchos.length &&
+		!commands.rollbackPending && !commands.editMessagePending && !commands.activateBranchPending && !commands.compacting &&
+		!session.isTerminated && session.provisionState !== "failed" && session.provisionState !== "provisioning" &&
+		!isLoading && !error && !refreshError && !unavailable &&
+		!agentSwitching && !switchLocksChat && !handoffDialogOpen &&
+		!controllerTransitioning && !agentResuming && !newWorkDisabled && !arriving &&
+		!workspaceFileActive && !workspaceActiveTabKey && !reviewerTarget && !reviewerChatSelected && !shellTarget,
+	), hostId);
 	const renderShellFallback = Boolean(shellTarget && session);
 	// A switch from the terminal shows the chat before the daemon has a
 	// conversation to read. The starting snapshot stands in for the whole
@@ -586,13 +601,14 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 			{refreshError ? <p role="alert" className="px-4 py-2 text-xs text-destructive">{refreshError}</p> : null}
 			{sideChatContainer ? createPortal(sideChats.panel, sideChatContainer) : null}
 			<ChatWorkspace
-				onAddToSideChat={sideEnabled ? attachToSide : undefined}
+				onAddToSideChat={sideEnabled && (sideChats.activeId || sideCreationEnabled) ? attachToSide : undefined}
 				annotationNavigationRequest={annotationNavigationRequest}
 				key={uiSessionId}
 				uiSessionId={uiSessionId}
 				assetBaseUrl={assetBaseUrl}
 				remoteHostId={hostId}
 				snapshot={renderSnapshot}
+				promptSuggestion={promptSuggestion}
 				agentInputDisabled={switchLocksChat || handoffDialogOpen}
 				newWorkDisabled={newWorkDisabled}
 				onLinkOpen={openLinkInBrowser}
@@ -637,7 +653,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 					// Only claim /btw and /side where side chats can open. Elsewhere the
 					// text goes to the agent as typed (it may be the harness's own skill),
 					// so a failed side launch can never strand the main draft.
-					const btw = sideEnabled ? /^\/(?:btw|side)(?:\s+|$)/i.exec(text) : null;
+					const btw = sideCreationEnabled ? /^\/(?:btw|side)(?:\s+|$)/i.exec(text) : null;
 					if (btw) {
 						openSideInspector();
 						const side = await sideChats.create(undefined, true, clientMessageId);
@@ -698,7 +714,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				onActivateBranch={commands.activateBranch}
 				activateBranchPending={commands.activateBranchPending}
 				activateBranchError={commands.activateBranchError}
-				skills={sideEnabled ? [...(["btw", "side"].map((name) => ({ name, displayName: name, description: "Open a new side chat", source: "AO" }))), ...skills.filter((skill) => skill.name !== "btw" && skill.name !== "side")] : skills}
+				skills={sideCreationEnabled ? [...(["btw", "side"].map((name) => ({ name, displayName: name, description: "Open a new side chat", source: "AO" }))), ...skills.filter((skill) => skill.name !== "btw" && skill.name !== "side")] : skills}
 				filePaths={paths}
 				fileCatalog={fileCatalog}
 				filePathsTruncated={truncated}
