@@ -138,10 +138,19 @@ func (m *Manager) StartCrewRole(ctx context.Context, start ports.CrewRoleStart) 
 		}
 		return domain.SessionRecord{}, fmt.Errorf("create crew role session: %w", err)
 	}
+	// Rollback proves the provider is stopped before the role is ended or its
+	// claim released. If shutdown cannot be confirmed the role stays live and
+	// discoverable (so it can be retried, and so a worker kill refuses to delete
+	// the worktree under it). It runs on a bounded context that outlives the
+	// request.
 	fail := func(cause error) (domain.SessionRecord, error) {
-		m.stopChatBestEffort(ctx, rec.ID)
-		_ = m.lcm.MarkTerminated(context.WithoutCancel(ctx), rec.ID)
-		m.releaseAttachedAttempt(ctx, rec.ID)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalIntentBudget)
+		defer cancel()
+		if err := m.chat.StopChat(cleanupCtx, rec.ID); err != nil {
+			return domain.SessionRecord{}, errors.Join(cause, fmt.Errorf("role %s left running; remove it again to retry: %w", rec.ID, err))
+		}
+		_ = m.lcm.MarkTerminated(cleanupCtx, rec.ID)
+		m.releaseAttachedAttempt(cleanupCtx, rec.ID)
 		return domain.SessionRecord{}, cause
 	}
 	// Reserve the role's own lifecycle operation for the rest of creation, so a

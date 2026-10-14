@@ -369,3 +369,34 @@ func TestStartCrewRoleDoesNotStartAProviderForARoleRemovedDuringCreation(t *test
 		t.Fatal("the failed creation must release the role's claim so it can be added again")
 	}
 }
+
+// If startup fails after the provider may have launched and the provider cannot
+// be proven stopped, the role stays live and retryable and the worker's
+// worktree is not removed underneath it.
+func TestFailedStartupWithFailedShutdownKeepsTheRoleRetryableAndBlocksWorkerKill(t *testing.T) {
+	m, st, launcher, ws, owner := newCrewRoleManager(t)
+	launcher.startErr = errors.New("host failed after launch")
+	var roleID domain.SessionID
+	launcher.beforeStart = func(cfg ChatStart) {
+		roleID = cfg.SessionID
+		m.chat = failingStopChat{recordingLauncher: launcher, failFor: cfg.SessionID}
+	}
+	_, err := m.StartCrewRole(context.Background(), ports.CrewRoleStart{Owner: owner.ID, RoleID: "builder", Harness: domain.HarnessClaudeCode})
+	if err == nil {
+		t.Fatal("startup must fail")
+	}
+	if st.sessions[roleID].IsTerminated {
+		t.Fatal("an unproven shutdown must not mark the role terminated")
+	}
+	if _, found, _ := m.findCrewRole(context.Background(), m.store.(crewRoleStore), owner.ID, "builder"); !found {
+		t.Fatal("the role must stay discoverable by name so it can be retried")
+	}
+	if _, err := m.Kill(context.Background(), owner.ID); err == nil || ws.destroyed != 0 {
+		t.Fatalf("the worker kill must be blocked while the role may be running: err=%v destroyed=%d", err, ws.destroyed)
+	}
+
+	m.chat = launcher
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); err != nil || !st.sessions[roleID].IsTerminated {
+		t.Fatalf("a retry succeeds once the provider stops: %v", err)
+	}
+}

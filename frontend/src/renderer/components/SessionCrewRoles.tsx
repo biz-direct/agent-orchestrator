@@ -185,7 +185,18 @@ export function AddCrewRoleMenu({
  * own session id, so messaging, steering, permission approval, and interrupt
  * work exactly as they do for any Chat session.
  */
-export function CrewRoleChat({ hostId, owner, role }: { hostId?: string; owner: WorkspaceSession; role: CrewRoleSession }) {
+export function CrewRoleChat({
+	assetBaseUrl,
+	hostId,
+	owner,
+	role,
+}: {
+	/** The connected remote host's proxy base; absent while disconnected, so assets never fall back to the local daemon. */
+	assetBaseUrl?: string;
+	hostId?: string;
+	owner: WorkspaceSession;
+	role: CrewRoleSession;
+}) {
 	const session = {
 		id: role.sessionId,
 		workspaceId: owner.workspaceId,
@@ -196,5 +207,5 @@ export function CrewRoleChat({ hostId, owner, role }: { hostId?: string; owner: 
 		mode: "chat",
 		status: "working",
 	} as WorkspaceSession;
-	return <SessionChatSurface hideHeader sideChatsDisabled hostId={hostId} key={role.sessionId} session={session} daemonReady />;
+	return <SessionChatSurface assetBaseUrl={assetBaseUrl} hideHeader sideChatsDisabled hostId={hostId} key={role.sessionId} session={session} daemonReady />;
 }

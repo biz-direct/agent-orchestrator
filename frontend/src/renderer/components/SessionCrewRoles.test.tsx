@@ -11,8 +11,8 @@ vi.mock("../lib/host-clients", () => ({
 	clientForSessionHost: () => ({ GET: getMock, POST: postMock, DELETE: deleteMock }),
 }));
 vi.mock("./chat/SessionChatSurface", () => ({
-	SessionChatSurface: ({ session, sideChatsDisabled }: { session: { id: string }; sideChatsDisabled?: boolean }) => (
-		<div data-side-disabled={String(Boolean(sideChatsDisabled))} data-testid="role-chat">{session.id}</div>
+	SessionChatSurface: ({ session, sideChatsDisabled, assetBaseUrl, hostId }: { session: { id: string }; sideChatsDisabled?: boolean; assetBaseUrl?: string; hostId?: string }) => (
+		<div data-asset-base={assetBaseUrl ?? ""} data-host={hostId ?? ""} data-side-disabled={String(Boolean(sideChatsDisabled))} data-testid="role-chat">{session.id}</div>
 	),
 }));
 
@@ -108,5 +108,19 @@ describe("crew role tabs", () => {
 		expect(screen.getByTestId("role-chat")).toHaveTextContent("w-att-2");
 		// No side panel is mounted for a role tab, so side chats must not be offered.
 		expect(screen.getByTestId("role-chat")).toHaveAttribute("data-side-disabled", "true");
+	});
+
+	it("gives a connected remote role the host's asset origin, and none while disconnected", () => {
+		const { rerender } = wrap(<CrewRoleChat assetBaseUrl="http://127.0.0.1:9/proxy" hostId="remote-1" owner={owner} role={builder} />);
+		expect(screen.getByTestId("role-chat")).toHaveAttribute("data-asset-base", "http://127.0.0.1:9/proxy");
+		expect(screen.getByTestId("role-chat")).toHaveAttribute("data-host", "remote-1");
+		rerender(
+			<QueryClientProvider client={new QueryClient()}>
+				<TooltipProvider>
+					<CrewRoleChat hostId="remote-1" owner={owner} role={builder} />
+				</TooltipProvider>
+			</QueryClientProvider>,
+		);
+		expect(screen.getByTestId("role-chat")).toHaveAttribute("data-asset-base", "");
 	});
 });
