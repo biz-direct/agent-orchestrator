@@ -149,7 +149,11 @@ func (m *Manager) StartCrewRole(ctx context.Context, start ports.CrewRoleStart) 
 		if err := m.chat.StopChat(cleanupCtx, rec.ID); err != nil {
 			return domain.SessionRecord{}, errors.Join(cause, fmt.Errorf("role %s left running; remove it again to retry: %w", rec.ID, err))
 		}
-		_ = m.lcm.MarkTerminated(cleanupCtx, rec.ID)
+		// The claim is released only once the row is durably terminated; a row
+		// that could not be ended stays claimed, discoverable, and retryable.
+		if err := m.lcm.MarkTerminated(cleanupCtx, rec.ID); err != nil {
+			return domain.SessionRecord{}, errors.Join(cause, fmt.Errorf("role %s could not be ended; remove it again to retry: %w", rec.ID, err))
+		}
 		m.releaseAttachedAttempt(cleanupCtx, rec.ID)
 		return domain.SessionRecord{}, cause
 	}

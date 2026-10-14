@@ -400,3 +400,36 @@ func TestFailedStartupWithFailedShutdownKeepsTheRoleRetryableAndBlocksWorkerKill
 		t.Fatalf("a retry succeeds once the provider stops: %v", err)
 	}
 }
+
+type failingTerminateLCM struct {
+	lifecycleRecorder
+	fail bool
+}
+
+func (l *failingTerminateLCM) MarkTerminated(ctx context.Context, id domain.SessionID) error {
+	if l.fail {
+		return errors.New("db unavailable")
+	}
+	return l.lifecycleRecorder.MarkTerminated(ctx, id)
+}
+
+// A failed startup whose row cannot be durably ended keeps the role's claim, so
+// the role stays discoverable and retryable rather than orphaned and unreachable.
+func TestFailedStartupKeepsTheClaimWhenTheRowCannotBeEnded(t *testing.T) {
+	m, st, launcher, _, owner := newCrewRoleManager(t)
+	lcm := &failingTerminateLCM{lifecycleRecorder: m.lcm, fail: true}
+	m.lcm = lcm
+	launcher.startErr = errors.New("host failed")
+
+	if _, err := m.StartCrewRole(context.Background(), ports.CrewRoleStart{Owner: owner.ID, RoleID: "builder", Harness: domain.HarnessClaudeCode}); err == nil {
+		t.Fatal("startup must fail")
+	}
+	if _, found := st.forAttempt[domain.CrewRoleMarker(owner.ID, "builder")]; !found {
+		t.Fatal("the claim must be kept while the row is still live")
+	}
+	lcm.fail = false
+	launcher.startErr = nil
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); err != nil {
+		t.Fatalf("the role is retryable by name: %v", err)
+	}
+}
