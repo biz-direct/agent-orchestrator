@@ -921,6 +921,8 @@ func (m *Manager) executeAgentSwitch(ctx context.Context, admitted *admittedAgen
 		current, committed, sourceStillOwns, resolutionErr := m.resolveTargetActivationOutcome(activationCtx, store, rec, activation)
 		cancelActivation()
 		if committed {
+			// Readback proves the target owns the session, so it got the staged prompt.
+			m.commitAppliedRules(rec.ID)
 			recorder.callOutcome = domain.AgentSwitchCallCommittedResponseLost
 			result = current
 		} else if !sourceStillOwns || resolutionErr != nil {
