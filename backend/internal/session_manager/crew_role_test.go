@@ -433,3 +433,29 @@ func TestFailedStartupKeepsTheClaimWhenTheRowCannotBeEnded(t *testing.T) {
 		t.Fatalf("the role is retryable by name: %v", err)
 	}
 }
+
+// Roles are Chat-only: the public interface-transition surface refuses a role
+// before anything is fenced, while ordinary workers keep their normal switching.
+func TestCrewRolesCannotSwitchInterfaceButWorkersCan(t *testing.T) {
+	m, _, launcher, _, owner := newCrewRoleManager(t)
+	role := startRole(t, m, owner, "builder")
+	launcher.armed = nil
+
+	status, err := m.InterfaceTransitionStatus(context.Background(), role.ID)
+	if err != nil || status.Supported || !strings.Contains(status.Reason, "builder role runs only as a Chat conversation") {
+		t.Fatalf("status must refuse with a visible reason: %+v err=%v", status, err)
+	}
+	_, err = m.StartInterfaceTransition(context.Background(), role.ID, domain.SessionModeTUI,
+		domain.SessionInterfaceTransitionDrain, domain.SessionInterfaceTransitionHistoryStrict)
+	if !errors.Is(err, ErrInterfaceHandoffUnsupported) || !strings.Contains(err.Error(), "builder crew role") {
+		t.Fatalf("start must refuse a role: %v", err)
+	}
+	if len(launcher.armed) != 0 {
+		t.Fatalf("the role's controller must not be fenced: %v", launcher.armed)
+	}
+
+	ownerStatus, err := m.InterfaceTransitionStatus(context.Background(), owner.ID)
+	if err != nil || strings.Contains(ownerStatus.Reason, "crew role") {
+		t.Fatalf("ordinary workers are unaffected: %+v err=%v", ownerStatus, err)
+	}
+}
