@@ -15,7 +15,18 @@
 - **Arch/Omarchy:** `chmod +x agent-orchestrator-linux-x64.AppImage && ./agent-orchestrator-linux-x64.AppImage` (needs `fuse2`; or run with `--appimage-extract-and-run`).
 
 ## Upstream sync
-`sync-upstream.yml` runs daily (and on dispatch): merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch, opens a PR into `main` and merges it (auto-merge when checks are required, direct otherwise). On conflicts it opens an `upstream-sync-conflict` issue and pushes nothing. Needs secret `SYNC_PAT` (repo + workflow scopes) and "Allow auto-merge" enabled in repo settings.
+`sync-upstream.yml` merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch and opens a **draft** PR into `main`. It never merges anything itself, even when the merge is clean. Needs secret `SYNC_PAT` (repo + workflow scopes). Its schedule is unchanged (see PR #63); run it from the Actions tab when you want a sync.
+
+Per sync:
+1. **Draft PR + triage list.** The workflow opens the draft PR (conflicts are committed raw and listed in a "Conflict inventory"). One Pullfrog pass resolves any conflicts onto the branch and writes a triage list into the PR body: one `- [ ]` line per upstream PR/commit with area, one-line summary, risk flag and a recommendation (take / override / revert). Items already decided in [`FORK_DECISIONS.md`](../FORK_DECISIONS.md) are pre-filled and marked `decided:`. Anything touching the app name/bundle id, updater, signing, telemetry/analytics/network calls, or files covered by fork overrides carries a `FLAG:`. The pass ends by adding `<!-- sync-triage:done -->`; a later run re-dispatches Pullfrog only if that marker is missing (timeout or failure), so a sync costs one agent pass.
+2. **You tick the rejects.** Tick the box of every item the fork should not take. Edit the PR body; leave the rest unticked.
+3. **A worker applies them.** Ask a worker to add a revert or override commit for each ticked item on the sync branch and to record each decision in `FORK_DECISIONS.md` (same PR). Prefer `override`/`flag-off` to `revert` when only behavior must differ.
+4. **You merge** the PR once CI is green.
+5. **Release when desired** (see "Builds and releases"); a sync does not bump `FORK_VERSION`.
+
+While a sync PR is open, later runs do not open another one (opening a newer PR would close the one being triaged and lose its worker commits). Merge or close the PR to start the next sync. If the Pullfrog pass fails, an `agent-review` issue is opened.
+
+**Why not cherry-pick:** cherry-picking upstream commits gives them new hashes and drops the merge relationship, so every later sync sees the same changes as new, conflicts repeat, and dependent commits get skipped or applied out of order. Merging all of upstream and opting out with reverts/overrides keeps history linear to upstream and makes each rejection explicit, recorded in `FORK_DECISIONS.md`, and reviewable.
 
 ## Workflow audit
 Automatic on the fork: PR/push CI that guards code quality, plus the fork's own workflows. Upstream-only workflows are gated with a job-level `if: github.repository == 'OrchestratorInc/agent-orchestrator'` (skipped, not deleted, to keep upstream merges clean).
@@ -28,7 +39,8 @@ Automatic on the fork: PR/push CI that guards code quality, plus the fork's own 
 | cli-e2e.yml | PR (backend/test paths), push main | keep on ubuntu+macOS; Windows dropped; concurrency added | real CLI/daemon coverage |
 | build-artifacts.yml | dispatch, workflow_call | keep | fork builds (mac arm64, linux AppImage) |
 | fork-release.yml | dispatch, `v*` tag | keep | fork releases |
-| sync-upstream.yml | daily cron, dispatch | keep | upstream sync |
+| sync-upstream.yml | cron, dispatch | keep | opens the draft sync PR; never merges |
+| sync-upstream-gate.yml | Pullfrog run finishing | keep | opens an `agent-review` issue when the sync triage pass fails |
 | pr-review-leaderboard.yml | pull_request_target | gated off | upstream PR stats |
 | deploy-docs.yml | push main (docs), dispatch | gated off | upstream GitHub Pages |
 | mac-update-e2e.yml | dispatch, workflow_call | gated off | needs signed upstream releases |
