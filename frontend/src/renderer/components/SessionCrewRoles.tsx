@@ -196,5 +196,5 @@ export function CrewRoleChat({ hostId, owner, role }: { hostId?: string; owner: 
 		mode: "chat",
 		status: "working",
 	} as WorkspaceSession;
-	return <SessionChatSurface hideHeader hostId={hostId} key={role.sessionId} session={session} daemonReady />;
+	return <SessionChatSurface hideHeader sideChatsDisabled hostId={hostId} key={role.sessionId} session={session} daemonReady />;
 }

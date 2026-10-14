@@ -264,3 +264,45 @@ func TestReconnectCrewRolesAdoptsLiveRoleHostsAfterRestart(t *testing.T) {
 		t.Fatal("an ended role stays ended")
 	}
 }
+
+type failingStopChat struct {
+	*recordingLauncher
+	failFor domain.SessionID
+}
+
+func (l failingStopChat) StopChat(ctx context.Context, id domain.SessionID) error {
+	if id == l.failFor {
+		return context.DeadlineExceeded
+	}
+	return l.recordingLauncher.StopChat(ctx, id)
+}
+
+// A role whose provider cannot be confirmed stopped is not removed: it stays
+// live and retryable, and the worker's worktree is not deleted underneath it.
+func TestFailedRoleShutdownIsNotATeardown(t *testing.T) {
+	m, st, launcher, ws, owner := newCrewRoleManager(t)
+	role := startRole(t, m, owner, "builder")
+	m.chat = failingStopChat{recordingLauncher: launcher, failFor: role.ID}
+
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); err == nil {
+		t.Fatal("removal must fail when the provider cannot be stopped")
+	}
+	if st.sessions[role.ID].IsTerminated {
+		t.Fatal("an unconfirmed shutdown must leave the role live")
+	}
+	if _, found, _ := m.findCrewRole(context.Background(), m.store.(crewRoleStore), owner.ID, "builder"); !found {
+		t.Fatal("the role must stay discoverable by name for a retry")
+	}
+
+	if _, err := m.Kill(context.Background(), owner.ID); err == nil {
+		t.Fatal("the worker kill must not report success while a role provider may still run")
+	}
+	if ws.destroyed != 0 || st.sessions[owner.ID].IsTerminated {
+		t.Fatalf("the shared worktree must be preserved: destroyed=%d", ws.destroyed)
+	}
+
+	m.chat = launcher
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); err != nil || !st.sessions[role.ID].IsTerminated {
+		t.Fatalf("a retry succeeds once the provider stops: %v", err)
+	}
+}

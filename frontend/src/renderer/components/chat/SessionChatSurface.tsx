@@ -131,6 +131,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceActiveTabKey,
 	workspaceFileActive,
 	hideHeader,
+	sideChatsDisabled,
 	auxiliaryTabOrder,
 	onAuxiliaryTabOrderChange,
 	controllerTransitioning,
@@ -183,6 +184,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceFileActive?: boolean;
 	/** Drop the chat header and tab strip when another surface already provides them. */
 	hideHeader?: boolean;
+	/** No side-chat panel is mounted for this surface, so /btw, /side and "Add to side chat" must not be offered. */
+	sideChatsDisabled?: boolean;
 	/** Session-owned order shared with the terminal UI surface. */
 	auxiliaryTabOrder?: string[];
 	onAuxiliaryTabOrderChange?: (keys: string[]) => void;
@@ -393,7 +396,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	const { paths, catalog: fileCatalog, truncated } = useWorkspaceFilePaths(session.id, Boolean(snapshot), hostId);
 	const stageAttachments = useStageAttachments(session.id, hostId);
 	const [annotationNavigationRequest, setAnnotationNavigationRequest] = useState<{ id: string; text: string; messageId?: string; revision?: number }>();
-	const sideEnabled = useSideChatsAvailable(session, hostId) && !unavailable;
+	const sideAvailable = useSideChatsAvailable(session, hostId);
+	const sideEnabled = sideAvailable && !unavailable && !sideChatsDisabled;
 	const openSideInspector = () => {
 		const ui = useUiStore.getState();
 		ui.setInspectorView(uiSessionId, "sideChat");

@@ -11,7 +11,9 @@ vi.mock("../lib/host-clients", () => ({
 	clientForSessionHost: () => ({ GET: getMock, POST: postMock, DELETE: deleteMock }),
 }));
 vi.mock("./chat/SessionChatSurface", () => ({
-	SessionChatSurface: ({ session }: { session: { id: string } }) => <div data-testid="role-chat">{session.id}</div>,
+	SessionChatSurface: ({ session, sideChatsDisabled }: { session: { id: string }; sideChatsDisabled?: boolean }) => (
+		<div data-side-disabled={String(Boolean(sideChatsDisabled))} data-testid="role-chat">{session.id}</div>
+	),
 }));
 
 import { AddCrewRoleMenu, CrewRoleChat, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
@@ -104,5 +106,7 @@ describe("crew role tabs", () => {
 	it("opens the role's own Chat conversation, never a terminal", () => {
 		wrap(<CrewRoleChat owner={owner} role={builder} />);
 		expect(screen.getByTestId("role-chat")).toHaveTextContent("w-att-2");
+		// No side panel is mounted for a role tab, so side chats must not be offered.
+		expect(screen.getByTestId("role-chat")).toHaveAttribute("data-side-disabled", "true");
 	});
 });
