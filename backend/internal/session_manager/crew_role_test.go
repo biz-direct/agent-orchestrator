@@ -306,3 +306,30 @@ func TestFailedRoleShutdownIsNotATeardown(t *testing.T) {
 		t.Fatalf("a retry succeeds once the provider stops: %v", err)
 	}
 }
+
+// Shutdown and durable termination are one exclusive operation on the role: a
+// resume already in progress refuses removal and the worker kill, so a provider
+// can never be started between the stop and the termination.
+func TestRoleRemovalAndOwnerKillRefuseWhileTheRoleIsBeingResumed(t *testing.T) {
+	m, st, launcher, ws, owner := newCrewRoleManager(t)
+	role := startRole(t, m, owner, "builder")
+	if err := m.beginAgentOperation(context.Background(), role.ID, agentOperationResume); err != nil {
+		t.Fatal(err)
+	}
+	stoppedBefore := len(launcher.stopped)
+
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); !errors.Is(err, ErrSwitchInProgress) {
+		t.Fatalf("removal must be refused while the role is being resumed: %v", err)
+	}
+	if _, err := m.Kill(context.Background(), owner.ID); !errors.Is(err, ErrSwitchInProgress) {
+		t.Fatalf("the worker kill must be refused too: %v", err)
+	}
+	if len(launcher.stopped) != stoppedBefore || st.sessions[role.ID].IsTerminated || ws.destroyed != 0 || st.sessions[owner.ID].IsTerminated {
+		t.Fatalf("nothing may be stopped or deleted: stopped=%v destroyed=%d", launcher.stopped, ws.destroyed)
+	}
+
+	m.endAgentOperation(role.ID, agentOperationResume)
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); err != nil || !st.sessions[role.ID].IsTerminated {
+		t.Fatalf("removal succeeds once the resume is over: %v", err)
+	}
+}

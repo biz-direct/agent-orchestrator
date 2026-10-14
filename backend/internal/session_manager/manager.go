@@ -2490,7 +2490,7 @@ func (m *Manager) kill(ctx context.Context, id domain.SessionID, backgroundClean
 	if owner, err := m.attachedOwner(ctx, id); err != nil {
 		return KillResult{}, fmt.Errorf("kill %s: attached stage lookup: %w", id, err)
 	} else if owner != "" {
-		return KillResult{}, m.terminateAttachedSession(ctx, id)
+		return KillResult{}, m.terminateAttachedSessionHeld(ctx, id)
 	}
 	// Stage sessions attached to this worker die with it, before its workspace
 	// is removed, so none is left running in a deleted directory.
@@ -2665,7 +2665,7 @@ func (m *Manager) RetireForReplacement(ctx context.Context, id domain.SessionID)
 	if owner, err := m.attachedOwner(ctx, id); err != nil {
 		return fmt.Errorf("retire replacement %s: attached stage lookup: %w", id, err)
 	} else if owner != "" {
-		return m.terminateAttachedSession(ctx, id)
+		return m.terminateAttachedSessionHeld(ctx, id)
 	}
 	if err := m.terminateAttachedSessionsOf(ctx, id); err != nil {
 		return fmt.Errorf("retire replacement %s: %w", id, err)

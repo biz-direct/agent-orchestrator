@@ -79,6 +79,28 @@ func (m *Manager) attachedOwner(ctx context.Context, id domain.SessionID) (domai
 // branch, reviewer, and restore markers belong to the owner worker, so none of
 // them are touched here.
 func (m *Manager) terminateAttachedSession(ctx context.Context, id domain.SessionID) error {
+	// A crew role's provider stop and durable termination are one exclusive
+	// operation on the role: a concurrent resume or replacement must not start a
+	// provider between the two. Pipeline stages keep their existing behavior.
+	role, err := m.crewRoleOf(ctx, id)
+	if err != nil {
+		return fmt.Errorf("terminate attached session %s: crew role lookup: %w", id, err)
+	}
+	if role != "" {
+		if err := m.beginAgentOperation(ctx, id, agentOperationKill); err != nil {
+			if errors.Is(err, errAgentOperationInProgress) {
+				err = ErrSwitchInProgress
+			}
+			return fmt.Errorf("terminate crew role %s (%s): %w", role, id, err)
+		}
+		defer m.endAgentOperation(id, agentOperationKill)
+	}
+	return m.terminateAttachedSessionHeld(ctx, id)
+}
+
+// terminateAttachedSessionHeld is terminateAttachedSession for a caller that
+// already holds the session's lifecycle operation (Kill, RetireForReplacement).
+func (m *Manager) terminateAttachedSessionHeld(ctx context.Context, id domain.SessionID) error {
 	// A crew role is only ended once its provider is confirmed stopped: a failed
 	// shutdown leaves it live and retryable by name, and aborts the owner's
 	// teardown before the shared worktree is removed under a running provider.

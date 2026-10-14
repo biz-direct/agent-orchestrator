@@ -2749,6 +2749,7 @@
 	"settings.project.pipeline.problems_other": "{{count}} definition problems",
 	"session.crew.addRole": "New role",
 	"session.crew.noRoles": "No roles available. Define roles in .ao/crew/roles.",
+	"session.crew.removeFailed": "The role was not stopped and is still running. Try removing it again. ({{error}})",
 	"session.crew.removeRole": "Remove {{role}}",
 	"session.crew.roleTabTitle": "{{role}} · {{harness}}",
 	"settings.project.crew.title": "Crew",

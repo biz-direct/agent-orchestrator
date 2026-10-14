@@ -319,8 +319,14 @@ func (m *Manager) ReconnectCrewRoles(ctx context.Context) {
 		return
 	}
 	for _, id := range ids {
+		// Honor lifecycle fencing: a role being removed, resumed, or replaced
+		// owns its own reconnection.
+		if err := m.beginAgentOperation(ctx, id, agentOperationReconcile); err != nil {
+			continue
+		}
 		if _, err := m.ReconnectExecutor(ctx, id); err != nil {
 			m.logger.Warn("reconcile: crew role reconnect failed", "sessionID", id, "error", err)
 		}
+		m.endAgentOperation(id, agentOperationReconcile)
 	}
 }
