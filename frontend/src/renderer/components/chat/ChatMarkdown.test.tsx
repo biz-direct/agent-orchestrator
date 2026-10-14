@@ -841,7 +841,8 @@ describe("plain-text workspace file links", () => {
 
 	it.each([
 		["reports/index.html:12", "reports/index.html"],
-		["/Users/me/.ao/worktrees/p/s-1/reports/index.html", "reports/index.html"],
+		// An absolute reference is kept as written (upstream #6586): the daemon decides which file it names.
+		["/Users/me/.ao/worktrees/p/s-1/reports/index.html", "/Users/me/.ao/worktrees/p/s-1/reports/index.html"],
 	])("previews the resolved HTML path for %s", async (reference, expected) => {
 		const { onFileOpen, onLinkOpen } = renderProse(`Open ${reference} now.`);
 
@@ -851,12 +852,12 @@ describe("plain-text workspace file links", () => {
 		expect(onFileOpen).not.toHaveBeenCalled();
 	});
 
-	it("opens an absolute worktree path in Files", async () => {
+	it("opens an absolute worktree path in Files as written, for the daemon to resolve", async () => {
 		const { onFileOpen } = renderProse("Edited /Users/me/.ao/worktrees/p/s-1/frontend/src/App.tsx");
 
 		await userEvent.click(screen.getByRole("link", { name: /frontend\/src\/App\.tsx$/ }));
 
-		expect(onFileOpen).toHaveBeenCalledWith("frontend/src/App.tsx");
+		expect(onFileOpen).toHaveBeenCalledWith("/Users/me/.ao/worktrees/p/s-1/frontend/src/App.tsx");
 	});
 
 	it("leaves unknown, outside, unsupported, and prose tokens as plain text", () => {

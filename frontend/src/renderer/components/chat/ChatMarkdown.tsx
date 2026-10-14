@@ -390,7 +390,7 @@ function MarkdownLink({ href, children, ...props }: { href?: string; children?: 
 	// that it is a file link, and the daemon decides which file it names.
 	const openInFiles = filePath && href && !workspaceFileOpensInBrowser(filePath) ? workspaceFileOpenTarget(href, filePath) : undefined;
 	// A resolved HTML file previews by its workspace path, without editor-location suffixes.
-	const targetHref = resolved && workspaceFileOpensInBrowser(resolved.workspacePath) ? resolved.workspacePath : href;
+	const targetHref = href && resolved && workspaceFileOpensInBrowser(resolved.workspacePath) ? workspaceFileOpenTarget(href, resolved.workspacePath) : href;
 	if (remoteHost && href && (isHostLocalWebLink(href) || (isPotentialWorkspaceFileLink(href) && !openInFiles))) {
 		return <span className="text-muted-foreground" title={REMOTE_PREVIEW_UNAVAILABLE}>
 			{children}<span className="sr-only"> (remote preview unavailable)</span>
