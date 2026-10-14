@@ -93,6 +93,9 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 		newCrewListCommand(ctx),
 		newCrewValidateCommand(ctx),
 		newCrewDefaultCommand(ctx),
+		newCrewAddCommand(ctx),
+		newCrewRolesCommand(ctx),
+		newCrewRemoveCommand(ctx),
 	)
 	return cmd
 }
@@ -350,4 +353,115 @@ func writeCrewCatalog(w io.Writer, res crewCatalogDTO) error {
 		return err
 	}
 	return nil
+}
+
+type crewRoleSessionDTO struct {
+	SessionID        string `json:"sessionId"`
+	OwnerSessionID   string `json:"ownerSessionId"`
+	Role             string `json:"role"`
+	Harness          string `json:"harness"`
+	Model            string `json:"model,omitempty"`
+	ControllerActive bool   `json:"controllerActive"`
+}
+
+type crewAddRoleDTO struct {
+	Role    string `json:"role"`
+	Harness string `json:"harness,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+type crewRoleListDTO struct {
+	Roles []crewRoleSessionDTO `json:"roles"`
+}
+
+const crewSessionFlagHelp = "Worker session id (default: AO_SESSION_ID)"
+
+func newCrewAddCommand(ctx *commandContext) *cobra.Command {
+	var session, harness, model string
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "add <role>",
+		Short: "Add a role to a worker task as a visible, interactive Chat session in its worktree",
+		Long: "Starts a new Chat conversation with the role's profile instructions inside the worker's own " +
+			"worktree. It appears as a tab in the task, never as a board card. The worker keeps ownership " +
+			"of the worktree, branch, and PR. Only Chat-capable harnesses are allowed.",
+		Args: usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := pipelineSessionID(session)
+			if err != nil {
+				return err
+			}
+			var res crewRoleSessionDTO
+			body := crewAddRoleDTO{Role: strings.TrimSpace(args[0]), Harness: strings.TrimSpace(harness), Model: strings.TrimSpace(model)}
+			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/roles", body, &res); err != nil {
+				return err
+			}
+			if jsonOutput {
+				return writeJSON(cmd.OutOrStdout(), res)
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "added role %s to %s as session %s (%s)\n", res.Role, res.OwnerSessionID, res.SessionID, res.Harness)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", crewSessionFlagHelp)
+	cmd.Flags().StringVar(&harness, "harness", "", "Chat-capable harness (default: the role's harness, then the task's)")
+	cmd.Flags().StringVar(&model, "model", "", "Model override")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
+}
+
+func newCrewRolesCommand(ctx *commandContext) *cobra.Command {
+	var session string
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "roles",
+		Short: "List the role sessions attached to a worker task",
+		Args:  usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			id, err := pipelineSessionID(session)
+			if err != nil {
+				return err
+			}
+			var res crewRoleListDTO
+			if err := ctx.getJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/roles", &res); err != nil {
+				return err
+			}
+			if jsonOutput {
+				return writeJSON(cmd.OutOrStdout(), res)
+			}
+			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+			_, _ = fmt.Fprintln(tw, "ROLE\tSESSION\tHARNESS")
+			for _, r := range res.Roles {
+				_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Role, r.SessionID, r.Harness)
+			}
+			return tw.Flush()
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", crewSessionFlagHelp)
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
+}
+
+func newCrewRemoveCommand(ctx *commandContext) *cobra.Command {
+	var session string
+	cmd := &cobra.Command{
+		Use:     "remove <role>",
+		Aliases: []string{"rm"},
+		Short:   "End a role's conversation; the task's worktree, branch, and PR are untouched",
+		Args:    usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := pipelineSessionID(session)
+			if err != nil {
+				return err
+			}
+			role := strings.TrimSpace(args[0])
+			if err := ctx.deleteJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/roles/"+url.PathEscape(role), nil); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "removed role %s from %s\n", role, id)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", crewSessionFlagHelp)
+	return cmd
 }

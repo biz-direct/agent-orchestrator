@@ -62,6 +62,20 @@ const settingsState = vi.hoisted(() => ({
 	chatHarnesses: undefined as string[] | undefined,
 }));
 const reviewGetMock = vi.hoisted(() => vi.fn());
+const crewDeleteMock = vi.hoisted(() => vi.fn());
+// Answers the first non-crew GET with `value`. The task view also polls the crew
+// role list, which must not consume a response meant for the review lookup.
+function mockReviewOnce(value: unknown) {
+	let used = false;
+	const base = reviewGetMock.getMockImplementation();
+	reviewGetMock.mockImplementation(async (path: string, ...rest: unknown[]) => {
+		if (!used && !path.includes("/crew")) {
+			used = true;
+			return value;
+		}
+		return base?.(path, ...rest);
+	});
+}
 const chatViewPostMock = vi.hoisted(() => vi.fn());
 const inspectorVisibilityRenders = vi.hoisted(() => [] as boolean[]);
 const chatSurfaceRenders = vi.hoisted(() => [] as string[]);
@@ -185,6 +199,7 @@ vi.mock("../hooks/useSessionInterfaceTransition", async (importOriginal) => ({
 vi.mock("../lib/api-client", () => ({
 	apiClient: {
 		GET: reviewGetMock,
+		DELETE: crewDeleteMock,
 		POST: vi.fn((path: string, ...args: unknown[]) =>
 			path.endsWith("/resume-agent")
 				? resumeAgentPostMock(path, ...args)
@@ -1007,6 +1022,7 @@ describe("SessionView", () => {
 		chatSurfaceWorkState.hasRunningTurn = false;
 		chatSurfaceWorkState.queuedTurnCount = 0;
 		reviewGetMock.mockReset();
+		crewDeleteMock.mockReset();
 		resumeAgentPostMock.mockReset();
 		resumeAgentPostMock.mockResolvedValue({ data: {}, error: undefined });
 		chatViewPostMock.mockReset().mockResolvedValue({ error: undefined });
@@ -1499,6 +1515,24 @@ describe("SessionView", () => {
 
 	// The strip only ever shows the session on screen — pinning another session's
 	// terminal as a tab (and the cross-project picker that did it) is gone (#3208).
+	it("keeps a role open and says so when its removal fails", async () => {
+		const role = { sessionId: "sess-att-2", ownerSessionId: "sess-1", role: "builder", harness: "codex", controllerActive: true, createdAt: "2026-01-01T00:00:00Z" };
+		const base = reviewGetMock.getMockImplementation();
+		reviewGetMock.mockImplementation(async (path: string, ...rest: unknown[]) =>
+			path.endsWith("/crew/roles") ? { data: { roles: [role] }, error: undefined } : base?.(path, ...rest));
+		crewDeleteMock.mockResolvedValue({ error: { message: "provider did not stop" } });
+		render(<SessionView sessionId="sess-1" />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "Remove builder" }));
+
+		const alert = await screen.findByRole("alert");
+		expect(alert).toHaveTextContent("The role was not stopped and is still running");
+		expect(crewDeleteMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/crew/roles/{role}", {
+			params: { path: { sessionId: "sess-1", role: "builder" } },
+		});
+		expect(screen.getByRole("tab", { name: "builder" })).toBeInTheDocument();
+	});
+
 	it("shows only the session on screen in the tab strip", () => {
 		render(<SessionView sessionId="sess-1" />);
 
@@ -2402,7 +2436,7 @@ describe("SessionView", () => {
 				createdAt: "2026-08-31T00:00:00Z",
 			},
 		];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [] },
 			error: undefined,
 		});
@@ -4184,7 +4218,7 @@ describe("SessionView", () => {
 				updatedAt: "2026-06-15T00:00:00Z",
 			},
 		];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [], runs: [] },
 			error: undefined,
 		});
@@ -4207,7 +4241,7 @@ describe("SessionView", () => {
 			reviewComments: false,
 			updatedAt: "2026-06-15T00:00:00Z",
 		}];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [], runs: [] },
 			error: undefined,
 		});
@@ -4363,7 +4397,7 @@ describe("SessionView", () => {
 				updatedAt: "2026-06-15T00:00:00Z",
 			},
 		];
-		reviewGetMock.mockResolvedValueOnce({
+		mockReviewOnce({
 			data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [] },
 			error: undefined,
 		});
@@ -4398,7 +4432,7 @@ describe("SessionView", () => {
 					updatedAt: "2026-06-15T00:00:00Z",
 				},
 			];
-			reviewGetMock.mockResolvedValueOnce({
+			mockReviewOnce({
 				data: { reviewerHandleId: "review-sess-1", reviewerHarness: "codex", reviews: [] },
 				error: undefined,
 			});

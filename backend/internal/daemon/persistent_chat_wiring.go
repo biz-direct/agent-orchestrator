@@ -29,10 +29,33 @@ func reconcilePersistentChatHosts(ctx context.Context, dataDir string, store per
 		return fmt.Errorf("list reviews for persistent chat hosts: %w", err)
 	}
 	keep := persistentChatHostKeepSet(records, reviews)
+	if err := keepCrewRoleHosts(ctx, store, keep); err != nil {
+		return err
+	}
 	if len(appRunIDs) > 0 && appRunIDs[0] != "" {
 		keepLaunchSideHosts(dataDir, appRunIDs[0], keep)
 	}
 	return persistenthost.Reconcile(ctx, dataDir, keep)
+}
+
+// keepCrewRoleHosts adds live crew role sessions to the keep set. They are
+// hidden from every session listing, so their live hosts would otherwise look
+// orphaned and be shut down; the manager adopts them after startup.
+func keepCrewRoleHosts(ctx context.Context, store any, keep map[string]struct{}) error {
+	roles, ok := store.(interface {
+		ListLiveCrewRoleSessionIDs(context.Context) ([]domain.SessionID, error)
+	})
+	if !ok {
+		return nil
+	}
+	ids, err := roles.ListLiveCrewRoleSessionIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("list crew roles for persistent chat hosts: %w", err)
+	}
+	for _, id := range ids {
+		keep[string(id)] = struct{}{}
+	}
+	return nil
 }
 
 func persistentChatHostKeepSet(records []domain.SessionRecord, reviews []domain.Review) map[string]struct{} {

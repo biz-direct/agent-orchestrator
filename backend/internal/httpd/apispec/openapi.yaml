@@ -7271,6 +7271,125 @@ paths:
       summary: Promote a queued message into the in-flight turn
       tags:
       - conversations
+  /api/v1/sessions/{sessionId}/crew/roles:
+    get:
+      operationId: listSessionCrewRoles
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewRoleList'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: List the live crew role sessions attached to a worker task
+      tags:
+      - sessions
+    post:
+      operationId: addSessionCrewRole
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddCrewRoleInput'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewRoleSession'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Start a visible, interactive Chat session for a repository-defined
+        role in the task's worktree
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/crew/roles/{role}:
+    delete:
+      operationId: removeSessionCrewRole
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - in: path
+        name: role
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: End a role's conversation without touching the task's worktree, branch,
+        or PR
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/exit-agent:
     post:
       operationId: exitAgent
@@ -11211,6 +11330,17 @@ components:
       required:
       - activeBranchId
       type: object
+    AddCrewRoleInput:
+      properties:
+        harness:
+          type: string
+        model:
+          type: string
+        role:
+          type: string
+      required:
+      - role
+      type: object
     AddProjectInput:
       properties:
         asWorkspace:
@@ -13937,6 +14067,40 @@ components:
       - file
       - valid
       - diagnostics
+      type: object
+    CrewRoleList:
+      properties:
+        roles:
+          items:
+            $ref: '#/components/schemas/CrewRoleSession'
+          type: array
+      required:
+      - roles
+      type: object
+    CrewRoleSession:
+      properties:
+        controllerActive:
+          type: boolean
+        createdAt:
+          format: date-time
+          type: string
+        harness:
+          type: string
+        model:
+          type: string
+        ownerSessionId:
+          type: string
+        role:
+          type: string
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - ownerSessionId
+      - role
+      - harness
+      - controllerActive
+      - createdAt
       type: object
     CrewSelection:
       properties:

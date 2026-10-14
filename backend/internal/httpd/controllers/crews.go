@@ -23,6 +23,62 @@ func (c *CrewsController) Register(r chi.Router) {
 	r.Get("/projects/{id}/crew", c.catalog)
 	r.Get("/projects/{id}/crew/default", c.getDefault)
 	r.Put("/projects/{id}/crew/default", c.setDefault)
+	r.Get("/sessions/{sessionId}/crew/roles", c.listRoles)
+	r.Post("/sessions/{sessionId}/crew/roles", c.addRole)
+	r.Delete("/sessions/{sessionId}/crew/roles/{role}", c.removeRole)
+}
+
+// CrewRoleList is the body of GET /sessions/{sessionId}/crew/roles.
+type CrewRoleList struct {
+	Roles []crewssvc.RoleSession `json:"roles"`
+}
+
+// CrewRoleParam is the {role} path parameter.
+type CrewRoleParam struct {
+	Role string `path:"role" doc:"Role id"`
+}
+
+func (c *CrewsController) listRoles(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/crew/roles")
+		return
+	}
+	out, err := c.Mgr.ListRoles(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, CrewRoleList{Roles: out})
+}
+
+func (c *CrewsController) addRole(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/roles")
+		return
+	}
+	var in crewssvc.AddRoleInput
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	out, err := c.Mgr.AddRole(r.Context(), sessionID(r), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusCreated, out)
+}
+
+func (c *CrewsController) removeRole(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/crew/roles/{role}")
+		return
+	}
+	if err := c.Mgr.RemoveRole(r.Context(), sessionID(r), chi.URLParam(r, "role")); err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *CrewsController) catalog(w http.ResponseWriter, r *http.Request) {

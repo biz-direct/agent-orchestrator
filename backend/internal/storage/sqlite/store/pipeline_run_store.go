@@ -654,3 +654,33 @@ func intentFromRow(r gen.SessionPipelineIntent) domain.PipelineIntent {
 		State: domain.PipelineIntentState(r.State), Detail: r.Detail, RunID: r.RunID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
 }
+
+// GetSessionCrewRole returns the crew role an attached session runs, or "" when
+// the session is not a crew role session.
+func (s *Store) GetSessionCrewRole(ctx context.Context, id domain.SessionID) (string, error) {
+	marker, err := s.qr.GetSessionAttachedAttempt(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get crew role %s: %w", id, err)
+	}
+	role, _ := domain.CrewRoleFromMarker(marker)
+	return role, nil
+}
+
+// FindCrewRoleSession returns the live role session of owner for role.
+func (s *Store) FindCrewRoleSession(ctx context.Context, owner domain.SessionID, role string) (domain.SessionID, bool, error) {
+	return s.FindAttachedSessionForAttempt(ctx, domain.CrewRoleMarker(owner, role))
+}
+
+// ListLiveCrewRoleSessionIDs returns every unterminated crew role session. Role
+// rows are hidden from ordinary listings, so startup recovery and persistent
+// host preservation enumerate them here instead.
+func (s *Store) ListLiveCrewRoleSessionIDs(ctx context.Context) ([]domain.SessionID, error) {
+	ids, err := s.qr.ListLiveCrewRoleSessionIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list live crew roles: %w", err)
+	}
+	return ids, nil
+}

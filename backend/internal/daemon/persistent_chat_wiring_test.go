@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,5 +49,32 @@ func TestSideHostsSurviveOnlyTheirDesktopLaunch(t *testing.T) {
 	}
 	if _, ok := keep["btw-previous-one"]; ok {
 		t.Fatal("kept a previous desktop launch")
+	}
+}
+
+type roleListingStore struct {
+	ids []domain.SessionID
+	err error
+}
+
+func (s roleListingStore) ListLiveCrewRoleSessionIDs(context.Context) ([]domain.SessionID, error) {
+	return s.ids, s.err
+}
+
+// Role sessions are hidden from ListAllSessions, so their live hosts must be
+// added to the keep set explicitly or a restart would shut them down mid-turn.
+func TestKeepCrewRoleHostsPreservesLiveRoleHosts(t *testing.T) {
+	keep := map[string]struct{}{"ordinary": {}}
+	if err := keepCrewRoleHosts(context.Background(), roleListingStore{ids: []domain.SessionID{"p-att-1"}}, keep); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keep["p-att-1"]; !ok || len(keep) != 2 {
+		t.Fatalf("keep = %v", keep)
+	}
+	if err := keepCrewRoleHosts(context.Background(), struct{}{}, keep); err != nil {
+		t.Fatalf("stores without role listing keep nothing extra: %v", err)
+	}
+	if err := keepCrewRoleHosts(context.Background(), roleListingStore{err: errors.New("db")}, keep); err == nil {
+		t.Fatal("an unreadable role set is not evidence that hosts are orphaned")
 	}
 }

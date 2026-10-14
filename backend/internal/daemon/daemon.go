@@ -949,7 +949,7 @@ func Run() error {
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectSvc,
 		Pipelines:          pipelinessvc.New(store),
-		Crews:              crewssvc.New(store),
+		Crews:              crewRoleService(crewssvc.New(store), store, sessMgr),
 		PipelineRuns:       pipelineRunSvc,
 		HostID:             hostIdentity.HostID,
 		Endpoints:          bs,
@@ -1300,6 +1300,14 @@ func stabilizeWorkingDirectory(dataDir string) error {
 		return fmt.Errorf("daemon working directory: chdir %s: %w", dataDir, err)
 	}
 	return nil
+}
+
+// crewRoleService enables role sessions when the session manager can host them.
+func crewRoleService(svc *crewssvc.Service, store crewssvc.SessionStore, sessMgr any) *crewssvc.Service {
+	if host, ok := sessMgr.(ports.CrewRoleHost); ok {
+		return svc.WithRoleSessions(store, host)
+	}
+	return svc
 }
 
 // promptService narrows the session manager to the prompt-preview surface; nil
