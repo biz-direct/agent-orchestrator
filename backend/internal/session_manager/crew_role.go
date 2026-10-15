@@ -315,6 +315,11 @@ func (m *Manager) crewRolePrompt(ctx context.Context, id domain.SessionID) (stri
 	}
 	b.WriteString("\n### Write baton\n\n")
 	b.WriteString(m.batonPromptSection(ctx, ownerID, role))
+	b.WriteString("\n### Talking to teammates\n\n")
+	b.WriteString("Text you write in this conversation is shown only to the person watching it; your teammates never see it. ")
+	b.WriteString("To reply to or message a teammate, you MUST run `ao crew send --to <role> --message \"...\"` (add `--steer` to join the teammate's running turn instead of queueing behind it). ")
+	b.WriteString("A message you receive that begins with `[crew message from <role> ...]` came this way, so answer it the same way. ")
+	b.WriteString("Messages reach only the roles listed above, by role name. Do not send routine acknowledgements: too many plain messages to one teammate are held for the human.\n")
 	if instructions := strings.TrimSpace(rec.Metadata.Prompt); instructions != "" {
 		b.WriteString("\n### Your role instructions\n\n")
 		b.WriteString(instructions)

@@ -33,6 +33,11 @@ func (c *CrewsController) Register(r chi.Router) {
 	r.Delete("/sessions/{sessionId}/crew/roles/{role}", c.removeRole)
 	r.Get("/sessions/{sessionId}/crew/baton", c.getBaton)
 	r.Put("/sessions/{sessionId}/crew/baton", c.moveBaton)
+	r.Get("/sessions/{sessionId}/crew/messages", c.listMessages)
+	r.Post("/sessions/{sessionId}/crew/messages", c.sendMessage)
+	r.Patch("/sessions/{sessionId}/crew/messages/{messageId}", c.editMessage)
+	r.Delete("/sessions/{sessionId}/crew/messages/{messageId}", c.dropMessage)
+	r.Post("/sessions/{sessionId}/crew/messages/{messageId}/release", c.releaseMessage)
 }
 
 func (c *CrewsController) getBaton(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +170,97 @@ func (c *CrewsController) setDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := c.Mgr.SetDefault(r.Context(), projectID(r), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// CrewMessageList is the body of GET /sessions/{sessionId}/crew/messages.
+type CrewMessageList struct {
+	Messages []crewssvc.CrewMessage `json:"messages"`
+}
+
+// CrewMessageParam is the {messageId} path parameter.
+type CrewMessageParam struct {
+	MessageID string `path:"messageId" doc:"Crew message id"`
+}
+
+func (c *CrewsController) listMessages(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/crew/messages")
+		return
+	}
+	out, err := c.Mgr.ListMessages(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, CrewMessageList{Messages: out})
+}
+
+func (c *CrewsController) sendMessage(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/messages")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2*crewssvc.MaxMessageBytes)
+	var in crewssvc.SendMessageInput
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	out, err := c.Mgr.SendMessage(r.Context(), sessionID(r), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if out.Duplicate {
+		status = http.StatusOK
+	}
+	envelope.WriteJSON(w, status, out)
+}
+
+func (c *CrewsController) editMessage(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/sessions/{sessionId}/crew/messages/{messageId}")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2*crewssvc.MaxMessageBytes)
+	var in crewssvc.EditMessageInput
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	out, err := c.Mgr.EditMessage(r.Context(), sessionID(r), chi.URLParam(r, "messageId"), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *CrewsController) dropMessage(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/crew/messages/{messageId}")
+		return
+	}
+	out, err := c.Mgr.DropMessage(r.Context(), sessionID(r), chi.URLParam(r, "messageId"))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *CrewsController) releaseMessage(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/messages/{messageId}/release")
+		return
+	}
+	out, err := c.Mgr.ReleaseMessage(r.Context(), sessionID(r), chi.URLParam(r, "messageId"))
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

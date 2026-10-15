@@ -946,10 +946,13 @@ func Run() error {
 		nativeSessions, _ = codewhaleAgent.(ports.AgentNativeSessionResolver)
 	}
 
+	crewSvc := crewRoleService(crewssvc.New(store), store, sessMgr).
+		WithMessages(store, crewMessageDelivery{chat: chatSvc}, crewssvc.MessageOptions{})
+
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectSvc,
 		Pipelines:          pipelinessvc.New(store),
-		Crews:              crewRoleService(crewssvc.New(store), store, sessMgr),
+		Crews:              crewSvc,
 		PipelineRuns:       pipelineRunSvc,
 		HostID:             hostIdentity.HostID,
 		Endpoints:          bs,
@@ -1072,6 +1075,15 @@ func Run() error {
 		// bounded subprocess probes no longer contend with the synchronous
 		// migration and fencing reconcile that gate the port bind.
 		agentSvc.WarmReadiness()
+		// Crew messages wait for role chats to be reconciled so a restart's
+		// pending deliveries do not race the hosts they are delivered to.
+		go func() {
+			select {
+			case <-persistentHostsReconciled:
+				crewSvc.RunMessageDispatcher(ctx, crewMessageDispatchInterval)
+			case <-ctx.Done():
+			}
+		}()
 		done := make(chan struct{})
 		startupReconcileDone = done
 		go func() {
@@ -1205,6 +1217,35 @@ func Run() error {
 		log.Error("cdc pipeline shutdown", "err", err)
 	}
 	return runErr
+}
+
+// crewMessageDispatchInterval is how often pending crew messages are retried: a
+// message held back by a blocked target goes out within this of the unblock.
+const crewMessageDispatchInterval = 3 * time.Second
+
+// crewMessageDelivery hands crew messages to role conversations through the
+// ordinary chat messaging paths, so queue and steer behave exactly as they do
+// for any session message. The message id is the chat client message id, which
+// the chat layer dedupes on.
+type crewMessageDelivery struct {
+	chat *chatsvc.Service
+}
+
+func (d crewMessageDelivery) DeliverCrewMessage(ctx context.Context, m ports.CrewMessageDelivery) error {
+	var err error
+	if m.Steer {
+		_, err = d.chat.SteerOrSend(ctx, m.Target, ports.ChatUserMessage{
+			Text: m.Text, ClientMessageID: m.ClientMessageID, SenderSessionID: string(m.Sender),
+		}, false)
+	} else {
+		_, err = d.chat.RelaySessionChatTurn(ctx, m.Target, m.Text, m.ClientMessageID, ports.MessageDeliveryOptions{
+			SenderSessionID: string(m.Sender), InteractionAt: time.Now(),
+		})
+	}
+	if errors.Is(err, sessionmanager.ErrTerminated) || errors.Is(err, sessionmanager.ErrNotFound) {
+		return fmt.Errorf("%w: %w", ports.ErrCrewMessageTargetGone, err)
+	}
+	return err
 }
 
 type reportSemanticSession interface {

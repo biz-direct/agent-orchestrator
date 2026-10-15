@@ -69,7 +69,9 @@ func TestStartCrewRoleRunsInTheWorkersWorktreeWithItsOwnConversationAndCrewPromp
 	if len(launcher.relayed) != 0 || len(launcher.turns) != 0 {
 		t.Fatalf("a role waits for the human; nothing is sent on its behalf: %v %v", launcher.relayed, launcher.turns)
 	}
-	for _, want := range []string{"Crew role: builder", "INSTRUCTIONS-builder", "Fix the login bug", "feat/x", string(owner.ID), "owns the worktree, branch, and PR"} {
+	for _, want := range []string{"Crew role: builder", "INSTRUCTIONS-builder", "Fix the login bug", "feat/x", string(owner.ID), "owns the worktree, branch, and PR",
+		// Replying to a teammate takes `ao crew send`; chat text never reaches them.
+		"you MUST run `ao crew send --to <role> --message", "your teammates never see it", "[crew message from <role>"} {
 		if !strings.Contains(cfg.SystemPrompt, want) {
 			t.Errorf("system prompt missing %q:\n%s", want, cfg.SystemPrompt)
 		}

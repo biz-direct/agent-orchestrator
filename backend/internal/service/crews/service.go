@@ -52,6 +52,16 @@ type Manager interface {
 	ListRoles(ctx context.Context, owner domain.SessionID) ([]RoleSession, error)
 	// RemoveRole ends only the role's conversation.
 	RemoveRole(ctx context.Context, owner domain.SessionID, role string) error
+	// SendMessage records a durable message from a role session to a teammate
+	// role on the same task and delivers it.
+	SendMessage(ctx context.Context, sender domain.SessionID, in SendMessageInput) (CrewMessage, error)
+	// ListMessages returns the task's crew thread.
+	ListMessages(ctx context.Context, session domain.SessionID) ([]CrewMessage, error)
+	// EditMessage, DropMessage, and ReleaseMessage are a person's controls over
+	// a message that has not been delivered.
+	EditMessage(ctx context.Context, session domain.SessionID, messageID string, in EditMessageInput) (CrewMessage, error)
+	DropMessage(ctx context.Context, session domain.SessionID, messageID string) (CrewMessage, error)
+	ReleaseMessage(ctx context.Context, session domain.SessionID, messageID string) (CrewMessage, error)
 	// GetBaton returns who holds the task's write baton and the move history.
 	GetBaton(ctx context.Context, owner domain.SessionID) (BatonStatus, error)
 	// MoveBaton is the human override that hands the baton to any holder.
@@ -92,6 +102,7 @@ type Service struct {
 	// batonMoves serializes each task's baton moves together with their notices,
 	// so an older move cannot deliver a grant after a newer one revoked it.
 	batonMoves sync.Map // domain.SessionID -> *sync.Mutex
+	msgs       *messaging
 }
 
 var _ Manager = (*Service)(nil)

@@ -144,6 +144,7 @@ var legacyActorlessUserCLICommands = map[string]struct{}{
 	"ao crew list":                  {},
 	"ao crew remove":                {},
 	"ao crew roles":                 {},
+	"ao crew send":                  {},
 	"ao crew status":                {},
 	"ao crew validate":              {},
 	"ao cue":                        {},

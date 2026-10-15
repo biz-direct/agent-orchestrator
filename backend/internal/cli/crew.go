@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -96,6 +97,7 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 		newCrewAddCommand(ctx),
 		newCrewRolesCommand(ctx),
 		newCrewRemoveCommand(ctx),
+		newCrewSendCommand(ctx),
 		newCrewStatusCommand(ctx),
 		newCrewBatonCommand(ctx),
 	)
@@ -465,5 +467,82 @@ func newCrewRemoveCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", crewSessionFlagHelp)
+	return cmd
+}
+
+type crewSendDTO struct {
+	To             string `json:"to"`
+	Message        string `json:"message"`
+	Steer          bool   `json:"steer,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey"`
+}
+
+type crewMessageDTO struct {
+	ID          string `json:"id"`
+	SenderRole  string `json:"senderRole"`
+	TargetRole  string `json:"targetRole"`
+	Mode        string `json:"mode"`
+	State       string `json:"state"`
+	StateReason string `json:"stateReason,omitempty"`
+	Duplicate   bool   `json:"duplicate,omitempty"`
+}
+
+func newCrewSendCommand(ctx *commandContext) *cobra.Command {
+	var session, to, message, key string
+	var steer, jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "send --to <role> --message <text>",
+		Short: "Message a teammate role on the same task",
+		Long: "Delivers a durable message from this role session to a teammate role as a new turn in " +
+			"its conversation, tagged with your role, the baton holder, and the current commit. A " +
+			"message to a busy role queues behind its current turn; --steer adds it to the running " +
+			"turn instead. A message to a role waiting on a permission prompt waits for it. Too many " +
+			"plain messages to one teammate are held for the human. Replying to a teammate always " +
+			"takes this command: text in your chat is not delivered to them. Retrying with the same " +
+			"--idempotency-key never delivers twice.",
+		Args: usageArgs(cobra.NoArgs),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			id, err := pipelineSessionID(session)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(to) == "" {
+				return usageError{errors.New("usage: --to is required")}
+			}
+			if strings.TrimSpace(message) == "" {
+				return usageError{errors.New("usage: --message is required")}
+			}
+			if strings.TrimSpace(key) == "" {
+				key = uuid.NewString()
+			}
+			var res crewMessageDTO
+			body := crewSendDTO{To: strings.TrimSpace(to), Message: message, Steer: steer, IdempotencyKey: strings.TrimSpace(key)}
+			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/messages", body, &res); err != nil {
+				var responseErr apiResponseError
+				if !errors.As(err, &responseErr) || responseErr.StatusCode >= 500 || errors.Is(err, errDaemonUnavailable) {
+					return fmt.Errorf("%w; outcome is unknown; retry safely with --idempotency-key %s", err, body.IdempotencyKey)
+				}
+				return err
+			}
+			if jsonOutput {
+				return writeJSON(cmd.OutOrStdout(), res)
+			}
+			note := ""
+			if res.StateReason != "" {
+				note = " (" + res.StateReason + ")"
+			}
+			if res.Duplicate {
+				note += " [already recorded; not sent again]"
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "message %s to %s: %s%s\n", res.ID, res.TargetRole, res.State, note)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&session, "session", "", "Sending role session id (default: AO_SESSION_ID)")
+	cmd.Flags().StringVar(&to, "to", "", "Target role name on the same task (required)")
+	cmd.Flags().StringVar(&message, "message", "", "Message body (required)")
+	cmd.Flags().BoolVar(&steer, "steer", false, "Add to the target's running turn instead of queueing behind it")
+	cmd.Flags().StringVar(&key, "idempotency-key", "", "Stable retry handle (default: a fresh one)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
 }
