@@ -1,107 +1,21 @@
 # .github/workflows/sync-upstream-gate.yml
 name: Sync upstream gate
 
-# FORK ONLY: decides what happens to the PRs opened by sync-upstream.yml.
-# Pullfrog reviews each sync PR; this gate merges it once Pullfrog's review of
-# the current head is clean and CI is green, and opens an `agent-review` issue
-# when a human is needed (CI failed, Pullfrog found issues, or Pullfrog could
-# not prepare the sync). Logic lives in .github/scripts/sync-upstream-gate.sh.
-#
-# Most CI workflows here are path-filtered, so they cannot be required checks
-# on main; the gate enforces "all reported checks pass" for sync PRs instead.
-# Every workflow that runs on pull_request must be listed under workflow_run
-# below, or its finishing last would not re-run the gate; the tests enforce it.
-#
-# Needs the SYNC_PAT secret (a merge made with GITHUB_TOKEN would not trigger CI
-# on main).
+# FORK ONLY: notification for the draft PRs opened by sync-upstream.yml. Sync PRs
+# are never merged automatically (the user merges after triage; see docs/fork-ci.md),
+# so the old merge gate is gone. What remains: when the Pullfrog pass that triages or
+# resolves a sync fails, open an `agent-review` issue so it is not silent.
 
 on:
-  pull_request_review:
-    types: [submitted]
   workflow_run:
     workflows:
-      - Frontend
-      - Go
-      - gitleaks
-      - CLI E2E
-      - Mobile
-      - e2e-gate tests
-      - Optional private submodule
-      - Pricing catalog validation
-      - sync-gate tests
-      - Version Floor Guard
       - Pullfrog
     types: [completed]
 
 permissions:
   contents: read
 
-concurrency:
-  group: sync-upstream-gate
-  cancel-in-progress: false
-
 jobs:
-  evaluate:
-    # A Pullfrog review of a sync PR, a CI workflow finishing on one, or a
-    # Pullfrog run finishing (its check can still be pending when the clean
-    # review lands, and nothing else would re-run the gate afterwards).
-    name: sync-gate
-    if: >-
-      github.repository != 'OrchestratorInc/agent-orchestrator' && (
-        (github.event_name == 'pull_request_review'
-          && github.event.review.user.login == 'pullfrog[bot]'
-          && startsWith(github.event.pull_request.head.ref, 'sync/upstream-'))
-        ||
-        (github.event_name == 'workflow_run'
-          && github.event.workflow_run.name != 'Pullfrog'
-          && github.event.workflow_run.event == 'pull_request'
-          && startsWith(github.event.workflow_run.head_branch, 'sync/upstream-'))
-        ||
-        (github.event_name == 'workflow_run'
-          && github.event.workflow_run.name == 'Pullfrog')
-      )
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.SYNC_PAT }}
-    steps:
-      - name: Require SYNC_PAT
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Repository secret SYNC_PAT is required."
-            exit 1
-          fi
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          persist-credentials: false
-      - name: Evaluate sync PR
-        shell: bash
-        env:
-          REVIEW_PR: ${{ github.event.pull_request.number }}
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          # After a Pullfrog run, wait for its check to settle (it can lag the run).
-          WAIT_SECS: ${{ github.event.workflow_run.name == 'Pullfrog' && '300' || '0' }}
-        run: |
-          set -euo pipefail
-          if [ -n "$REVIEW_PR" ]; then
-            prs="$REVIEW_PR"
-          elif [[ "$HEAD_BRANCH" == sync/upstream-* ]]; then
-            prs="$(gh pr list --head "$HEAD_BRANCH" --base main --state open \
-              --json number --jq '.[].number')"
-          else
-            # A Pullfrog run belongs to the default branch, not the PR, so
-            # evaluate every open sync PR; the script is idempotent.
-            prs="$(gh pr list --base main --state open --json number,headRefName \
-              --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | .number')"
-          fi
-          if [ -z "$prs" ]; then
-            echo "No open sync PR; nothing to do."
-            exit 0
-          fi
-          for pr in $prs; do
-            bash .github/scripts/sync-upstream-gate.sh "$pr"
-          done
-
   pullfrog-failed:
     name: sync-gate-failure
     # Pullfrog could not prepare a conflicted sync (dispatched by sync-upstream.yml).

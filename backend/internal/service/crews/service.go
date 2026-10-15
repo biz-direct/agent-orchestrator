@@ -10,6 +10,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/crew"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -60,6 +62,10 @@ type Manager interface {
 	EditMessage(ctx context.Context, session domain.SessionID, messageID string, in EditMessageInput) (CrewMessage, error)
 	DropMessage(ctx context.Context, session domain.SessionID, messageID string) (CrewMessage, error)
 	ReleaseMessage(ctx context.Context, session domain.SessionID, messageID string) (CrewMessage, error)
+	// GetBaton returns who holds the task's write baton and the move history.
+	GetBaton(ctx context.Context, owner domain.SessionID) (BatonStatus, error)
+	// MoveBaton is the human override that hands the baton to any holder.
+	MoveBaton(ctx context.Context, owner domain.SessionID, in MoveBatonInput) (BatonStatus, error)
 }
 
 // CatalogResponse is the body of GET /projects/{id}/crew.
@@ -87,10 +93,16 @@ type SetDefaultInput struct {
 
 // Service implements Manager.
 type Service struct {
-	store    Store
-	sessions SessionStore
-	host     ports.CrewRoleHost
-	msgs     *messaging
+	store     Store
+	sessions  SessionStore
+	host      ports.CrewRoleHost
+	baton     BatonStore
+	messenger Messenger
+	now       func() time.Time
+	// batonMoves serializes each task's baton moves together with their notices,
+	// so an older move cannot deliver a grant after a newer one revoked it.
+	batonMoves sync.Map // domain.SessionID -> *sync.Mutex
+	msgs       *messaging
 }
 
 var _ Manager = (*Service)(nil)

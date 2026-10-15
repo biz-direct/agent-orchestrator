@@ -98,6 +98,8 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 		newCrewRolesCommand(ctx),
 		newCrewRemoveCommand(ctx),
 		newCrewSendCommand(ctx),
+		newCrewStatusCommand(ctx),
+		newCrewBatonCommand(ctx),
 	)
 	return cmd
 }

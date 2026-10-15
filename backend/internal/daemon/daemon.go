@@ -1346,7 +1346,14 @@ func stabilizeWorkingDirectory(dataDir string) error {
 // crewRoleService enables role sessions when the session manager can host them.
 func crewRoleService(svc *crewssvc.Service, store crewssvc.SessionStore, sessMgr any) *crewssvc.Service {
 	if host, ok := sessMgr.(ports.CrewRoleHost); ok {
-		return svc.WithRoleSessions(store, host)
+		svc.WithRoleSessions(store, host)
+	}
+	if baton, ok := store.(crewssvc.BatonStore); ok {
+		var messenger crewssvc.Messenger
+		if sess, ok := sessMgr.(sessionLifecycle); ok {
+			messenger = sessionLifecycleMessenger{sess}
+		}
+		svc.WithBaton(baton, messenger)
 	}
 	return svc
 }

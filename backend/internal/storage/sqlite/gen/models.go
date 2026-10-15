@@ -386,6 +386,26 @@ type ConversationTurn struct {
 	HandledByReviewID    sql.NullString
 }
 
+type CrewBaton struct {
+	OwnerSessionID  string
+	HolderKind      string
+	HolderRole      string
+	HolderSessionID string
+	UpdatedAt       time.Time
+}
+
+type CrewBatonEvent struct {
+	ID             int64
+	OwnerSessionID string
+	FromKind       string
+	FromRole       string
+	ToKind         string
+	ToRole         string
+	Actor          string
+	Reason         string
+	CreatedAt      time.Time
+}
+
 type CrewMessage struct {
 	Seq             int64
 	ID              string

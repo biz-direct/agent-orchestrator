@@ -14,8 +14,8 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
-	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
 
 // Crew messages: durable role-to-role messages on a task crew.
@@ -104,6 +104,22 @@ func (s *Service) WithMessages(store MessageStore, deliverer ports.CrewMessageDe
 	}
 	if m.headCommit == nil {
 		m.headCommit = gitHeadCommit
+	}
+	if m.baton == nil {
+		// Read the baton lazily: WithBaton may be applied after WithMessages.
+		m.baton = func(ctx context.Context, owner domain.SessionID) string {
+			if s.baton == nil {
+				return ""
+			}
+			h, err := s.baton.GetCrewBaton(ctx, owner)
+			if err != nil {
+				return ""
+			}
+			if h.Kind == domain.BatonHolderRole {
+				return h.Role
+			}
+			return string(h.Kind)
+		}
 	}
 	if m.rateLimit == 0 {
 		m.rateLimit = DefaultRateLimit
