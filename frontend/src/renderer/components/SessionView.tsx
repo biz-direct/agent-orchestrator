@@ -29,6 +29,7 @@ import { CloudFileContentPane, CloudWorkspaceDiff } from "./CloudWorkspaceDiff";
 import { CloudSessionStartupError } from "./CloudSessionStartupError";
 import { CloudSessionStartupLoader } from "./CloudSessionStartupLoader";
 import { SessionFileTab } from "./SessionFileTabs";
+import { CREW_THREAD_ID, CrewThreadPane, CrewThreadTab, crewThreadTabKey } from "./SessionCrewThread";
 import { AddCrewRoleMenu, CrewRoleChat, roleTabKey, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
 import { SessionFileWorkspace } from "./SessionFileWorkspace";
 import { SessionFilesPopOut } from "./SessionFilesPopOut";
@@ -1301,7 +1302,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const crewRoles = useSessionCrewRoles(session, hostId);
 	const removeCrewRole = useRemoveCrewRole(sessionId, hostId);
 	const activeRole = crewRoles.roles.find((role) => role.sessionId === activeRoleId);
-	const roleActive = Boolean(activeRole) && !fileTabs.activePath && !reviewerChatId && terminalTarget.kind === "worker";
+	const threadSelected = activeRoleId === CREW_THREAD_ID && crewRoles.roles.length > 0;
+	const roleActive = (Boolean(activeRole) || threadSelected) && !fileTabs.activePath && !reviewerChatId && terminalTarget.kind === "worker";
 	// Another selection (a file, the reviewer, a shell) takes over from the role.
 	useEffect(() => {
 		if (activeRoleId && (fileTabs.activePath || reviewerChatId || terminalTarget.kind !== "worker")) setActiveRole(null);
@@ -1334,14 +1336,26 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 				onSelect: () => selectCrewRole(role.sessionId),
 				onClose: () => closeCrewRole(role.role, role.sessionId),
 			})),
+			// The crew thread shows what the roles said to each other; it is not a role.
+			...(crewRoles.roles.length > 0
+				? [
+						{
+							key: crewThreadTabKey,
+							content: <CrewThreadTab active={roleActive && threadSelected} onActivate={() => selectCrewRole(CREW_THREAD_ID)} />,
+							onSelect: () => selectCrewRole(CREW_THREAD_ID),
+						},
+					]
+				: []),
 		],
-		[activeRole?.sessionId, centerFileTabs, closeCrewRole, crewRoles.roles, roleActive, selectCrewRole],
+		[activeRole?.sessionId, centerFileTabs, closeCrewRole, crewRoles.roles, roleActive, selectCrewRole, threadSelected],
 	);
 	const activeWorkspaceTabKey = fileTabs.activePath
 		? `file:${fileTabs.activePath}`
-		: roleActive && activeRole
-			? roleTabKey(activeRole.sessionId)
-			: undefined;
+		: roleActive && threadSelected
+			? crewThreadTabKey
+			: roleActive && activeRole
+				? roleTabKey(activeRole.sessionId)
+				: undefined;
 	const addCrewRoleAction = useMemo(
 		() =>
 			session && crewRoles.eligible ? (
@@ -2103,6 +2117,11 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 								/>
 							)}
 							</div>
+							{roleActive && threadSelected && session ? (
+								<div className="absolute inset-0 bg-background">
+									<CrewThreadPane hostId={hostId} session={session} />
+								</div>
+							) : null}
 							{roleActive && activeRole && session ? (
 								<div className="absolute inset-0 bg-background">
 									<CrewRoleChat assetBaseUrl={remoteBase} hostId={hostId} onOpenLinkInBrowser={browserView.openLink} owner={session} role={activeRole} />

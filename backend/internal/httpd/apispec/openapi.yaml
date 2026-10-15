@@ -7271,6 +7271,240 @@ paths:
       summary: Promote a queued message into the in-flight turn
       tags:
       - conversations
+  /api/v1/sessions/{sessionId}/crew/messages:
+    get:
+      operationId: listSessionCrewMessages
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewMessageList'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: 'List the task''s crew thread: every durable role-to-role message with
+        its delivery state'
+      tags:
+      - sessions
+    post:
+      operationId: sendSessionCrewMessage
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCrewMessageInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewMessage'
+          description: OK
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewMessage'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Send a durable message from a role session to a teammate role on the
+        same task
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/crew/messages/{messageId}:
+    delete:
+      operationId: dropSessionCrewMessage
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - in: path
+        name: messageId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewMessage'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Drop a crew message that has not been delivered
+      tags:
+      - sessions
+    patch:
+      operationId: editSessionCrewMessage
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - in: path
+        name: messageId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditCrewMessageInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewMessage'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Edit a crew message that has not been delivered
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/crew/messages/{messageId}/release:
+    post:
+      operationId: releaseSessionCrewMessage
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - in: path
+        name: messageId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrewMessage'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Release a crew message held for a person (rate limited) into delivery
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/crew/roles:
     get:
       operationId: listSessionCrewRoles
@@ -14003,6 +14237,72 @@ components:
       required:
       - message
       type: object
+    CrewMessage:
+      properties:
+        attempts:
+          type: integer
+        batonHolder:
+          type: string
+        commit:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        deliveredAt:
+          format: date-time
+          type: string
+        duplicate:
+          type: boolean
+        editable:
+          type: boolean
+        id:
+          type: string
+        message:
+          type: string
+        mode:
+          enum:
+          - queue
+          - steer
+          type: string
+        senderRole:
+          type: string
+        seq:
+          format: int64
+          type: integer
+        state:
+          enum:
+          - queued
+          - held
+          - delivering
+          - delivered
+          - dropped
+          - failed
+          type: string
+        stateReason:
+          type: string
+        targetRole:
+          type: string
+      required:
+      - id
+      - seq
+      - senderRole
+      - targetRole
+      - message
+      - mode
+      - state
+      - attempts
+      - createdAt
+      - editable
+      type: object
+    CrewMessageList:
+      properties:
+        messages:
+          items:
+            $ref: '#/components/schemas/CrewMessage'
+          type: array
+      required:
+      - messages
+      type: object
     CrewReturn:
       properties:
         from:
@@ -14580,6 +14880,13 @@ components:
       required:
       - sourceBranchId
       - activeBranchId
+      type: object
+    EditCrewMessageInput:
+      properties:
+        message:
+          type: string
+      required:
+      - message
       type: object
     EditQueuedConversationMessageRequest:
       properties:
@@ -17625,6 +17932,21 @@ components:
           type: string
       required:
       - duplicate
+      type: object
+    SendCrewMessageInput:
+      properties:
+        idempotencyKey:
+          type: string
+        message:
+          type: string
+        steer:
+          type: boolean
+        to:
+          type: string
+      required:
+      - to
+      - message
+      - idempotencyKey
       type: object
     SendSessionMessageRequest:
       properties:

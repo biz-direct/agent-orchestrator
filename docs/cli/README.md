@@ -70,6 +70,7 @@ addresses change on restart.
 | `ao crew ls/validate`               | `GET /api/v1/projects/{id}/crew`               |
 | `ao crew default get/set/clear`     | `GET/PUT /api/v1/projects/{id}/crew/default`   |
 | `ao crew add/roles/remove`          | `POST/GET /api/v1/sessions/{id}/crew/roles`, `DELETE .../roles/{role}` |
+| `ao crew send --to <role> --message …` | `POST/GET /api/v1/sessions/{id}/crew/messages`, `PATCH/DELETE .../messages/{messageId}`, `POST .../messages/{messageId}/release` |
 | `ao spawn --pipeline/--no-pipeline` | `POST /api/v1/sessions` (`pipeline` selection) |
 | `ao pipeline pause/resume/cancel`   | `POST /api/v1/sessions/{id}/pipeline/control`  |
 | `ao pipeline authorize-repairs`     | `POST /api/v1/sessions/{id}/pipeline/control` (user only) |

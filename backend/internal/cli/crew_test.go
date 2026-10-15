@@ -185,3 +185,65 @@ func TestCrewAddRefusalIsVisibleAndNeedsASession(t *testing.T) {
 		t.Fatalf("missing session is a usage error: %v", err)
 	}
 }
+
+func TestCrewSendPostsADurableMessageWithAStableKey(t *testing.T) {
+	var bodies []crewSendDTO
+	pipelineServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions/w-att-1/crew/messages" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body crewSendDTO
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"m-1","senderRole":"builder","targetRole":"reviewer","mode":"steer","state":"queued","stateReason":"waiting: the target is blocked on a permission prompt"}`)
+	})
+	out, stderr, err := executeCLI(t, crewDeps(), "crew", "send", "--session", "w-att-1", "--to", "reviewer", "--message", "look", "--steer", "--idempotency-key", "k-1")
+	if err != nil || !strings.Contains(out, "message m-1 to reviewer: queued") || !strings.Contains(out, "blocked on a permission prompt") {
+		t.Fatalf("send: %v out=%s stderr=%s", err, out, stderr)
+	}
+	if len(bodies) != 1 || bodies[0] != (crewSendDTO{To: "reviewer", Message: "look", Steer: true, IdempotencyKey: "k-1"}) {
+		t.Fatalf("body = %+v", bodies)
+	}
+	// Without a key the CLI mints one, so a single invocation is still retry-safe.
+	if _, _, err := executeCLI(t, crewDeps(), "crew", "send", "--session", "w-att-1", "--to", "reviewer", "--message", "again"); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || bodies[1].IdempotencyKey == "" {
+		t.Fatalf("generated key: %+v", bodies)
+	}
+}
+
+func TestCrewSendRequiresTargetMessageAndSession(t *testing.T) {
+	pipelineServer(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) })
+	for name, args := range map[string][]string{
+		"no target":  {"crew", "send", "--session", "s", "--message", "m"},
+		"no message": {"crew", "send", "--session", "s", "--to", "r"},
+		"no session": {"crew", "send", "--to", "r", "--message", "m"},
+	} {
+		if _, _, err := executeCLI(t, crewDeps(), args...); err == nil || ExitCode(err) != 2 {
+			t.Errorf("%s must be a usage error: %v", name, err)
+		}
+	}
+}
+
+func TestCrewSendSurfacesRefusalsAndRetryHandle(t *testing.T) {
+	status := http.StatusNotFound
+	pipelineServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"error":"x","code":"CREW_MESSAGE_TARGET_NOT_IN_CREW","message":"Role \"ghost\" is not in your crew"}`)
+	})
+	_, stderr, err := executeCLI(t, crewDeps(), "crew", "send", "--session", "s", "--to", "ghost", "--message", "m", "--idempotency-key", "k")
+	if err == nil || !strings.Contains(err.Error()+stderr, "not in your crew") || strings.Contains(err.Error(), "retry safely") {
+		t.Fatalf("a refusal is final and visible: err=%v stderr=%s", err, stderr)
+	}
+	status = http.StatusInternalServerError
+	_, _, err = executeCLI(t, crewDeps(), "crew", "send", "--session", "s", "--to", "r", "--message", "m", "--idempotency-key", "k-9")
+	if err == nil || !strings.Contains(err.Error(), "--idempotency-key k-9") {
+		t.Fatalf("an unknown outcome names the retry handle: %v", err)
+	}
+}

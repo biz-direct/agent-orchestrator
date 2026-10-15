@@ -386,6 +386,27 @@ type ConversationTurn struct {
 	HandledByReviewID    sql.NullString
 }
 
+type CrewMessage struct {
+	Seq             int64
+	ID              string
+	OwnerSessionID  string
+	SenderRole      string
+	SenderSessionID string
+	TargetRole      string
+	TargetSessionID string
+	IdempotencyKey  string
+	Body            string
+	Mode            string
+	CommitSha       string
+	BatonHolder     string
+	State           string
+	StateReason     string
+	Attempts        int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeliveredAt     sql.NullTime
+}
+
 type Cue struct {
 	ID        domain.CueID
 	ProjectID domain.ProjectID
