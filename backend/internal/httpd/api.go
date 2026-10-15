@@ -180,7 +180,7 @@ func newAPIWithLogger(cfg config.Config, deps APIDeps, log *slog.Logger) *API {
 			Mgr: deps.Projects,
 		},
 		pipelines:    &controllers.PipelinesController{Mgr: deps.Pipelines, Callers: pipelineCallers(deps)},
-		crews:        &controllers.CrewsController{Mgr: deps.Crews},
+		crews:        &controllers.CrewsController{Mgr: deps.Crews, Callers: pipelineCallers(deps)},
 		pipelineRuns: &controllers.PipelineRunsController{Mgr: deps.PipelineRuns, Callers: pipelineCallers(deps)},
 		sessions: &controllers.SessionsController{
 			Pipelines:                pipelineSelector(deps.PipelineRuns),

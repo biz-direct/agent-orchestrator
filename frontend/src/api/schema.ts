@@ -2544,6 +2544,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/crew/baton": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Show who holds the task's write baton and every recorded move */
+        get: operations["getSessionCrewBaton"];
+        /** Human override: give the write baton to the worker, a live role, or the human */
+        put: operations["moveSessionCrewBaton"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/crew/roles": {
         parameters: {
             query?: never;
@@ -4751,6 +4769,27 @@ export interface components {
         CreateReportResponse: {
             id: string;
         };
+        CrewBatonEvent: {
+            /** @enum {string} */
+            actor: "human" | "system";
+            /** Format: date-time */
+            createdAt: string;
+            from: components["schemas"]["CrewBatonHolder"];
+            /** Format: int64 */
+            id: number;
+            reason: string;
+            to: components["schemas"]["CrewBatonHolder"];
+        };
+        CrewBatonHolder: {
+            /** @enum {string} */
+            kind: "worker" | "role" | "human";
+            role?: string;
+        };
+        CrewBatonStatus: {
+            history: components["schemas"]["CrewBatonEvent"][];
+            holder: components["schemas"]["CrewBatonHolder"];
+            ownerSessionId: string;
+        };
         CrewDiagnostic: {
             field?: string;
             file?: string;
@@ -5351,6 +5390,10 @@ export interface components {
             ready: boolean;
             running: boolean;
             supported: boolean;
+        };
+        MoveCrewBatonInput: {
+            reason?: string;
+            to: components["schemas"]["CrewBatonHolder"];
         };
         MuteDeviceRequest: {
             /** @description True to stop sending push notifications to this device. */
@@ -16244,6 +16287,119 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSessionCrewBaton: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrewBatonStatus"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    moveSessionCrewBaton: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveCrewBatonInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrewBatonStatus"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
