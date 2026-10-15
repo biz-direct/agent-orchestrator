@@ -12,6 +12,7 @@ import (
 // BatonHolderKind says what kind of party holds the baton.
 type BatonHolderKind string
 
+// The kinds of baton holder.
 const (
 	BatonHolderWorker BatonHolderKind = "worker"
 	BatonHolderRole   BatonHolderKind = "role"
@@ -53,6 +54,7 @@ func (h BatonHolder) String() string {
 // BatonActor says who moved the baton.
 type BatonActor string
 
+// Who can move the baton.
 const (
 	BatonActorHuman  BatonActor = "human"
 	BatonActorSystem BatonActor = "system"

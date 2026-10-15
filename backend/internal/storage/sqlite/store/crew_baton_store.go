@@ -141,7 +141,7 @@ func (s *Store) ListCrewBatonEvents(ctx context.Context, owner domain.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list crew baton events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []domain.BatonEvent{}
 	for rows.Next() {
 		var e domain.BatonEvent

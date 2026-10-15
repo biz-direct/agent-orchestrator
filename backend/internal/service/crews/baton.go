@@ -66,7 +66,7 @@ func (s *Service) GetBaton(ctx context.Context, ownerID domain.SessionID) (Baton
 	if err := s.batonAvailable(); err != nil {
 		return BatonStatus{}, err
 	}
-	if _, err := s.batonOwner(ctx, ownerID, false); err != nil {
+	if err := s.batonOwner(ctx, ownerID, false); err != nil {
 		return BatonStatus{}, err
 	}
 	holder, err := s.baton.GetCrewBaton(ctx, ownerID)
@@ -94,7 +94,7 @@ func (s *Service) MoveBaton(ctx context.Context, ownerID domain.SessionID, in Mo
 	if len(reason) > maxBatonReason {
 		return BatonStatus{}, apierr.Invalid("INVALID_CREW_BATON_REASON", fmt.Sprintf("Reason must be at most %d characters", maxBatonReason), nil)
 	}
-	if _, err := s.batonOwner(ctx, ownerID, true); err != nil {
+	if err := s.batonOwner(ctx, ownerID, true); err != nil {
 		return BatonStatus{}, err
 	}
 	if err := s.moveBaton(ctx, ownerID, in.To, domain.BatonActorHuman, reason); err != nil {
@@ -105,18 +105,19 @@ func (s *Service) MoveBaton(ctx context.Context, ownerID domain.SessionID, in Mo
 
 // batonOwner loads the task the baton belongs to; live is true when the task
 // must still be running (a move), false for reads.
-func (s *Service) batonOwner(ctx context.Context, id domain.SessionID, live bool) (domain.SessionRecord, error) {
+func (s *Service) batonOwner(ctx context.Context, id domain.SessionID, live bool) error {
 	if live {
-		return s.owner(ctx, id)
+		_, err := s.owner(ctx, id)
+		return err
 	}
-	rec, ok, err := s.sessions.GetSession(ctx, id)
+	_, ok, err := s.sessions.GetSession(ctx, id)
 	if err != nil {
-		return domain.SessionRecord{}, apierr.Internal("SESSION_LOAD_FAILED", "Failed to load session")
+		return apierr.Internal("SESSION_LOAD_FAILED", "Failed to load session")
 	}
 	if !ok {
-		return domain.SessionRecord{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
-	return rec, nil
+	return nil
 }
 
 // moveBaton performs a move and tells the crew. It is shared by the human
@@ -129,7 +130,10 @@ func (s *Service) moveBaton(ctx context.Context, owner domain.SessionID, to doma
 // lockBaton serializes baton moves and their notices for one task.
 func (s *Service) lockBaton(owner domain.SessionID) func() {
 	mu, _ := s.batonMoves.LoadOrStore(owner, &sync.Mutex{})
-	m := mu.(*sync.Mutex)
+	m, ok := mu.(*sync.Mutex)
+	if !ok {
+		return func() {}
+	}
 	m.Lock()
 	return m.Unlock
 }
