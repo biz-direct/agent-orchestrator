@@ -299,8 +299,10 @@ run: |
     expect(prompt).not.toMatch(/\^2\b/);
   });
 
-  it("leaves the upstream sync schedule untouched", async () => {
+  it("keeps the upstream sync manual-only", async () => {
     const sync = await readFile(path.join(workflowsDirectory, "sync-upstream.yml"), "utf8");
-    expect(sync).toMatch(/cron: "23 5 \* \* \*"/);
+    expect(sync).toMatch(/workflow_dispatch:/);
+    expect(sync).not.toMatch(/^\s*schedule:/m);
+    expect(sync).not.toMatch(/cron:/);
   });
 });
