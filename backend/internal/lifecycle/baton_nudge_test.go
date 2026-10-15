@@ -103,3 +103,19 @@ func TestNudgeEligibilityFollowsTheBatonHolderNotTheOwner(t *testing.T) {
 		t.Fatalf("a holder waiting on input keeps its permission-dialog protection: %v", msg.ids)
 	}
 }
+
+// Ending the task vetoes automatic work even while its holding role is live.
+func TestTerminatedTaskDoesNotNudgeItsLiveHolder(t *testing.T) {
+	m, msg := batonManager("mer-1-role", true)
+	if err := m.MarkTerminated(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range batonObservations() {
+		if err := m.ApplyPRObservation(ctx, "mer-1", o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(msg.msgs) != 0 {
+		t.Fatalf("a terminated task must not nudge its holder: %v", msg.ids)
+	}
+}

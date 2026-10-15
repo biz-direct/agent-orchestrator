@@ -154,7 +154,8 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			gate = trec
 		}
 	}
-	if gate.IsTerminated || gate.Activity.State == domain.ActivityExited {
+	// A terminated task is never nudged, whatever its holder's state.
+	if rec.IsTerminated || gate.IsTerminated || gate.Activity.State == domain.ActivityExited {
 		return rearmErr
 	}
 	// cannotNudge's remaining condition, needs-input, defers CI-failure and
