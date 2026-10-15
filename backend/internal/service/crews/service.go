@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/crew"
@@ -88,6 +89,9 @@ type Service struct {
 	baton     BatonStore
 	messenger Messenger
 	now       func() time.Time
+	// batonMoves serializes each task's baton moves together with their notices,
+	// so an older move cannot deliver a grant after a newer one revoked it.
+	batonMoves sync.Map // domain.SessionID -> *sync.Mutex
 }
 
 var _ Manager = (*Service)(nil)

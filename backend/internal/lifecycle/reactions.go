@@ -145,7 +145,16 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// A genuinely dead session — terminated, or its pane already exited to a
 	// shell — has nowhere to deliver any nudge, merge-conflict included, so
 	// return once the non-delivery re-arm above has run.
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityExited {
+	// The delivery gates below look at whoever will actually receive the nudge:
+	// the baton holder's session when a role holds it, so a parked owner does not
+	// block automatic work a live role should do. sendOnce re-checks the target.
+	gate := rec
+	if target, deliver, err := m.batonNudgeTarget(ctx, id); err == nil && deliver && target != id {
+		if trec, ok, err := m.store.GetSession(ctx, target); err == nil && ok {
+			gate = trec
+		}
+	}
+	if gate.IsTerminated || gate.Activity.State == domain.ActivityExited {
 		return rearmErr
 	}
 	// cannotNudge's remaining condition, needs-input, defers CI-failure and
@@ -161,7 +170,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// prompt is a genuine idle composer rather than a masked permission decision
 	// (the urgentNudgeWaitingInputSafe gate) — so only a provably-idle needs-input
 	// prompt is pasted into unsolicited.
-	needsInput := rec.Activity.State.NeedsInput()
+	needsInput := gate.Activity.State.NeedsInput()
 	// A single PR can trip several actionable conditions at once (failing CI,
 	// unresolved review comments, a merge conflict). Queue every applicable nudge
 	// and send them together, so each surfaces independently instead of one

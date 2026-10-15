@@ -21,23 +21,33 @@ type batonQuerier interface {
 
 // effectiveBaton reads the holder through q (a transaction or the read pool).
 func effectiveBaton(ctx context.Context, q batonQuerier, owner domain.SessionID) (domain.BatonHolder, error) {
-	var kind, role string
-	err := q.QueryRowContext(ctx, `SELECT holder_kind, holder_role FROM crew_baton WHERE owner_session_id = ?`, string(owner)).Scan(&kind, &role)
+	holder, _, _, err := rawBaton(ctx, q, owner)
+	return holder, err
+}
+
+// rawBaton returns the effective holder, and when the stored row is stale (a
+// role grant whose session has ended) that stored holder with stale=true.
+func rawBaton(ctx context.Context, q batonQuerier, owner domain.SessionID) (effective, stored domain.BatonHolder, stale bool, err error) {
+	var kind, role, holderSession string
+	err = q.QueryRowContext(ctx, `SELECT holder_kind, holder_role, holder_session_id FROM crew_baton WHERE owner_session_id = ?`, string(owner)).Scan(&kind, &role, &holderSession)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.BatonHolder{Kind: domain.BatonHolderWorker}, nil
+		return domain.BatonHolder{Kind: domain.BatonHolderWorker}, domain.BatonHolder{}, false, nil
 	}
 	if err != nil {
-		return domain.BatonHolder{}, fmt.Errorf("read crew baton: %w", err)
+		return domain.BatonHolder{}, domain.BatonHolder{}, false, fmt.Errorf("read crew baton: %w", err)
 	}
 	holder := domain.BatonHolder{Kind: domain.BatonHolderKind(kind), Role: role}
 	if holder.Kind == domain.BatonHolderRole {
-		if _, live, err := liveRoleSession(ctx, q, owner, role); err != nil {
-			return domain.BatonHolder{}, err
-		} else if !live {
-			return domain.BatonHolder{Kind: domain.BatonHolderWorker}, nil
+		// The grant belongs to the session it was made to: once that session has
+		// ended the worker holds, and a fresh session for the same role starts
+		// read-only until another authorized move.
+		if id, live, err := liveRoleSession(ctx, q, owner, role); err != nil {
+			return domain.BatonHolder{}, domain.BatonHolder{}, false, err
+		} else if !live || string(id) != holderSession {
+			return domain.BatonHolder{Kind: domain.BatonHolderWorker}, holder, true, nil
 		}
 	}
-	return holder, nil
+	return holder, holder, false, nil
 }
 
 func liveRoleSession(ctx context.Context, q batonQuerier, owner domain.SessionID, role string) (domain.SessionID, bool, error) {
@@ -76,14 +86,33 @@ func (s *Store) MoveCrewBaton(ctx context.Context, owner domain.SessionID, to do
 		if !ok {
 			return errors.New("transaction unavailable")
 		}
-		if from, err = effectiveBaton(ctx, tx, owner); err != nil {
+		effective, stored, stale, err := rawBaton(ctx, tx, owner)
+		if err != nil {
 			return err
 		}
+		from = effective
+		var toSession domain.SessionID
 		if to.Kind == domain.BatonHolderRole {
-			if _, live, err := liveRoleSession(ctx, tx, owner, to.Role); err != nil {
+			id, live, err := liveRoleSession(ctx, tx, owner, to.Role)
+			if err != nil {
 				return err
 			} else if !live {
 				return domain.ErrBatonRoleNotLive
+			}
+			toSession = id
+		}
+		if stale {
+			// The holding role's session ended without a recorded hand-back:
+			// persist it now so the row and the history agree.
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE crew_baton SET holder_kind = 'worker', holder_role = '', holder_session_id = '', updated_at = ? WHERE owner_session_id = ?`,
+				now, string(owner)); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO crew_baton_events (owner_session_id, from_kind, from_role, to_kind, to_role, actor, reason, created_at) VALUES (?, ?, ?, 'worker', '', 'system', ?, ?)`,
+				string(owner), string(stored.Kind), stored.Role, fmt.Sprintf("role %s ended", stored.Role), now); err != nil {
+				return err
 			}
 		}
 		if from == to {
@@ -91,12 +120,12 @@ func (s *Store) MoveCrewBaton(ctx context.Context, owner domain.SessionID, to do
 		}
 		changed = true
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO crew_baton (owner_session_id, holder_kind, holder_role, updated_at) VALUES (?, ?, ?, ?)
-			 ON CONFLICT(owner_session_id) DO UPDATE SET holder_kind = excluded.holder_kind, holder_role = excluded.holder_role, updated_at = excluded.updated_at`,
-			string(owner), string(to.Kind), to.Role, now); err != nil {
+			`INSERT INTO crew_baton (owner_session_id, holder_kind, holder_role, holder_session_id, updated_at) VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(owner_session_id) DO UPDATE SET holder_kind = excluded.holder_kind, holder_role = excluded.holder_role, holder_session_id = excluded.holder_session_id, updated_at = excluded.updated_at`,
+			string(owner), string(to.Kind), to.Role, string(toSession), now); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx,
+		_, err = tx.ExecContext(ctx,
 			`INSERT INTO crew_baton_events (owner_session_id, from_kind, from_role, to_kind, to_role, actor, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			string(owner), string(from.Kind), from.Role, string(to.Kind), to.Role, string(actor), reason, now)
 		return err

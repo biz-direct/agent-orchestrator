@@ -1346,7 +1346,7 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		() =>
 			session && crewRoles.eligible ? (
 				<>
-					{crewRoles.roles.length > 0 ? <CrewBatonMenu hostId={hostId} roles={crewRoles.roles} session={session} /> : null}
+					<CrewBatonMenu hostId={hostId} roles={crewRoles.roles} session={session} />
 					<AddCrewRoleMenu hostId={hostId} onAdded={(role) => selectCrewRole(role.sessionId)} roles={crewRoles.roles} session={session} />
 				</>
 			) : null,

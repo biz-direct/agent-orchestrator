@@ -10,6 +10,9 @@ CREATE TABLE crew_baton (
     owner_session_id TEXT NOT NULL PRIMARY KEY,
     holder_kind      TEXT NOT NULL CHECK (holder_kind IN ('worker', 'human', 'role')),
     holder_role      TEXT NOT NULL DEFAULT '',
+    -- The role session the grant was made to; a replacement session for the same
+    -- role does not inherit it.
+    holder_session_id TEXT NOT NULL DEFAULT '',
     updated_at       TIMESTAMP NOT NULL,
     CHECK ((holder_kind = 'role') = (holder_role <> ''))
 );

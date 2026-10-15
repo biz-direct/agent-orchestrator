@@ -94,6 +94,9 @@ export function CrewBatonMenu({ hostId, roles, session }: { hostId?: string; rol
 		onSettled: () => queryClient.invalidateQueries({ queryKey }),
 	});
 	const holder = baton.data?.holder;
+	// With no roles left only the human can still hold the baton; keep the control
+	// reachable then so it can be handed back.
+	if (roles.length === 0 && holder?.kind !== "human") return null;
 	const describe = (h: CrewBatonHolder) => (h.kind === "role" ? (h.role ?? "") : t(`session.crew.baton.${h.kind}`));
 	const options: CrewBatonHolder[] = [{ kind: "worker" }, ...roles.map((r) => ({ kind: "role" as const, role: r.role })), { kind: "human" }];
 	const label = holder ? t("session.crew.baton.holder", { holder: describe(holder) }) : t("session.crew.baton.title");

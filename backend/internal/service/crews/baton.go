@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -121,6 +122,19 @@ func (s *Service) batonOwner(ctx context.Context, id domain.SessionID, live bool
 // moveBaton performs a move and tells the crew. It is shared by the human
 // override and the system hand-back when the holding role is removed.
 func (s *Service) moveBaton(ctx context.Context, owner domain.SessionID, to domain.BatonHolder, actor domain.BatonActor, reason string) error {
+	defer s.lockBaton(owner)()
+	return s.moveBatonLocked(ctx, owner, to, actor, reason)
+}
+
+// lockBaton serializes baton moves and their notices for one task.
+func (s *Service) lockBaton(owner domain.SessionID) func() {
+	mu, _ := s.batonMoves.LoadOrStore(owner, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
+}
+
+func (s *Service) moveBatonLocked(ctx context.Context, owner domain.SessionID, to domain.BatonHolder, actor domain.BatonActor, reason string) error {
 	from, changed, err := s.baton.MoveCrewBaton(ctx, owner, to, actor, reason, s.now().UTC())
 	switch {
 	case errors.Is(err, domain.ErrBatonRoleNotLive):
@@ -184,11 +198,12 @@ func (s *Service) handBackBaton(ctx context.Context, owner domain.SessionID, rol
 	if s.baton == nil {
 		return
 	}
+	defer s.lockBaton(owner)()
 	holder, err := s.baton.GetCrewBaton(ctx, owner)
 	if err != nil || holder.Kind != domain.BatonHolderRole || holder.Role != role {
 		return
 	}
-	if err := s.moveBaton(ctx, owner, domain.BatonHolder{Kind: domain.BatonHolderWorker}, domain.BatonActorSystem, fmt.Sprintf("role %s was removed", role)); err != nil {
+	if err := s.moveBatonLocked(ctx, owner, domain.BatonHolder{Kind: domain.BatonHolderWorker}, domain.BatonActorSystem, fmt.Sprintf("role %s was removed", role)); err != nil {
 		slog.Default().Warn("crew baton: hand back", "owner", owner, "role", role, "err", err)
 	}
 }

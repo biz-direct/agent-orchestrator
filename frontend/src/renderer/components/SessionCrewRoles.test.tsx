@@ -124,6 +124,20 @@ describe("crew role tabs", () => {
 		expect(await screen.findByRole("button", { name: "Write baton: builder" })).toBeInTheDocument();
 	});
 
+	it("keeps the baton control while the human holds it with no roles left, and hides it otherwise", async () => {
+		getMock.mockResolvedValue({ data: { ownerSessionId: "w-1", holder: { kind: "human" }, history: [] }, error: undefined });
+		wrap(<CrewBatonMenu roles={[]} session={owner} />);
+		await userEvent.click(await screen.findByRole("button", { name: "Write baton: you" }));
+		expect(await screen.findByRole("menuitem", { name: "Give baton to worker" })).toBeInTheDocument();
+	});
+
+	it("renders no baton control for a worker-held task without roles", async () => {
+		getMock.mockResolvedValue({ data: { ownerSessionId: "w-1", holder: { kind: "worker" }, history: [] }, error: undefined });
+		wrap(<CrewBatonMenu roles={[]} session={owner} />);
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+		expect(screen.queryByRole("button", { name: /Write baton/ })).not.toBeInTheDocument();
+	});
+
 	it("opens the role's own Chat conversation, never a terminal", () => {
 		wrap(<CrewRoleChat owner={owner} role={builder} />);
 		expect(screen.getByTestId("role-chat")).toHaveTextContent("w-att-2");

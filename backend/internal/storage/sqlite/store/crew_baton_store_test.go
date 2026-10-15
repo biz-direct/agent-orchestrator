@@ -34,7 +34,9 @@ func batonFixture(t *testing.T, roles ...string) (*sqlite.Store, domain.SessionI
 	return s, owner.ID, ids
 }
 
-func role(id string) domain.BatonHolder { return domain.BatonHolder{Kind: domain.BatonHolderRole, Role: id} }
+func role(id string) domain.BatonHolder {
+	return domain.BatonHolder{Kind: domain.BatonHolderRole, Role: id}
+}
 
 func TestBatonDefaultsToTheWorkerAndRecordsEveryMove(t *testing.T) {
 	ctx := context.Background()
@@ -137,4 +139,43 @@ func TestResolveNudgeTargetRoutesToTheHolder(t *testing.T) {
 	check("role holds", ids["builder"], true)
 	_, _, _ = s.MoveCrewBaton(ctx, owner, domain.BatonHolder{Kind: domain.BatonHolderHuman}, domain.BatonActorHuman, "", time.Now())
 	check("human holds", "", false)
+}
+
+// A role session that ended while holding the baton hands it back durably, and a
+// replacement session for the same role does not inherit the grant.
+func TestReplacementRoleDoesNotInheritAnEndedHoldersBaton(t *testing.T) {
+	ctx := context.Background()
+	s, owner, ids := batonFixture(t, "builder")
+	now := time.Now().UTC()
+	if _, _, err := s.MoveCrewBaton(ctx, owner, role("builder"), domain.BatonActorHuman, "build", now); err != nil {
+		t.Fatal(err)
+	}
+	rec, _, _ := s.GetSession(ctx, ids["builder"])
+	rec.IsTerminated = true
+	if err := s.UpdateSession(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearAttachedSessionAttempt(ctx, ids["builder"]); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetCrewBaton(ctx, owner); got.Kind != domain.BatonHolderWorker {
+		t.Fatalf("an ended holder no longer holds: %+v", got)
+	}
+	// Explicitly giving the baton to the worker persists the hand-back.
+	if _, _, err := s.MoveCrewBaton(ctx, owner, domain.BatonHolder{Kind: domain.BatonHolderWorker}, domain.BatonActorHuman, "", now); err != nil {
+		t.Fatal(err)
+	}
+	fresh := sampleRecord("crw")
+	fresh.Mode = domain.SessionModeChat
+	if _, err := s.CreateAttachedSessionForAttempt(ctx, fresh, owner, domain.CrewRoleMarker(owner, "builder")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetCrewBaton(ctx, owner); got.Kind != domain.BatonHolderWorker {
+		t.Fatalf("a replacement role must not resurrect the old grant: %+v", got)
+	}
+	events, _ := s.ListCrewBatonEvents(ctx, owner)
+	last := events[len(events)-1]
+	if last.Actor != domain.BatonActorSystem || last.To.Kind != domain.BatonHolderWorker {
+		t.Fatalf("the hand-back is recorded: %+v", events)
+	}
 }

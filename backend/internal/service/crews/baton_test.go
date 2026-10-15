@@ -170,3 +170,55 @@ func TestBatonUnavailableWithoutAStore(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// gatedMessenger blocks the first send until released.
+type gatedMessenger struct {
+	recordingMessenger
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *gatedMessenger) Send(ctx context.Context, id domain.SessionID, msg string) error {
+	g.once.Do(func() {
+		close(g.entered)
+		<-g.release
+	})
+	return g.recordingMessenger.Send(ctx, id, msg)
+}
+
+// An older move stalled in delivery must not tell a role it may write after a
+// newer move took the baton away.
+func TestBatonNoticesKeepTheOrderOfMoves(t *testing.T) {
+	svc, host, _ := newRoleFixture(t, allFiles)
+	g := &gatedMessenger{entered: make(chan struct{}), release: make(chan struct{})}
+	if _, err := svc.AddRole(context.Background(), "p-1", crews.AddRoleInput{Role: "builder"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = host
+	svc.WithBaton(&fakeBaton{live: map[string]bool{"builder": true}}, g)
+	ctx := context.Background()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = svc.MoveBaton(ctx, "p-1", crews.MoveBatonInput{To: domain.BatonHolder{Kind: domain.BatonHolderRole, Role: "builder"}})
+	}()
+	<-g.entered
+	second := make(chan struct{})
+	go func() {
+		defer close(second)
+		_, _ = svc.MoveBaton(ctx, "p-1", crews.MoveBatonInput{To: domain.BatonHolder{Kind: domain.BatonHolderHuman}})
+	}()
+	select {
+	case <-second:
+		t.Fatal("the second move must wait for the first move's notices")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(g.release)
+	<-done
+	<-second
+	n := g.sent["p-att-builder"]
+	if len(n) != 2 || !strings.Contains(n[0], "you now hold") || !strings.Contains(n[1], "human now holds") {
+		t.Fatalf("notices must follow move order, last must be the revocation: %v", n)
+	}
+}
