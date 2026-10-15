@@ -259,4 +259,50 @@ run: |
       expect(contents, name).toMatch(/if:.*github\.repository == '(?:OrchestratorInc|Untrivial-ai)\/agent-orchestrator'/);
     }
   });
+
+  it("opens upstream sync PRs as drafts and never merges them", async () => {
+    const sync = await readFile(path.join(workflowsDirectory, "sync-upstream.yml"), "utf8");
+    const gate = await readFile(path.join(workflowsDirectory, "sync-upstream-gate.yml"), "utf8");
+    const prompt = await readFile(path.join(repositoryRoot, ".github/scripts/sync-upstream-prompt.sh"), "utf8");
+    const executable = (text: string) =>
+      text
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+
+    // Always draft, clean or conflicted.
+    expect(sync).toMatch(/gh pr create[^\n]*--draft/);
+    expect(sync).not.toMatch(/draft=\(\)/);
+    // No merge, ready or auto-merge path, in the workflows or the gate scripts.
+    for (const [name, text] of [
+      ["sync-upstream.yml", sync],
+      ["sync-upstream-gate.yml", gate],
+    ]) {
+      expect(executable(text), name).not.toMatch(/gh pr (?:merge|ready)\b/);
+      expect(executable(text), name).not.toMatch(/--auto\b|enablePullRequestAutoMerge/);
+    }
+    expect(executable(sync)).not.toMatch(/sync-upstream-gate\.sh/);
+    // The agent is told to keep the PR a draft and to write the triage list.
+    expect(prompt).toMatch(/stay a DRAFT/);
+    expect(prompt).not.toMatch(/gh pr ready/);
+    expect(prompt).toMatch(/FORK_DECISIONS\.md/);
+    expect(prompt).toMatch(/- \[ \] /);
+    expect(prompt).toMatch(/sync-triage:done/);
+    expect(prompt).toMatch(/bundle id/);
+    expect(prompt).toMatch(/telemetry/);
+    // One agent dispatch per sync, finished passes are not repeated.
+    expect(sync.match(/gh workflow run pullfrog\.yml/g)).toHaveLength(1);
+    expect(sync).toMatch(/sync-triage:done/);
+    // The marker check must not pipe into an early-exiting grep (SIGPIPE under pipefail).
+    expect(sync).not.toMatch(/\|\s*grep -q/);
+    // The upstream endpoint is the pinned sha, not the branch tip's second parent.
+    expect(prompt).not.toMatch(/\^2\b/);
+  });
+
+  it("keeps the upstream sync manual-only", async () => {
+    const sync = await readFile(path.join(workflowsDirectory, "sync-upstream.yml"), "utf8");
+    expect(sync).toMatch(/workflow_dispatch:/);
+    expect(sync).not.toMatch(/^\s*schedule:/m);
+    expect(sync).not.toMatch(/cron:/);
+  });
 });

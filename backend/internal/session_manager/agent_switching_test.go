@@ -4189,12 +4189,26 @@ func TestSwitchAgentTreatsAmbiguousCommittedTargetActivationAsSuccess(t *testing
 	runtime := &fakeRestartRuntime{fakeRuntime: &fakeRuntime{}}
 	manager, store, _ := newSwitchTestManager(t, runtime)
 	store.activateAfterCommitErr = errors.New("commit response lost")
+	manager.dataDir = t.TempDir()
+	project := store.projects["proj"]
+	project.Config.AgentRules = "Old rule."
+	store.projects["proj"] = project
+	if _, err := manager.buildSystemPrompt(context.Background(), domain.KindWorker, "proj", "proj-1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	manager.commitAppliedRules("proj-1")
+	project.Config.AgentRules = "New rule."
+	store.projects["proj"] = project
 
 	sw, err := switchAgentSynchronously(context.Background(), manager, "proj-1", SwitchAgentConfig{
 		TargetHarness: domain.HarnessCodex, IdempotencyKey: "activation-commit-ambiguous",
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The target owns the session and received the new rules, so freshness is current.
+	if sessions, err := manager.PromptSessions(context.Background(), "proj", PromptRoleWorker); err != nil || len(sessions) != 1 || sessions[0].Freshness != PromptFreshnessCurrent {
+		t.Fatalf("freshness after response-lost activation = %+v, %v; want current", sessions, err)
 	}
 	if sw.State != domain.AgentSwitchCompleted || store.sessions["proj-1"].Harness != domain.HarnessCodex {
 		t.Fatalf("committed activation was not adopted: switch=%+v session=%+v", sw, store.sessions["proj-1"])

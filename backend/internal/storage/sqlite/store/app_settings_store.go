@@ -28,7 +28,10 @@ type AppSettings struct {
 	// GlobalOrchestratorRules are standing instructions added to every
 	// project orchestrator prompt on this daemon. Empty means none.
 	GlobalOrchestratorRules string
-	UpdatedAt               time.Time
+	// GlobalWorkerRules are standing instructions added to every worker prompt
+	// on this daemon. Empty means none.
+	GlobalWorkerRules string
+	UpdatedAt         time.Time
 }
 
 // GetAppSettings reads the preference row.
@@ -43,6 +46,7 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		DefaultSessionMode:      domain.NormalizeSessionMode(row.DefaultSessionMode),
 		CloudOffering:           row.CloudOffering,
 		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
+		GlobalWorkerRules:       row.GlobalWorkerRules,
 		UpdatedAt:               row.UpdatedAt,
 	}, nil
 }
@@ -85,6 +89,19 @@ func (s *Store) SetGlobalOrchestratorRules(ctx context.Context, rules string, no
 		UpdatedAt:               now,
 	}); err != nil {
 		return fmt.Errorf("set global orchestrator rules: %w", err)
+	}
+	return nil
+}
+
+// SetGlobalWorkerRules persists the daemon-wide worker rules.
+func (s *Store) SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.SetGlobalWorkerRules(ctx, gen.SetGlobalWorkerRulesParams{
+		GlobalWorkerRules: rules,
+		UpdatedAt:         now,
+	}); err != nil {
+		return fmt.Errorf("set global worker rules: %w", err)
 	}
 	return nil
 }

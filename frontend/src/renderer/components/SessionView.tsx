@@ -29,6 +29,7 @@ import { CloudFileContentPane, CloudWorkspaceDiff } from "./CloudWorkspaceDiff";
 import { CloudSessionStartupError } from "./CloudSessionStartupError";
 import { CloudSessionStartupLoader } from "./CloudSessionStartupLoader";
 import { SessionFileTab } from "./SessionFileTabs";
+import { AddCrewRoleMenu, CrewRoleChat, roleTabKey, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
 import { SessionFileWorkspace } from "./SessionFileWorkspace";
 import { SessionFilesPopOut } from "./SessionFilesPopOut";
 import { isArtifactPreviewUrl } from "../lib/artifact-preview";
@@ -523,6 +524,13 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	>({});
 	const [fileTabsBySession, setFileTabsBySession] = useState<Record<string, SessionFileTabState>>({});
 	const fileTabs = fileTabsBySession[uiSessionId] ?? EMPTY_SESSION_FILE_TABS;
+	// The role session whose conversation is shown in place of the task's own.
+	const [activeRoleBySession, setActiveRoleBySession] = useState<Record<string, string | null>>({});
+	const activeRoleId = activeRoleBySession[uiSessionId] ?? null;
+	const setActiveRole = useCallback(
+		(id: string | null) => setActiveRoleBySession((current) => (current[uiSessionId] === id ? current : { ...current, [uiSessionId]: id })),
+		[uiSessionId],
+	);
 	const [dirtyFilesBySession, setDirtyFilesBySession] = useState<Record<string, Record<string, true>>>({});
 	const dirtyFiles = dirtyFilesBySession[uiSessionId] ?? {};
 	const [centerFileRequestsBySession, setCenterFileRequestsBySession] = useState<
@@ -967,11 +975,22 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		setActiveShellTerminal(null);
 		setTerminalTarget({ kind: "worker" });
 		setReviewerChatId(null);
+		setActiveRole(null);
 		setFileTabsBySession((current) => ({
 			...current,
 			[uiSessionId]: activateSessionFile(current[uiSessionId] ?? EMPTY_SESSION_FILE_TABS, null),
 		}));
-	}, [setActiveShellTerminal, uiSessionId]);
+	}, [setActiveRole, setActiveShellTerminal, uiSessionId]);
+	const selectCrewRole = useCallback((roleSessionId: string) => {
+		setActiveShellTerminal(null);
+		setTerminalTarget({ kind: "worker" });
+		setReviewerChatId(null);
+		setActiveRole(roleSessionId);
+		setFileTabsBySession((current) => ({
+			...current,
+			[uiSessionId]: activateSessionFile(current[uiSessionId] ?? EMPTY_SESSION_FILE_TABS, null),
+		}));
+	}, [setActiveRole, setActiveShellTerminal, uiSessionId]);
 	// "Ask in chat" from a file tab brings the session's Chat surface forward.
 	useEffect(() => subscribeChatReveal(uiSessionId, selectSessionTerminal), [selectSessionTerminal, uiSessionId]);
 	const selectReviewerTerminal = useCallback((target: ReviewerTerminalTarget) => {
@@ -1279,7 +1298,66 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 			})),
 		[activateCenterFile, closeCenterFile, dirtyFiles, fileTabs.activePath, fileTabs.openPaths],
 	);
-	const activeWorkspaceTabKey = fileTabs.activePath ? `file:${fileTabs.activePath}` : undefined;
+	const crewRoles = useSessionCrewRoles(session, hostId);
+	const removeCrewRole = useRemoveCrewRole(sessionId, hostId);
+	const activeRole = crewRoles.roles.find((role) => role.sessionId === activeRoleId);
+	const roleActive = Boolean(activeRole) && !fileTabs.activePath && !reviewerChatId && terminalTarget.kind === "worker";
+	// Another selection (a file, the reviewer, a shell) takes over from the role.
+	useEffect(() => {
+		if (activeRoleId && (fileTabs.activePath || reviewerChatId || terminalTarget.kind !== "worker")) setActiveRole(null);
+	}, [activeRoleId, fileTabs.activePath, reviewerChatId, setActiveRole, terminalTarget.kind]);
+	const closeCrewRole = useCallback(
+		(role: string, roleSessionId: string) => {
+			// Stay on the role until the daemon confirms it stopped; a failed
+			// removal leaves the conversation live and the error is shown.
+			removeCrewRole.mutate(role, {
+				onSuccess: () => {
+					if (activeRoleId === roleSessionId) selectSessionTerminal();
+				},
+			});
+		},
+		[activeRoleId, removeCrewRole, selectSessionTerminal],
+	);
+	const centerTabs = useMemo(
+		() => [
+			...centerFileTabs,
+			...crewRoles.roles.map((role) => ({
+				key: roleTabKey(role.sessionId),
+				content: (
+					<SessionRoleTab
+						active={roleActive && activeRole?.sessionId === role.sessionId}
+						onActivate={() => selectCrewRole(role.sessionId)}
+						onClose={() => closeCrewRole(role.role, role.sessionId)}
+						role={role}
+					/>
+				),
+				onSelect: () => selectCrewRole(role.sessionId),
+				onClose: () => closeCrewRole(role.role, role.sessionId),
+			})),
+		],
+		[activeRole?.sessionId, centerFileTabs, closeCrewRole, crewRoles.roles, roleActive, selectCrewRole],
+	);
+	const activeWorkspaceTabKey = fileTabs.activePath
+		? `file:${fileTabs.activePath}`
+		: roleActive && activeRole
+			? roleTabKey(activeRole.sessionId)
+			: undefined;
+	const addCrewRoleAction = useMemo(
+		() =>
+			session && crewRoles.eligible ? (
+				<AddCrewRoleMenu hostId={hostId} onAdded={(role) => selectCrewRole(role.sessionId)} roles={crewRoles.roles} session={session} />
+			) : null,
+		[crewRoles.eligible, crewRoles.roles, hostId, selectCrewRole, session],
+	);
+	const tabStripActions = useMemo(
+		() => (
+			<>
+				{addCrewRoleAction}
+				{newShellTerminalAction}
+			</>
+		),
+		[addCrewRoleAction, newShellTerminalAction],
+	);
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
 	const browserSlotVisible = Boolean(
@@ -1856,6 +1934,11 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 
 	return (
 		<div className="relative flex h-full min-h-0 flex-col bg-background text-foreground" data-testid="session-detail">
+			{removeCrewRole.isError ? (
+				<p className="px-4 py-2 text-xs text-error" role="alert">
+					{t("session.crew.removeFailed", { error: apiErrorMessage(removeCrewRole.error) })}
+				</p>
+			) : null}
 			{!hostId && !session?.cloud && session?.mode !== "chat" && sessionAgentExited(session) && autoResume.variables === sessionId && autoResume.isError ? (
 				<p className="px-4 py-2 text-xs text-error" role="alert">
 					{apiErrorMessage(autoResume.error)}
@@ -1905,8 +1988,8 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 							{/* The committed mode owns the agent surface. Auxiliary shell and
 							    reviewer targets remain terminal surfaces in either mode. */}
 							<div
-								className={cn("h-full min-h-0", fileTabs.activePath && "invisible pointer-events-none")}
-								inert={fileTabs.activePath ? true : undefined}
+								className={cn("h-full min-h-0", (fileTabs.activePath || roleActive) && "invisible pointer-events-none")}
+								inert={fileTabs.activePath || roleActive ? true : undefined}
 							>
 							{showChatSurface && session?.cloud && (routedTerminalTarget.kind === "worker" || routedTerminalTarget.kind === "reviewer") && !reviewerChatId ? (
 								<CloudSessionChatSurface
@@ -1957,11 +2040,11 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 									headerActions={sessionHeaderActions}
 									sessionTabAction={sessionTabActions}
 									sessionTabActionWide={sessionTabActionWide}
-									tabStripAction={newShellTerminalAction}
+									tabStripAction={tabStripActions}
 									handoffDialogOpen={handoffDialogOpen}
-									workspaceTabs={centerFileTabs}
+									workspaceTabs={centerTabs}
 									workspaceActiveTabKey={activeWorkspaceTabKey}
-									workspaceFileActive={Boolean(fileTabs.activePath)}
+									workspaceFileActive={Boolean(fileTabs.activePath) || roleActive}
 									auxiliaryTabOrder={resolvedAuxiliaryTabOrder}
 									onAuxiliaryTabOrderChange={setAuxiliaryTabOrder}
 									controllerResumeError={!hostId && autoResume.variables === sessionId && autoResume.isError
@@ -2010,16 +2093,21 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 									topbarActions={sessionHeaderActions}
 									sessionTabAction={sessionTabActions}
 									sessionTabActionWide={sessionTabActionWide}
-									tabStripAction={newShellTerminalAction}
+									tabStripAction={tabStripActions}
 									handoffDialogOpen={handoffDialogOpen}
-									workspaceTabs={centerFileTabs}
+									workspaceTabs={centerTabs}
 									workspaceActiveTabKey={activeWorkspaceTabKey}
-									workspaceFileActive={Boolean(fileTabs.activePath)}
+									workspaceFileActive={Boolean(fileTabs.activePath) || roleActive}
 									auxiliaryTabOrder={resolvedAuxiliaryTabOrder}
 									onAuxiliaryTabOrderChange={setAuxiliaryTabOrder}
 								/>
 							)}
 							</div>
+							{roleActive && activeRole && session ? (
+								<div className="absolute inset-0 bg-background">
+									<CrewRoleChat assetBaseUrl={remoteBase} hostId={hostId} onOpenLinkInBrowser={browserView.openLink} owner={session} role={activeRole} />
+								</div>
+							) : null}
 							{fileTabs.activePath ? (
 								<div className="absolute inset-0">
 					{session?.cloud ? (

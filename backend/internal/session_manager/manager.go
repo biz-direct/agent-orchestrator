@@ -422,12 +422,16 @@ type Manager struct {
 	// without it behaves exactly as before.
 	defaults     SessionModeDefaults
 	globalRules  GlobalOrchestratorRulesReader
+	globalWorker GlobalWorkerRulesReader
 	chat         ChatLauncher
 	pipelineGate ports.PipelineExecutionGate
 	modelCatalog interface {
 		Models(context.Context, string, string, bool) (ports.AgentModelCatalog, error)
 	}
-	lcm                         lifecycleRecorder
+	lcm lifecycleRecorder
+	// pendingRules holds, per session, the rules digest of the prompt just built
+	// for a launch. It becomes the applied digest only when that launch succeeds.
+	pendingRules                sync.Map
 	preview                     PreviewLifecycle
 	browser                     BrowserLifecycle
 	browserCapabilities         BrowserCapabilityIssuer
@@ -782,6 +786,8 @@ type Deps struct {
 	Defaults SessionModeDefaults
 	// GlobalRules supplies the daemon-wide orchestrator rules. Nil means none.
 	GlobalRules GlobalOrchestratorRulesReader
+	// GlobalWorkerRules supplies the daemon-wide worker rules. Nil means none.
+	GlobalWorkerRules GlobalWorkerRulesReader
 	// Chat launches the structured controller for a chat-mode session. Nil means
 	// chat mode is unavailable. Explicit Chat requests are refused; an inherited
 	// Chat preference falls back to TUI.
@@ -834,6 +840,7 @@ func New(d Deps) *Manager {
 		daemonRunID:                    strings.TrimSpace(d.DaemonRunID),
 		defaults:                       d.Defaults,
 		globalRules:                    d.GlobalRules,
+		globalWorker:                   d.GlobalWorkerRules,
 		chat:                           d.Chat,
 		lcm:                            d.Lifecycle,
 		preview:                        d.Preview,
@@ -1464,6 +1471,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		m.markSpawnFailedTerminatedAfterFailure(ctx, id, false)
 		return domain.SessionRecord{}, 0, 0, wrapSpawnStage(id, ErrSpawnCommit, err)
 	}
+	m.commitAppliedRules(id)
 	if delivery == ports.PromptDeliveryAfterStart && afterStartPrompt != "" {
 		if err := m.deliverAfterStartPrompt(ctx, agent, launchCfg, handle, id, afterStartPrompt); err != nil {
 			runtimeDestroyed := m.destroySpawnRuntimeAfterFailure(ctx, handle)
@@ -2482,7 +2490,7 @@ func (m *Manager) kill(ctx context.Context, id domain.SessionID, backgroundClean
 	if owner, err := m.attachedOwner(ctx, id); err != nil {
 		return KillResult{}, fmt.Errorf("kill %s: attached stage lookup: %w", id, err)
 	} else if owner != "" {
-		return KillResult{}, m.terminateAttachedSession(ctx, id)
+		return KillResult{}, m.terminateAttachedSessionHeld(ctx, id)
 	}
 	// Stage sessions attached to this worker die with it, before its workspace
 	// is removed, so none is left running in a deleted directory.
@@ -2657,7 +2665,7 @@ func (m *Manager) RetireForReplacement(ctx context.Context, id domain.SessionID)
 	if owner, err := m.attachedOwner(ctx, id); err != nil {
 		return fmt.Errorf("retire replacement %s: attached stage lookup: %w", id, err)
 	} else if owner != "" {
-		return m.terminateAttachedSession(ctx, id)
+		return m.terminateAttachedSessionHeld(ctx, id)
 	}
 	if err := m.terminateAttachedSessionsOf(ctx, id); err != nil {
 		return fmt.Errorf("retire replacement %s: %w", id, err)
@@ -3430,6 +3438,7 @@ func (m *Manager) relaunchSessionWithPolicyAndGeneration(ctx context.Context, op
 		m.cleanupSystemPromptDir(rec.ID)
 		return RestoreResult{}, fmt.Errorf("%s %s: completed: %w", operation, rec.ID, err)
 	}
+	m.commitAppliedRules(rec.ID)
 	if delivery == ports.PromptDeliveryAfterStart && afterStartPrompt != "" {
 		if err := m.deliverAfterStartPrompt(ctx, agent, launchCfg, handle, rec.ID, afterStartPrompt); err != nil {
 			m.destroySpawnRuntimeAfterFailure(ctx, handle)
@@ -3897,6 +3906,7 @@ func (m *Manager) ReconcileBackground(ctx context.Context) (resultErr error) {
 		return fmt.Errorf("reconcile: list sessions: %w", err)
 	}
 	m.reconcileLivePass(ctx, recs)
+	m.ReconnectCrewRoles(ctx)
 	for _, rec := range recs {
 		if !rec.IsTerminated {
 			continue
@@ -5448,9 +5458,35 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, se
 // agent runs as a chat session, the only mode with the html tools and ao render.
 // requestedOutput is the deliverable requested at spawn.
 func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, sessionID domain.SessionID, requestedOutput domain.RequestedOutput, chat bool) (string, error) {
-	project, err := m.loadProject(ctx, projectID)
+	return m.buildSessionPrompt(ctx, kind, projectID, sessionID, requestedOutput, chat, true)
+}
+
+// buildSessionPrompt builds the standing instructions a session is about to be
+// launched with. When record is set it also notes which rules went in, so the
+// prompt views can tell whether a running session lags behind the saved rules.
+// A reconnect to a live provider applies nothing new and must pass record=false.
+func (m *Manager) buildSessionPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, sessionID domain.SessionID, requestedOutput domain.RequestedOutput, chat, record bool) (string, error) {
+	sections, err := m.buildSystemPromptSections(ctx, kind, projectID, sessionID, requestedOutput, chat)
 	if err != nil {
 		return "", err
+	}
+	if record {
+		m.pendingRules.Store(sessionID, rulesFingerprint(sections))
+	}
+	texts := make([]string, 0, len(sections))
+	for _, section := range sections {
+		texts = append(texts, section.Text)
+	}
+	return strings.Join(texts, "\n\n"), nil
+}
+
+// buildSystemPromptSections is buildSystemPrompt with each block labelled by
+// the layer it came from. Spawn, restore, and the effective-prompt preview all
+// run it, so a preview cannot drift from what a new session gets.
+func (m *Manager) buildSystemPromptSections(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, sessionID domain.SessionID, requestedOutput domain.RequestedOutput, chat bool) ([]PromptSection, error) {
+	project, err := m.loadProject(ctx, projectID)
+	if err != nil {
+		return nil, err
 	}
 	cfg := systemPromptConfig{
 		Role:       promptRoleForKind(kind),
@@ -5460,7 +5496,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 
 	switch kind {
 	case domain.KindOrchestrator:
-		rules, err := buildProjectRules(projectRulesConfig{
+		inline, file, err := buildProjectRuleParts(projectRulesConfig{
 			ProjectPath:  project.Path,
 			Field:        rulesfile.FieldOrchestratorRulesFile,
 			Inline:       project.Config.OrchestratorRules,
@@ -5468,13 +5504,13 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			MaxFileBytes: domain.MaxOrchestratorRulesBytes,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		cfg.OrchestratorRules = rules
+		cfg.OrchestratorRules, cfg.OrchestratorRulesFile = inline, file
 		if !project.Config.SkipGlobalOrchestratorRules && m.globalRules != nil {
 			global, err := m.globalRules.GlobalOrchestratorRules(ctx)
 			if err != nil {
-				return "", fmt.Errorf("read global orchestrator rules: %w", err)
+				return nil, fmt.Errorf("read global orchestrator rules: %w", err)
 			}
 			cfg.GlobalOrchestratorRules = global
 		}
@@ -5482,30 +5518,39 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 		if projectID != "" {
 			orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			if ok {
 				cfg.OrchestratorSessionID = string(orchestratorID)
 			}
 		}
-		rules, err := buildProjectRules(projectRulesConfig{
+		inline, file, err := buildProjectRuleParts(projectRulesConfig{
 			ProjectPath: project.Path,
 			Field:       rulesfile.FieldAgentRulesFile,
 			Inline:      project.Config.AgentRules,
 			File:        project.Config.AgentRulesFile,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		cfg.ProjectRules = rules
+		cfg.ProjectRules, cfg.ProjectRulesFile = inline, file
+		// Standalone workers have no project, so no skip flag: they always get
+		// the global layer.
+		if !project.Config.SkipGlobalWorkerRules && m.globalWorker != nil {
+			global, err := m.globalWorker.GlobalWorkerRules(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("read global worker rules: %w", err)
+			}
+			cfg.GlobalWorkerRules = global
+		}
 	default:
-		return "", nil
+		return nil, nil
 	}
 
 	if projectID != "" {
 		workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if workspacePrompt != "" {
 			cfg.AdditionalSections = append(cfg.AdditionalSections, workspacePrompt)
@@ -5520,7 +5565,16 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	if kind == domain.KindWorker && requestedOutput == domain.RequestedOutputArtifact {
 		cfg.AdditionalSections = append(cfg.AdditionalSections, artifactOutputPrompt)
 	}
-	return buildSystemPromptText(cfg), nil
+	if kind == domain.KindWorker && sessionID != "" {
+		section, err := m.crewRolePrompt(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if section != "" {
+			cfg.AdditionalSections = append(cfg.AdditionalSections, section)
+		}
+	}
+	return buildSystemPromptSections(cfg), nil
 }
 
 // aoSkillPointer is appended to every agent system prompt. It points the agent

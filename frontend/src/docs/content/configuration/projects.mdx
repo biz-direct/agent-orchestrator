@@ -51,8 +51,9 @@ ao project rm <project-id>
 | `agentConfig` | Default model, permission, and effort settings. Set effort through Project Settings or the daemon API; CLI replacement drops it. |
 | `worker` | Worker harness and agent-config overrides. |
 | `orchestrator` | Orchestrator harness and agent-config overrides. |
-| `agentRules` | Standing instructions for workers. |
-| `agentRulesFile` | Repository-relative instructions appended to worker instructions. |
+| `agentRules` | Standing instructions for workers. Added after the global worker rules. |
+| `agentRulesFile` | Repository-relative file whose contents follow `agentRules` in the worker prompt. |
+| `skipGlobalWorkerRules` | `true` leaves the host's global worker rules out of this project's workers. Defaults to `false`. |
 | `orchestratorRules` | Standing instructions for this project's orchestrators. Added after the global orchestrator prompt. At most 32 KiB. |
 | `orchestratorRulesFile` | Repository-relative file whose contents follow `orchestratorRules` in the orchestrator prompt. At most 32 KiB. |
 | `skipGlobalOrchestratorRules` | `true` leaves the host's global orchestrator prompt out of this project's orchestrators. Defaults to `false`. |
@@ -117,6 +118,8 @@ The same command list runs on every platform. Use `sh` syntax on macOS/Linux and
 Cleanup steps use `preRemove`. They run in order after processes stop and before permanent worktree removal. They have no execution time limit. Daemon shutdown cancels them. A failed step preserves the worktree. Save a fix, then use **Retry cleanup** for terminated sessions. Dirty worktrees remain intact. Replacing an orchestrator is the exception: its cleanup gets 90 seconds, and Orchestrator removes the old worktree even if a step fails or runs out of time. Cleanup does not run on ordinary agent exit or app quit, and it excludes scratch workspaces.
 
 Use `agentRules` or `agentRulesFile` for worker instructions and `orchestratorRules` for supervision instructions. If both worker fields are set, Orchestrator combines the inline rules and file contents.
+
+Worker instructions are layered the same way and only ever add to AO's built-in worker prompt: first the host's global worker rules (unless `skipGlobalWorkerRules` is `true`), then `agentRules`, then the contents of `agentRulesFile`. The global worker rules are at most 32 KiB, like the orchestrator ones, and apply to every worker AO starts on the host: project workers (spawned by an orchestrator or directly), restored and agent-switched workers, and standalone workers, which have no project and so no skip setting. AO's native review sessions run their own reviewer prompt and do not use worker rules. Edit them under **Settings → Prompts**, globally and per project (the project page has an Orchestrator and a Worker section). Changes take effect the next time a worker is spawned or restored; running workers are not updated, and the page lists which running sessions still use the previous rules. See [Per-role agents](/guides/per-role-agents#orchestrator-and-worker-prompts) for the built-in and effective prompt views.
 
 Orchestrator instructions are layered and only ever add to AO's built-in orchestrator prompt: first the host's global orchestrator prompt (unless `skipGlobalOrchestratorRules` is `true`), then `orchestratorRules`, then the contents of `orchestratorRulesFile`. Edit them under **Settings → Prompts**, globally and per project. Changes take effect the next time an orchestrator is spawned or restored; running orchestrators are not updated. The global prompt belongs to each AO daemon, so a remote host has its own. AO Cloud and Coder sessions apply only `orchestratorRules`.
 

@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentReadiness } from "../test/agent-readiness-fixtures";
@@ -2168,10 +2168,11 @@ describe("ProjectSettingsForm", () => {
 		renderSettings("proj-1", undefined, "prompts");
 		await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "Be terse.");
 		await userEvent.click(screen.getByRole("switch", { name: "Skip global orchestrator prompt" }));
-		submitSettings();
+		expect(putMock).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalled());
-		await screen.findByText("Saved");
+		await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
 		const body = putMock.mock.calls.at(-1)?.[1].body;
 		expect(body.config).toMatchObject({
 			orchestratorRules: "Be terse.",
@@ -2180,6 +2181,130 @@ describe("ProjectSettingsForm", () => {
 			orchestrator: { agent: "claude-code" },
 		});
 		expect(postMock).not.toHaveBeenCalled();
+	});
+
+	describe("worker prompt section", () => {
+		const project = {
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, agentRules: "keep small", agentRulesFile: "docs/worker.md" },
+		};
+		const withPromptApis = () => {
+			mockProject(project);
+			const base = getMock.getMockImplementation()!;
+			getMock.mockImplementation(async (path: string, init?: { params?: { query?: { path?: string; role?: string } } }) => {
+				if (path === "/api/v1/projects/{id}/agent-rules-file") {
+					return init?.params?.query?.path === "docs/worker.md" || init?.params?.query?.path === "docs/new.md"
+						? { data: { path: init.params.query.path, content: "Worker file rules." }, error: undefined }
+						: { data: undefined, error: { message: 'agentRulesFile "x": not_found' } };
+				}
+				if (path === "/api/v1/projects/{id}/effective-prompt") {
+					const role = init?.params?.query?.role;
+					return {
+						data: {
+							role,
+							mode: "tui",
+							text: "BUILTIN\n\nGLOBAL\n\nPROJECT",
+							sections: [
+								{ layer: "builtin", title: "AO Worker Role", text: "## AO Worker Role" },
+								{ layer: "global", title: "Global Worker Rules", text: "## Global Worker Rules\nGlobal." },
+								{ layer: "project", title: "Project Rules", text: "## Project Rules\nkeep small" },
+								{ layer: "file", title: "Project Rules", text: "Worker file rules." },
+							],
+						},
+						error: undefined,
+					};
+				}
+				if (path === "/api/v1/prompts/sessions") {
+					return { data: { sessions: init?.params?.query?.role === "worker" ? [{ sessionId: "proj-1-3", projectId: "proj-1", role: "worker", freshness: "stale" }] : [] }, error: undefined };
+				}
+				return base(path);
+			});
+		};
+
+		it("shows both sections on one page and keeps the worker fields saved with the config", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			expect(await screen.findByRole("heading", { name: "Orchestrator" })).toBeInTheDocument();
+			expect(screen.getByRole("heading", { name: "Worker" })).toBeInTheDocument();
+			const rules = (await screen.findByLabelText("Project worker prompt")) as HTMLTextAreaElement;
+			expect(rules.value).toBe("keep small");
+			expect(((await screen.findByLabelText("Worker rules file")) as HTMLInputElement).value).toBe("docs/worker.md");
+			expect(await screen.findByTestId("worker-rules-file-preview")).toHaveTextContent("Worker file rules.");
+
+			await userEvent.type(rules, " and tidy");
+			await userEvent.click(screen.getByRole("switch", { name: "Skip global worker prompt" }));
+			expect(putMock).not.toHaveBeenCalled();
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			await waitFor(() => expect(putMock).toHaveBeenCalled());
+			expect(putMock.mock.calls.at(-1)?.[1].body.config).toMatchObject({
+				agentRules: "keep small and tidy",
+				agentRulesFile: "docs/worker.md",
+				skipGlobalWorkerRules: true,
+				orchestrator: { agent: "claude-code" },
+			});
+			expect(postMock).not.toHaveBeenCalled();
+		});
+
+		it("does not block saving when saved project worker rules exceed the global 32 KiB limit", async () => {
+			withPromptApis();
+			mockProject({ ...project, config: { ...project.config, agentRules: "x".repeat(32 * 1024 + 1) } });
+			const base = getMock.getMockImplementation()!;
+			getMock.mockImplementation(async (path: string, init?: unknown) =>
+				path === "/api/v1/projects/{id}/agent-rules-file" || path === "/api/v1/projects/{id}/effective-prompt" || path === "/api/v1/prompts/sessions"
+					? { data: path.endsWith("sessions") ? { sessions: [] } : { path: "docs/worker.md", content: "x", sections: [], text: "", role: "worker", mode: "tui" }, error: undefined }
+					: base(path, init as never));
+			renderSettings("proj-1", undefined, "prompts");
+			await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "Be terse.");
+			expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+			expect(screen.queryByText("Too large: the limit is 32 KiB.")).not.toBeInTheDocument();
+		});
+
+		it("discards worker edits", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			const rules = (await screen.findByLabelText("Project worker prompt")) as HTMLTextAreaElement;
+			await userEvent.type(rules, " extra");
+			await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+			expect(rules.value).toBe("keep small");
+			expect(putMock).not.toHaveBeenCalled();
+		});
+
+		it("validates a changed worker rules file on Save and blocks a bad path", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			const input = await screen.findByLabelText("Worker rules file");
+			await userEvent.clear(input);
+			await userEvent.type(input, "docs/missing.md");
+			expect(await screen.findAllByText(/not_found/)).not.toHaveLength(0);
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			expect(putMock).not.toHaveBeenCalled();
+			// The error sits under the worker field, not the orchestrator one.
+			expect(input).toHaveAttribute("aria-invalid", "true");
+			expect(screen.getByLabelText("Rules file")).toHaveAttribute("aria-invalid", "false");
+		});
+
+		it("shows the effective prompt layer by layer and the sessions still on old rules after saving", async () => {
+			withPromptApis();
+			renderSettings("proj-1", undefined, "prompts");
+			await screen.findByLabelText("Project worker prompt");
+			expect(screen.queryByTestId("effective-worker")).not.toBeInTheDocument();
+			await userEvent.click(screen.getByRole("button", { name: "Effective worker prompt" }));
+			const view = await screen.findByTestId("effective-worker");
+			expect(within(view).getAllByTestId("prompt-layer").map((el) => el.textContent)).toEqual(["Built-in", "Global", "Project", "Rules file"]);
+
+			await userEvent.type(screen.getByLabelText("Project worker prompt"), "!");
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			const notice = await screen.findByTestId("prompt-apply-notice");
+			expect(await within(notice).findByText("proj-1-3")).toBeInTheDocument();
+			expect(within(notice).getByTestId("apply-worker")).toBeInTheDocument();
+			expect(within(notice).queryByTestId("apply-orchestrator")).not.toBeInTheDocument();
+		});
 	});
 
 	it("does not retry a failed orchestrator replacement when only prompt fields change", async () => {
@@ -2215,14 +2340,14 @@ describe("ProjectSettingsForm", () => {
 
 		rerenderSection("prompts");
 		await userEvent.type(await screen.findByLabelText("Project orchestrator prompt"), "More rules.");
-		// Autosave (not an explicit submit, which clears the banner by design).
+		await userEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2), { timeout: 3000 });
 		await waitFor(() => expect(screen.getByText(/Orchestrator restart failed/)).toBeInTheDocument());
-		await screen.findByText("Saved");
+		await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
 		expect(postMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("validates the orchestrator rules file before autosaving and blocks a bad path", async () => {
+	it("validates the orchestrator rules file on Save and blocks a bad path", async () => {
 		const project = {
 			id: "proj-1",
 			name: "Project One",
@@ -2249,12 +2374,107 @@ describe("ProjectSettingsForm", () => {
 		expect(await screen.findByText(/not_found/)).toBeInTheDocument();
 		await new Promise((resolve) => setTimeout(resolve, 900));
 		expect(putMock).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Save" }));
+		expect(await screen.findAllByText(/not_found/)).not.toHaveLength(0);
+		expect(putMock).not.toHaveBeenCalled();
 
 		await userEvent.clear(input);
 		await userEvent.type(input, "docs/good.md");
+		// The preview follows the typed path without saving it.
 		expect(await screen.findByText("Be careful.")).toBeInTheDocument();
+		expect(putMock).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() => expect(putMock).toHaveBeenCalled(), { timeout: 3000 });
 		expect(putMock.mock.calls.at(-1)?.[1].body.config.orchestratorRulesFile).toBe("docs/good.md");
 		expect(postMock).not.toHaveBeenCalled();
+	});
+	describe("explicit prompt save", () => {
+		const promptProject = {
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, orchestratorRules: "Saved rules." },
+		};
+
+		it("keeps a long typed text intact and saves nothing until Save is clicked", async () => {
+			mockProject(promptProject);
+			renderSettings("proj-1", undefined, "prompts");
+			const textarea = (await screen.findByLabelText("Project orchestrator prompt")) as HTMLTextAreaElement;
+			const long = "Rule one. ".repeat(60);
+			await userEvent.click(textarea);
+			await userEvent.clear(textarea);
+			await userEvent.paste(long);
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			expect(textarea.value).toBe(long);
+			expect(putMock).not.toHaveBeenCalled();
+			expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+			expect(putMock.mock.calls[0][1].body.config.orchestratorRules).toBe(long.trim());
+		});
+
+		it("disables Save and Discard without changes, and Discard restores the saved value", async () => {
+			mockProject(promptProject);
+			renderSettings("proj-1", undefined, "prompts");
+			const textarea = (await screen.findByLabelText("Project orchestrator prompt")) as HTMLTextAreaElement;
+			await waitFor(() => expect(textarea.value).toBe("Saved rules."));
+			expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+			expect(screen.getByRole("button", { name: "Discard" })).toBeDisabled();
+			await userEvent.type(textarea, " More.");
+			await userEvent.click(screen.getByRole("switch", { name: "Skip global orchestrator prompt" }));
+			expect(screen.getByRole("button", { name: "Discard" })).toBeEnabled();
+			await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+			expect(textarea.value).toBe("Saved rules.");
+			expect(screen.getByRole("switch", { name: "Skip global orchestrator prompt" })).not.toBeChecked();
+			expect(putMock).not.toHaveBeenCalled();
+		});
+
+		it("does not let a background refetch overwrite unsaved edits", async () => {
+			mockProject(promptProject);
+			const queryClient = renderSettings("proj-1", undefined, "prompts");
+			const textarea = (await screen.findByLabelText("Project orchestrator prompt")) as HTMLTextAreaElement;
+			await userEvent.type(textarea, " Local edit.");
+			mockProject({ ...promptProject, config: { ...promptProject.config, orchestratorRules: "Changed elsewhere." } });
+			await queryClient.invalidateQueries();
+			await waitFor(() => expect(getMock.mock.calls.length).toBeGreaterThan(1));
+			expect(textarea.value).toBe("Saved rules. Local edit.");
+			expect(putMock).not.toHaveBeenCalled();
+		});
+
+		it("saves with Cmd/Ctrl+S from inside the form", async () => {
+			mockProject(promptProject);
+			renderSettings("proj-1", undefined, "prompts");
+			const textarea = await screen.findByLabelText("Project orchestrator prompt");
+			await userEvent.type(textarea, " Hotkey.");
+			await userEvent.keyboard("{Control>}s{/Control}");
+			await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+			expect(putMock.mock.calls[0][1].body.config.orchestratorRules).toBe("Saved rules. Hotkey.");
+		});
+
+		it("blocks Save with an inline error when the prompt exceeds the size limit", async () => {
+			mockProject(promptProject);
+			renderSettings("proj-1", undefined, "prompts");
+			const textarea = await screen.findByLabelText("Project orchestrator prompt");
+			await userEvent.click(textarea);
+			await userEvent.paste("x".repeat(32 * 1024 + 1));
+			expect(await screen.findByText("Too large: the limit is 32 KiB.")).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+			expect(putMock).not.toHaveBeenCalled();
+		});
+
+		it("shows a failed save inline and keeps the edits", async () => {
+			mockProject(promptProject);
+			putMock.mockResolvedValueOnce({ data: undefined, error: { message: "boom" }, response: { status: 500 } });
+			renderSettings("proj-1", undefined, "prompts");
+			const textarea = (await screen.findByLabelText("Project orchestrator prompt")) as HTMLTextAreaElement;
+			await userEvent.type(textarea, " Edit.");
+			await userEvent.click(screen.getByRole("button", { name: "Save" }));
+			expect(await screen.findAllByText(/boom/)).not.toHaveLength(0);
+			expect(textarea.value).toBe("Saved rules. Edit.");
+			expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+		});
 	});
 });

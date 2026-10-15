@@ -32,6 +32,8 @@ export interface Settings {
 	trackerIntakeEnabled: boolean;
 	/** This daemon's global orchestrator prompt; empty means none. */
 	globalOrchestratorRules: string;
+	/** This daemon's global worker prompt; empty means none. */
+	globalWorkerRules: string;
 }
 
 export function useSettings(hostId?: string, enabled = true) {
@@ -60,6 +62,7 @@ export function useSettings(hostId?: string, enabled = true) {
 				cloudControlPlaneUrl: data?.cloudControlPlaneUrl ?? "",
 				trackerIntakeEnabled: data?.trackerIntakeEnabled ?? false,
 				globalOrchestratorRules: data?.globalOrchestratorRules ?? "",
+				globalWorkerRules: data?.globalWorkerRules ?? "",
 			};
 		},
 	});
@@ -126,7 +129,36 @@ export function useUpdateGlobalOrchestratorRules() {
 			if (error) throw error;
 			return data;
 		},
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsQueryKey }),
+		onSuccess: (_data, rules) => {
+			// Keep the acknowledged text even if the read-back below fails.
+			queryClient.setQueryData<Settings>(settingsQueryKey, (current) => current && { ...current, globalOrchestratorRules: rules });
+			void queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+		},
+	});
+
+	return {
+		update: (rules: string) => mutation.mutateAsync(rules),
+		saving: mutation.isPending,
+		error: mutation.error ? apiErrorMessage(mutation.error) : undefined,
+	};
+}
+
+/** Saves this computer's global worker prompt (the local daemon only). */
+export function useUpdateGlobalWorkerRules() {
+	const queryClient = useQueryClient();
+	const mutation = useMutation({
+		mutationFn: async (rules: string) => {
+			const { data, error } = await apiClient.PATCH("/api/v1/settings/global-worker-rules", {
+				body: { globalWorkerRules: rules },
+			});
+			if (error) throw error;
+			return data;
+		},
+		onSuccess: (_data, rules) => {
+			// Keep the acknowledged text even if the read-back below fails.
+			queryClient.setQueryData<Settings>(settingsQueryKey, (current) => current && { ...current, globalWorkerRules: rules });
+			void queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+		},
 	});
 
 	return {

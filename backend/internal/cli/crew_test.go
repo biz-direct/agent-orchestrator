@@ -132,3 +132,56 @@ func TestCrewDefaultSetRequiresExactlyOneChoice(t *testing.T) {
 		}
 	}
 }
+
+func TestCrewAddRolesRemoveTalkToTheTaskRoleRoutes(t *testing.T) {
+	var seen []string
+	pipelineServer(t, func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/w-1/crew/roles":
+			var body crewAddRoleDTO
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Role != "builder" || body.Harness != "codex" {
+				t.Errorf("body = %+v err=%v", body, err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"sessionId":"w-att-2","ownerSessionId":"w-1","role":"builder","harness":"codex","controllerActive":true}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions/w-1/crew/roles":
+			_, _ = io.WriteString(w, `{"roles":[{"sessionId":"w-att-2","ownerSessionId":"w-1","role":"builder","harness":"codex","controllerActive":true}]}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/sessions/w-1/crew/roles/builder":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	out, stderr, err := executeCLI(t, crewDeps(), "crew", "add", "builder", "--session", "w-1", "--harness", "codex")
+	if err != nil || !strings.Contains(out, "added role builder to w-1 as session w-att-2") {
+		t.Fatalf("add: %v out=%s stderr=%s", err, out, stderr)
+	}
+	out, _, err = executeCLI(t, crewDeps(), "crew", "roles", "--session", "w-1")
+	if err != nil || !strings.Contains(out, "builder") || !strings.Contains(out, "w-att-2") {
+		t.Fatalf("roles: %v %s", err, out)
+	}
+	out, _, err = executeCLI(t, crewDeps(), "crew", "remove", "builder", "--session", "w-1")
+	if err != nil || !strings.Contains(out, "removed role builder") {
+		t.Fatalf("remove: %v %s", err, out)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("requests: %v", seen)
+	}
+}
+
+func TestCrewAddRefusalIsVisibleAndNeedsASession(t *testing.T) {
+	pipelineServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"bad_request","code":"CREW_ROLE_HARNESS_UNSUPPORTED","message":"harness x has no Chat driver"}`)
+	})
+	_, stderr, err := executeCLI(t, crewDeps(), "crew", "add", "builder", "--session", "w-1")
+	if err == nil || !strings.Contains(err.Error()+stderr, "no Chat driver") {
+		t.Fatalf("an unsupported harness must be refused visibly: err=%v stderr=%s", err, stderr)
+	}
+	_, _, err = executeCLI(t, crewDeps(), "crew", "add", "builder")
+	if err == nil || ExitCode(err) != 2 {
+		t.Fatalf("missing session is a usage error: %v", err)
+	}
+}

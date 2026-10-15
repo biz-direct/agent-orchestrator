@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/crew"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // Default-selection states reported to clients.
@@ -42,6 +43,13 @@ type Manager interface {
 	// SetDefault saves (or, with a nil selection, clears) the project default
 	// without touching any other project setting.
 	SetDefault(ctx context.Context, id domain.ProjectID, in SetDefaultInput) (DefaultStatus, error)
+	// AddRole starts a visible, interactive role session inside a worker
+	// task's worktree.
+	AddRole(ctx context.Context, owner domain.SessionID, in AddRoleInput) (RoleSession, error)
+	// ListRoles lists the task's live role sessions.
+	ListRoles(ctx context.Context, owner domain.SessionID) ([]RoleSession, error)
+	// RemoveRole ends only the role's conversation.
+	RemoveRole(ctx context.Context, owner domain.SessionID, role string) error
 }
 
 // CatalogResponse is the body of GET /projects/{id}/crew.
@@ -69,12 +77,15 @@ type SetDefaultInput struct {
 
 // Service implements Manager.
 type Service struct {
-	store Store
+	store    Store
+	sessions SessionStore
+	host     ports.CrewRoleHost
 }
 
 var _ Manager = (*Service)(nil)
 
-// New returns a crews service.
+// New returns a crews service. Role sessions are unavailable until
+// WithRoleSessions is applied.
 func New(store Store) *Service { return &Service{store: store} }
 
 func (s *Service) project(ctx context.Context, id domain.ProjectID) (domain.ProjectRecord, error) {

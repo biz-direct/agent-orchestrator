@@ -303,6 +303,7 @@ func startSession(ctx context.Context, cfg config.Config, runtime runtimeselect.
 		Chat:                chat,
 		Defaults:            defaults,
 		GlobalRules:         globalOrchestratorRules(defaults),
+		GlobalWorkerRules:   globalWorkerRules(defaults),
 		Lifecycle:           lcm,
 		Preview:             previewLifecycle,
 		Browser:             browserLifecycle,
@@ -740,6 +741,12 @@ func (c chatLauncher) StopChat(ctx context.Context, id domain.SessionID) error {
 // defaults to the global-rules reader; nil when it does not provide one.
 func globalOrchestratorRules(defaults sessionmanager.SessionModeDefaults) sessionmanager.GlobalOrchestratorRulesReader {
 	reader, _ := defaults.(sessionmanager.GlobalOrchestratorRulesReader)
+	return reader
+}
+
+// globalWorkerRules is globalOrchestratorRules for the worker layer.
+func globalWorkerRules(defaults sessionmanager.SessionModeDefaults) sessionmanager.GlobalWorkerRulesReader {
+	reader, _ := defaults.(sessionmanager.GlobalWorkerRulesReader)
 	return reader
 }
 

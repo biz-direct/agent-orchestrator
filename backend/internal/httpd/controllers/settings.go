@@ -19,6 +19,7 @@ type SettingsService interface {
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode) (settingssvc.Snapshot, error)
 	SetCloudOffering(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	SetGlobalOrchestratorRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
+	SetGlobalWorkerRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
 	SetChatHibernationEnabled(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	ChatHarnesses(candidates []domain.AgentHarness) []domain.AgentHarness
 	Offering() settingssvc.Offering
@@ -39,6 +40,7 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Patch("/settings/session-interface", c.setSessionInterface)
 	r.Patch("/settings/cloud-offering", c.setCloudOffering)
 	r.Patch("/settings/global-orchestrator-rules", c.setGlobalOrchestratorRules)
+	r.Patch("/settings/global-worker-rules", c.setGlobalWorkerRules)
 	r.Patch("/settings/chat-hibernation", c.setChatHibernation)
 }
 
@@ -113,15 +115,46 @@ func (c *SettingsController) setGlobalOrchestratorRules(w http.ResponseWriter, r
 	if !decodeConversationBody(w, r, &req) {
 		return
 	}
-	if req.GlobalOrchestratorRules == nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
-			"GLOBAL_ORCHESTRATOR_RULES_INVALID", "globalOrchestratorRules must be a string", nil)
+	c.setGlobalRules(w, r, req.GlobalOrchestratorRules, globalRulesRoute{
+		invalidCode: "GLOBAL_ORCHESTRATOR_RULES_INVALID", invalidMsg: "globalOrchestratorRules must be a string",
+		tooLarge: domain.ErrOrchestratorRulesTooLarge, tooLargeCode: "ORCHESTRATOR_RULES_TOO_LARGE",
+		save: c.Svc.SetGlobalOrchestratorRules,
+	})
+}
+
+func (c *SettingsController) setGlobalWorkerRules(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/global-worker-rules")
 		return
 	}
-	snapshot, err := c.Svc.SetGlobalOrchestratorRules(r.Context(), *req.GlobalOrchestratorRules)
-	if errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
-			"ORCHESTRATOR_RULES_TOO_LARGE", err.Error(), nil)
+	var req UpdateGlobalWorkerRulesRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	c.setGlobalRules(w, r, req.GlobalWorkerRules, globalRulesRoute{
+		invalidCode: "GLOBAL_WORKER_RULES_INVALID", invalidMsg: "globalWorkerRules must be a string",
+		tooLarge: domain.ErrWorkerRulesTooLarge, tooLargeCode: "WORKER_RULES_TOO_LARGE",
+		save: c.Svc.SetGlobalWorkerRules,
+	})
+}
+
+// globalRulesRoute is what differs between the orchestrator and worker global
+// rules routes.
+type globalRulesRoute struct {
+	invalidCode, invalidMsg string
+	tooLarge                error
+	tooLargeCode            string
+	save                    func(ctx context.Context, rules string) (settingssvc.Snapshot, error)
+}
+
+func (c *SettingsController) setGlobalRules(w http.ResponseWriter, r *http.Request, rules *string, route globalRulesRoute) {
+	if rules == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", route.invalidCode, route.invalidMsg, nil)
+		return
+	}
+	snapshot, err := route.save(r.Context(), *rules)
+	if errors.Is(err, route.tooLarge) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", route.tooLargeCode, err.Error(), nil)
 		return
 	}
 	if err != nil {
@@ -172,6 +205,7 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 		CloudControlPlaneURL:    offering.CloudControlPlaneURL,
 		TrackerIntakeEnabled:    offering.TrackerIntakeEnabled,
 		GlobalOrchestratorRules: snapshot.GlobalOrchestratorRules,
+		GlobalWorkerRules:       snapshot.GlobalWorkerRules,
 		ChatHibernationEnabled:  snapshot.ChatHibernationEnabled,
 	}
 }

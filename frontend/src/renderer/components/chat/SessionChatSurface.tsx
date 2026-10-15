@@ -130,6 +130,9 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceTabActions,
 	workspaceActiveTabKey,
 	workspaceFileActive,
+	hideHeader,
+	sideChatsDisabled,
+	browserSession,
 	auxiliaryTabOrder,
 	onAuxiliaryTabOrderChange,
 	controllerTransitioning,
@@ -180,6 +183,12 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	workspaceActiveTabKey?: string;
 	/** A file overlay hides the chat surface, so it must not acknowledge switch UI. */
 	workspaceFileActive?: boolean;
+	/** Drop the chat header and tab strip when another surface already provides them. */
+	hideHeader?: boolean;
+	/** No side-chat panel is mounted for this surface, so /btw, /side and "Add to side chat" must not be offered. */
+	sideChatsDisabled?: boolean;
+	/** The session whose visible Browser pane links open in, when it is not this conversation's own (a crew role opens links in its task's pane). */
+	browserSession?: WorkspaceSession;
 	/** Session-owned order shared with the terminal UI surface. */
 	auxiliaryTabOrder?: string[];
 	onAuxiliaryTabOrderChange?: (keys: string[]) => void;
@@ -390,7 +399,8 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 	const { paths, catalog: fileCatalog, truncated } = useWorkspaceFilePaths(session.id, Boolean(snapshot), hostId);
 	const stageAttachments = useStageAttachments(session.id, hostId);
 	const [annotationNavigationRequest, setAnnotationNavigationRequest] = useState<{ id: string; text: string; messageId?: string; revision?: number }>();
-	const sideEnabled = useSideChatsAvailable(session, hostId) && !unavailable;
+	const sideAvailable = useSideChatsAvailable(session, hostId);
+	const sideEnabled = sideAvailable && !unavailable && !sideChatsDisabled;
 	const openSideInspector = () => {
 		const ui = useUiStore.getState();
 		ui.setInspectorView(uiSessionId, "sideChat");
@@ -416,7 +426,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 		}
 	};
 
-	const openLinkInBrowser = useSessionBrowserLink(session, onOpenLinkInBrowser, paths);
+	const openLinkInBrowser = useSessionBrowserLink(browserSession ?? session, onOpenLinkInBrowser, paths);
 	const openSessionLink = useSessionLinkNavigation(hostId);
 	const conversationLinkBaselines = useRef(new Map<string, ConversationLinkBaseline>());
 	useEffect(() => {
@@ -612,6 +622,7 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				workspaceTabs={workspaceTabs}
 				workspaceTabActions={workspaceTabActions}
 				workspaceActiveTabKey={workspaceActiveTabKey}
+				hideHeader={hideHeader}
 				auxiliaryTabOrder={auxiliaryTabOrder}
 				onAuxiliaryTabOrderChange={onAuxiliaryTabOrderChange}
 				controllerTransitioning={controllerTransitioning}

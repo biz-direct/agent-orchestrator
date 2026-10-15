@@ -265,6 +265,9 @@ var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names
 	"DomainProjectConfig":             "ProjectConfig",
 	"DomainPipelineSelection":         "PipelineSelection",
 	"DomainCrewSelection":             "CrewSelection",
+	"CrewsAddRoleInput":               "AddCrewRoleInput",
+	"CrewsRoleSession":                "CrewRoleSession",
+	"ControllersCrewRoleList":         "CrewRoleList",
 	"PipelinerunsStageReport":         "PipelineStageReport",
 	"PipelinerunsFeedback":            "PipelineFeedback",
 	"PipelinerunsFeedbackCheck":       "PipelineFeedbackCheck",
@@ -899,6 +902,20 @@ type orchestratorRulesFileQuery struct {
 	Path string `query:"path,omitempty" description:"Repo-relative candidate path to read. Omit to read the project's saved orchestratorRulesFile."`
 }
 
+type agentRulesFileQuery struct {
+	Path string `query:"path,omitempty" description:"Repo-relative candidate path to read. Omit to read the project's saved agentRulesFile."`
+}
+
+type effectivePromptQuery struct {
+	Role string `query:"role" enum:"orchestrator,worker" description:"Which role's prompt to assemble."`
+	Mode string `query:"mode,omitempty" enum:"chat,tui" description:"Interface to assemble for. Omit to use the default a new session would get."`
+}
+
+type promptSessionsQuery struct {
+	Role      string `query:"role" enum:"orchestrator,worker" description:"Which role's sessions to list."`
+	ProjectID string `query:"projectId,omitempty" description:"Limit to one project. Omit to list every project's sessions."`
+}
+
 type renderSourceQuery struct {
 	Source *string `query:"source,omitempty" enum:"1" description:"Set to 1 to read the page as the agent wrote it: the stored bytes as text/plain, without the theme bootstrap."`
 }
@@ -997,6 +1014,48 @@ func shellTerminalOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.SettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPatch, path: "/api/v1/settings/global-worker-rules", id: "updateGlobalWorkerRules", tag: "settings",
+			summary: "Set the global worker rules for this daemon",
+			reqBody: controllers.UpdateGlobalWorkerRulesRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/prompts/builtin", id: "getBuiltinPrompts", tag: "prompts",
+			summary: "Read AO's built-in orchestrator and worker prompts, rendered with sample project values",
+			resps: []respUnit{
+				{http.StatusOK, controllers.BuiltinPromptsResponse{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/prompts/sessions", id: "listPromptSessions", tag: "prompts",
+			summary:    "List live sessions of a role and whether each still uses an older prompt",
+			pathParams: []any{promptSessionsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.PromptSessionsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/effective-prompt", id: "getEffectivePrompt", tag: "prompts",
+			summary:    "Read the prompt a new session of a role would get in this project",
+			pathParams: []any{controllers.ProjectIDParam{}, effectivePromptQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.EffectivePromptResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
@@ -2463,6 +2522,17 @@ func projectOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/projects/{id}/agent-rules-file", id: "previewAgentRulesFile", tag: "projects",
+			summary:    "Read a project's worker rules file (or a candidate path) without saving",
+			pathParams: []any{controllers.ProjectIDParam{}, agentRulesFileQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, projectsvc.OrchestratorRulesFilePreview{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPatch, path: "/api/v1/projects/{id}/permissions", id: "setProjectPermissions", tag: "projects",
 			summary:    "Remember project permissions for future sessions",
 			pathParams: []any{controllers.ProjectIDParam{}},
@@ -2598,6 +2668,39 @@ func projectOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, crewssvc.DefaultStatus{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/crew/roles", id: "listSessionCrewRoles", tag: "sessions",
+			summary:    "List the live crew role sessions attached to a worker task",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.CrewRoleList{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/roles", id: "addSessionCrewRole", tag: "sessions",
+			summary:    "Start a visible, interactive Chat session for a repository-defined role in the task's worktree",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    crewssvc.AddRoleInput{},
+			resps: []respUnit{
+				{http.StatusCreated, crewssvc.RoleSession{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/crew/roles/{role}", id: "removeSessionCrewRole", tag: "sessions",
+			summary:    "End a role's conversation without touching the task's worktree, branch, or PR",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.CrewRoleParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

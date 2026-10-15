@@ -17,6 +17,8 @@ type attachedStore struct {
 	*fakeStore
 	attached   map[domain.SessionID]domain.SessionID
 	forAttempt map[string]domain.SessionID
+	// afterAttachedCreate lets a test interleave work right after a row exists.
+	afterAttachedCreate func(domain.SessionRecord)
 }
 
 func (s *attachedStore) FindAttachedSessionForAttempt(_ context.Context, attemptID string) (domain.SessionID, bool, error) {
@@ -43,6 +45,9 @@ func (s *attachedStore) CreateAttachedSession(_ context.Context, rec domain.Sess
 		s.attached = map[domain.SessionID]domain.SessionID{}
 	}
 	s.attached[rec.ID] = owner
+	if s.afterAttachedCreate != nil {
+		s.afterAttachedCreate(rec)
+	}
 	return rec, nil
 }
 

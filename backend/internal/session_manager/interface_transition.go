@@ -103,6 +103,12 @@ func (m *Manager) InterfaceTransitionStatus(
 	if rec.IsTerminated {
 		status.ReasonCode = "SESSION_TERMINATED"
 		status.Reason = "Terminated sessions must be restored before switching interfaces."
+	} else if role, rerr := m.crewRoleOf(ctx, id); rerr != nil {
+		status.ReasonCode = "INTERFACE_HANDOFF_UNSUPPORTED"
+		status.Reason = fmt.Sprintf("crew role state could not be determined: %v", rerr)
+	} else if role != "" {
+		status.ReasonCode = "INTERFACE_HANDOFF_UNSUPPORTED"
+		status.Reason = fmt.Sprintf("The %s role runs only as a Chat conversation and cannot switch to a terminal.", role)
 	} else if target == domain.SessionModeChat && (m.chat == nil || !m.chat.SupportsChat(rec.Harness)) {
 		status.ReasonCode = "CHAT_UNSUPPORTED"
 		status.Reason = fmt.Sprintf("%s does not support Chat UI.", rec.Harness)
@@ -159,6 +165,13 @@ func (m *Manager) StartInterfaceTransition(
 	}
 	if !historyPolicy.Valid() {
 		return domain.SessionInterfaceTransition{}, fmt.Errorf("transition history policy %q is invalid", historyPolicy)
+	}
+	// Crew roles are Chat-only: a terminal runtime could outlive the role's
+	// Chat-only teardown, so the transition is refused before anything is fenced.
+	if role, rerr := m.crewRoleOf(ctx, id); rerr != nil {
+		return domain.SessionInterfaceTransition{}, fmt.Errorf("%w: crew role state could not be determined: %w", ErrInterfaceHandoffUnsupported, rerr)
+	} else if role != "" {
+		return domain.SessionInterfaceTransition{}, fmt.Errorf("%w: the %s crew role runs only as a Chat conversation", ErrInterfaceHandoffUnsupported, role)
 	}
 	store, ok := m.store.(interfaceTransitionStore)
 	if !ok {

@@ -2,19 +2,19 @@
 name: Sync upstream
 
 # FORK ONLY: manual only (Actions tab -> Run workflow); no schedule. Bring OrchestratorInc/agent-orchestrator main into this fork's main
-# through a reviewed PR. Never tags or publishes, never force-pushes.
+# through a DRAFT PR that a human triages. Never tags or publishes, never force-pushes,
+# never merges: the user merges after ticking the rejects (see docs/fork-ci.md).
 #
-#   clean merge  -> push sync/upstream-<sha> and open a PR into main.
-#   conflicts    -> commit the raw merge (conflict markers included) to that branch,
-#                   open a DRAFT PR, and dispatch Pullfrog to resolve the conflicts
-#                   on it. The branch is a repeatable state: if Pullfrog times out,
-#                   what it pushed is kept and a later run continues from it.
-#   in flight    -> a PR for this upstream commit is already open; a draft whose
-#                   Pullfrog run is gone is handed to Pullfrog again.
+#   clean merge  -> push sync/upstream-<sha> and open a DRAFT PR into main.
+#   conflicts    -> commit the raw merge (conflict markers included) to that branch
+#                   and open a DRAFT PR. The branch is a repeatable state: if Pullfrog
+#                   times out, what it pushed is kept and a later run continues from it.
+#   in flight    -> a sync PR is already open (any upstream commit); nothing new is
+#                   opened, so triage work is never closed under the user. A draft whose
+#                   Pullfrog pass never finished is handed to Pullfrog again.
 #
-# Pullfrog reviews the PR once it is ready; sync-upstream-gate.yml merges it when
-# the review is clean and CI is green, or opens an `agent-review` issue when a human is needed.
-# Every run also re-evaluates all open sync PRs as a safety net.
+# Either way one Pullfrog pass (sync-upstream-prompt.sh) resolves any conflicts and
+# writes the triage list into the PR body. The PR stays a draft.
 #
 # Needs the SYNC_PAT secret (PAT with repo + workflow scope): GITHUB_TOKEN
 # cannot push changes to .github/workflows, and pushes made with it do not
@@ -71,15 +71,20 @@ jobs:
             echo "status=uptodate" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # A PR for this upstream commit (from this repo, not an outside fork)
-          # is already open: leave it to Pullfrog and the gate.
-          open_pr="$(gh pr list --head "sync/upstream-$sha" --base main --state open \
-            --json number,headRepository,headRepositoryOwner \
-            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | .number' | head -n1)"
+          # A sync PR (from this repo, not an outside fork) is already open, for
+          # this or an older upstream commit: leave it to the user. Opening a newer
+          # one would close the PR being triaged and lose its worker commits.
+          open_pr="$(gh pr list --base main --state open \
+            --json number,headRefName,headRepository,headRepositoryOwner \
+            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefName | startswith("sync/upstream-")) | "\(.number) \(.headRefName)"' | head -n1)"
           if [ -n "$open_pr" ]; then
-            echo "Sync PR #$open_pr for $UPSTREAM@$sha is already open"
-            echo "status=inflight" >> "$GITHUB_OUTPUT"
-            echo "pr=$open_pr" >> "$GITHUB_OUTPUT"
+            pr_number="${open_pr%% *}"
+            echo "Sync PR #$pr_number ($open_pr) is already open; not opening another."
+            {
+              echo "status=inflight"
+              echo "pr=$pr_number"
+              echo "sha=${open_pr##*sync/upstream-}"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git checkout -b "sync/upstream-$sha"
@@ -118,32 +123,26 @@ jobs:
             --json number,headRefOid,headRepository,headRepositoryOwner \
             --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefOid == "'"$head_sha"'") | .number' | head -n1)"
           if [ -z "$pr" ]; then
+            marker='<!-- sync-triage:pending -->'
             if [ "$STATUS" = conflict ]; then
-              draft=(--draft)
               inventory="$(sed 's/^/    /' "$RUNNER_TEMP/conflicts.txt")"
-              intro="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. The merge conflicts; this branch holds the raw merge and Pullfrog is resolving it. Pullfrog marks the PR ready when every conflict is resolved; then it reviews the PR and sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
+              intro="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. The merge conflicts; this branch holds the raw merge and Pullfrog is resolving it, then writing the triage list below. This PR stays a draft and is never merged automatically."
               legend="Git status codes (UU both modified, AA both added, DU/UD deleted by one side, AU/UA added by one side, DD both deleted) for every path that conflicted. Some of these have no conflict markers in the committed files, so resolve every path listed here, not just the files with markers."
-              body="$(printf '%s\n\n## Conflict inventory\n\n%s\n\n%s\n' "$intro" "$legend" "$inventory")"
+              body="$(printf '%s\n\n## Conflict inventory\n\n%s\n\n%s\n\n## Triage\n\n%s\n' "$intro" "$legend" "$inventory" "$marker")"
             else
-              draft=()
-              body="Automated merge of \`$UPSTREAM\` main at \`$SHA\`. Created by sync-upstream.yml. Pullfrog reviews it; sync-upstream-gate.yml merges it when the review is clean and CI is green, otherwise an \`agent-review\` issue is opened."
+              intro="Automated clean merge of \`$UPSTREAM\` main at \`$SHA\`. Pullfrog is writing the triage list below. This PR stays a draft and is never merged automatically."
+              body="$(printf '%s\n\n## Triage\n\n%s\n' "$intro" "$marker")"
             fi
-            pr="$(gh pr create --base main --head "$branch" "${draft[@]}" \
+            pr="$(gh pr create --base main --head "$branch" --draft \
               --title "chore: sync upstream $UPSTREAM@$SHA" --body "$body" \
               | grep -oE '[0-9]+$')"
           fi
           echo "pr=$pr" >> "$GITHUB_OUTPUT"
-          # Supersede older sync PRs.
-          gh pr list --state open --base main --json number,headRefName,headRepository,headRepositoryOwner \
-            --jq '.[] | select(.headRepositoryOwner.login + "/" + .headRepository.name == "'"$GITHUB_REPOSITORY"'") | select(.headRefName | startswith("sync/upstream-")) | select(.headRefName != "'"$branch"'") | .number' |
-            while read -r old; do
-              gh pr close "$old" --delete-branch --comment "Superseded by #$pr."
-            done
           echo "Sync PR #$pr is open."
-      - name: Hand conflicts to Pullfrog
-        # A fresh conflicted merge, or an open draft sync PR that no Pullfrog run
-        # is working on any more (timed out, failed): continue from the branch.
-        if: steps.merge.outputs.status == 'conflict' || steps.merge.outputs.status == 'inflight'
+      - name: Hand the sync to Pullfrog
+        # One triage pass per sync: a fresh PR (clean or conflicted), or an open
+        # draft sync PR whose pass never finished (timed out, failed): continue.
+        if: steps.merge.outputs.status == 'clean' || steps.merge.outputs.status == 'conflict' || steps.merge.outputs.status == 'inflight'
         id: handoff
         shell: bash
         env:
@@ -153,10 +152,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f "$RUNNER_TEMP/conflicts.txt" ]; then
-            { echo "### Upstream sync conflicts handed to Pullfrog (PR #$PR)"; sed 's/^/    /' "$RUNNER_TEMP/conflicts.txt"; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "### Upstream sync handed to Pullfrog (PR #$PR)"; sed 's/^/    /' "$RUNNER_TEMP/conflicts.txt"; } >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "$(gh pr view "$PR" --json isDraft --jq .isDraft)" != true ]; then
-            echo "PR #$PR is ready for review; nothing for Pullfrog to resolve."
+            echo "PR #$PR is no longer a draft; leaving it to the user."
+            exit 0
+          fi
+          # Pullfrog replaces the pending marker once conflicts are resolved and the
+          # triage list is written; a PR without it has no finished pass yet.
+          body="$(gh pr view "$PR" --json body --jq .body)"
+          if grep -q 'sync-triage:done' <<<"$body"; then
+            echo "PR #$PR is already triaged; nothing for Pullfrog to do."
             exit 0
           fi
           active="$(gh run list --workflow pullfrog.yml --json status,displayTitle \
@@ -169,25 +175,13 @@ jobs:
           gh workflow run pullfrog.yml --ref main \
             -f name="Sync upstream $SHA" \
             -f prompt="$prompt"
-          echo "Dispatched Pullfrog for PR #$PR ($UPSTREAM@$SHA)."
+          echo "Dispatched the Pullfrog triage pass for PR #$PR ($UPSTREAM@$SHA)."
       - name: Flag a failed Pullfrog hand-off
-        if: failure() && steps.merge.outputs.status == 'conflict'
+        if: failure() && steps.handoff.conclusion == 'failure'
         shell: bash
         env:
           SHA: ${{ steps.merge.outputs.sha }}
         run: |
           bash .github/scripts/agent-review-issue.sh open \
             "Upstream sync needs review: hand-off to Pullfrog failed for $UPSTREAM@$SHA" \
-            "Merging $UPSTREAM main ($SHA) into main conflicts and the Pullfrog dispatch failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-      - name: Re-evaluate open sync PRs
-        # Safety net: a missed event must not strand a sync PR, including one for
-        # an older upstream commit.
-        if: success() || failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh pr list --base main --state open --json number,headRefName \
-            --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | .number' |
-            while read -r pr; do
-              bash .github/scripts/sync-upstream-gate.sh "$pr" || echo "::warning::Gate failed for #$pr"
-            done
+            "The Pullfrog dispatch for the $UPSTREAM main ($SHA) sync failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
