@@ -134,10 +134,10 @@ func TestChatHistoryRepairPreservesForkGlobalRulesVersion(t *testing.T) {
 
 // Upstream shipped artifact versioning as 0196, which the fork uses for the
 // conversation sender columns. A database that ran upstream's 0196 keeps its
-// table, records the fork's 0251, and still gets the sender columns.
-func TestMigrateUpstreamArtifactVersionsMovesTo0251(t *testing.T) {
+// table, records the fork's 0252, and still gets the sender columns.
+func TestMigrateUpstreamArtifactVersionsMovesTo0252(t *testing.T) {
 	db := openMigratedDatabaseCopy(t, 195)
-	body, err := migrationsFS.ReadFile("migrations/0251_session_artifact_versions.sql")
+	body, err := migrationsFS.ReadFile("migrations/0252_session_artifact_versions.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestMigrateUpstreamArtifactVersionsMovesTo0251(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, version := range []int{196, 251} {
+	for _, version := range []int{196, 252} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM goose_db_version WHERE version_id = ? AND is_applied = 1`, version).Scan(&count); err != nil || count != 1 {
 			t.Fatalf("version %d: applied rows = %d, err = %v", version, count, err)

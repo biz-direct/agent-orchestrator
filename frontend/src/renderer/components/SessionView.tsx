@@ -29,7 +29,7 @@ import { CloudFileContentPane, CloudWorkspaceDiff } from "./CloudWorkspaceDiff";
 import { CloudSessionStartupError } from "./CloudSessionStartupError";
 import { CloudSessionStartupLoader } from "./CloudSessionStartupLoader";
 import { SessionFileTab } from "./SessionFileTabs";
-import { AddCrewRoleMenu, CrewRoleChat, roleTabKey, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
+import { AddCrewRoleMenu, CrewBatonMenu, CrewRoleChat, roleTabKey, SessionRoleTab, useRemoveCrewRole, useSessionCrewRoles } from "./SessionCrewRoles";
 import { SessionFileWorkspace } from "./SessionFileWorkspace";
 import { SessionFilesPopOut } from "./SessionFilesPopOut";
 import { isArtifactPreviewUrl } from "../lib/artifact-preview";
@@ -1347,7 +1347,10 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 	const addCrewRoleAction = useMemo(
 		() =>
 			session && crewRoles.eligible ? (
-				<AddCrewRoleMenu hostId={hostId} onAdded={(role) => selectCrewRole(role.sessionId)} roles={crewRoles.roles} session={session} />
+				<>
+					<CrewBatonMenu hostId={hostId} roles={crewRoles.roles} session={session} />
+					<AddCrewRoleMenu hostId={hostId} onAdded={(role) => selectCrewRole(role.sessionId)} roles={crewRoles.roles} session={session} />
+				</>
 			) : null,
 		[crewRoles.eligible, crewRoles.roles, hostId, selectCrewRole, session],
 	);

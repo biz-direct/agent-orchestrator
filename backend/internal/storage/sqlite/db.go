@@ -371,7 +371,7 @@ func migrate(db *sql.DB) error {
 // The fork keeps pipelines/global rules at 0178/0179; upstream's archive
 // and sender columns move unchanged to 0195/0196, and upstream's requested-output
 // column moves from 0195 to 0197, and upstream's artifact versioning moves from
-// 0196 to 0251. Physical schema, not the ambiguous old ledger
+// 0196 to 0252. Physical schema, not the ambiguous old ledger
 // entries, determines which migrations already ran.
 func repairForkMigrationCollisions(db *sql.DB) error {
 	var gooseTable int
@@ -391,8 +391,8 @@ func repairForkMigrationCollisions(db *sql.DB) error {
 		{195, "review", []string{"is_archived"}},
 		{196, "conversation_messages", []string{"sender_session_id", "sender_project_id", "sender_display_name"}},
 		{197, "sessions", []string{"requested_output"}},
-		// Upstream shipped artifact versioning as 0196; the fork carries it at 0251.
-		{251, "session_artifact_versions", []string{"session_id", "path", "version", "sha256"}},
+		// Upstream shipped artifact versioning as 0196; the fork carries it at 0252.
+		{252, "session_artifact_versions", []string{"session_id", "path", "version", "sha256"}},
 	} {
 		complete := true
 		for _, column := range migration.columns {
