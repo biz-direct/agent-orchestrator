@@ -130,28 +130,28 @@ func crewMessagesFromGen(rows []gen.CrewMessage) []domain.CrewMessage {
 
 // ClaimCrewMessage moves a queued message to delivering for exactly one caller.
 func (s *Store) ClaimCrewMessage(ctx context.Context, id string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "claim", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("claim", func(q *gen.Queries) (int64, error) {
 		return q.ClaimCrewMessage(ctx, gen.ClaimCrewMessageParams{ID: id, Now: now})
 	})
 }
 
 // MarkCrewMessageDelivered records a claimed message as delivered.
 func (s *Store) MarkCrewMessageDelivered(ctx context.Context, id string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "mark delivered", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("mark delivered", func(q *gen.Queries) (int64, error) {
 		return q.MarkCrewMessageDelivered(ctx, gen.MarkCrewMessageDeliveredParams{ID: id, Now: sql.NullTime{Time: now, Valid: true}})
 	})
 }
 
 // RequeueCrewMessage returns a claimed message to the queue after a failed attempt.
 func (s *Store) RequeueCrewMessage(ctx context.Context, id, reason string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "requeue", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("requeue", func(q *gen.Queries) (int64, error) {
 		return q.RequeueCrewMessage(ctx, gen.RequeueCrewMessageParams{ID: id, StateReason: reason, Now: now})
 	})
 }
 
 // FailCrewMessage abandons delivery of a queued or claimed message.
 func (s *Store) FailCrewMessage(ctx context.Context, id, reason string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "fail", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("fail", func(q *gen.Queries) (int64, error) {
 		return q.FailCrewMessage(ctx, gen.FailCrewMessageParams{ID: id, StateReason: reason, Now: now})
 	})
 }
@@ -181,27 +181,27 @@ func (s *Store) SetCrewMessageWaitReason(ctx context.Context, id, reason string)
 
 // EditCrewMessage replaces the body of a queued or held message.
 func (s *Store) EditCrewMessage(ctx context.Context, id, body string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "edit", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("edit", func(q *gen.Queries) (int64, error) {
 		return q.EditCrewMessage(ctx, gen.EditCrewMessageParams{ID: id, Body: body, Now: now})
 	})
 }
 
 // DropCrewMessage drops a queued or held message.
 func (s *Store) DropCrewMessage(ctx context.Context, id string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "drop", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("drop", func(q *gen.Queries) (int64, error) {
 		return q.DropCrewMessage(ctx, gen.DropCrewMessageParams{ID: id, Now: now})
 	})
 }
 
 // ReleaseCrewMessage moves a held message into the delivery queue.
 func (s *Store) ReleaseCrewMessage(ctx context.Context, id string, now time.Time) (bool, error) {
-	return s.crewMessageWrite(ctx, "release", func(q *gen.Queries) (int64, error) {
+	return s.crewMessageWrite("release", func(q *gen.Queries) (int64, error) {
 		return q.ReleaseCrewMessage(ctx, gen.ReleaseCrewMessageParams{ID: id, Now: now})
 	})
 }
 
 // crewMessageWrite runs one guarded UPDATE and reports whether it matched a row.
-func (s *Store) crewMessageWrite(ctx context.Context, what string, fn func(*gen.Queries) (int64, error)) (bool, error) {
+func (s *Store) crewMessageWrite(what string, fn func(*gen.Queries) (int64, error)) (bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	n, err := fn(s.qw)

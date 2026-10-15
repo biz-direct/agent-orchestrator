@@ -32,7 +32,8 @@ const (
 	MaxMessageBytes = 16 * 1024
 	// DefaultRateLimit plain messages per sender/target pair per DefaultRateWindow
 	// are delivered; later ones are held for a person.
-	DefaultRateLimit  = 10
+	DefaultRateLimit = 10
+	// DefaultRateWindow is the window DefaultRateLimit applies to.
 	DefaultRateWindow = 10 * time.Minute
 	// maxDeliveryAttempts bounds retries of a delivery that keeps erroring.
 	maxDeliveryAttempts = 5
@@ -507,7 +508,10 @@ func (s *Service) dispatchTarget(ctx context.Context, target domain.SessionID) {
 		return
 	}
 	lock, _ := m.targets.LoadOrStore(target, &sync.Mutex{})
-	mu := lock.(*sync.Mutex)
+	mu, ok := lock.(*sync.Mutex)
+	if !ok {
+		return
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	ctx = context.WithoutCancel(ctx)
