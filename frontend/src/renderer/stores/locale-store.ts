@@ -11,10 +11,12 @@ type LocaleState = {
 	setLocale: (locale: AppLocale) => Promise<void>;
 };
 
-async function applyLocale(locale: AppLocale): Promise<void> {
+async function applyLocale(locale: AppLocale, isCurrent: () => boolean = () => true): Promise<void> {
 	// Non-English catalogs are lazy chunks; load before switching so the first
 	// render in the new language is complete.
 	await loadLocaleCatalog(locale);
+	// A newer selection made while the catalog loaded owns i18n and the document.
+	if (!isCurrent()) return;
 	const changingLanguage = appI18n.changeLanguage(locale);
 	if (typeof document !== "undefined") {
 		document.documentElement.lang = documentLang(locale);
@@ -47,7 +49,7 @@ export const useLocaleStore = create<LocaleState>((set, get) => ({
 				// A missing bridge or unreadable setting must not prevent the UI from starting.
 			}
 			if (revisionAtStart !== localeRevision) return;
-			await applyLocale(locale);
+			await applyLocale(locale, () => revisionAtStart === localeRevision);
 			if (revisionAtStart === localeRevision) set({ locale, loaded: true });
 		})();
 		try {
@@ -62,7 +64,7 @@ export const useLocaleStore = create<LocaleState>((set, get) => ({
 		set({ saving: true, saveError: false });
 		try {
 			await aoBridge.uiSettings.set({ locale });
-			await applyLocale(locale);
+			await applyLocale(locale, () => revision === localeRevision);
 			if (revision === localeRevision) set({ locale, loaded: true, saving: false });
 		} catch {
 			if (revision === localeRevision) set({ saving: false, saveError: true });
