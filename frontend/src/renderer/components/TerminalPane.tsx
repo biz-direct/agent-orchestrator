@@ -2,6 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RotateCcw } from "lucide-react";
 import {
 	createContext,
+	lazy,
+	Suspense,
 	useCallback,
 	useContext,
 	useEffect,
@@ -42,7 +44,18 @@ import { useShellTerminals } from "../hooks/useShellTerminals";
 import { useCloudCp } from "../hooks/useCloudCp";
 import { terminalResetNonce, useTerminalResetStore } from "../stores/terminal-reset-store";
 import { createCloudTerminalMux } from "../lib/cloud-terminal-mux";
-import { XtermTerminal } from "./XtermTerminal";
+import { LazyChunkBoundary } from "./LazyChunkBoundary";
+
+// xterm and its WebGL addon (~700 KB) load on first terminal render instead of
+// with the shell: the shell imports TerminalCacheProvider from this module, so a
+// static import here put xterm on every route. preloadXtermTerminal() warms the
+// chunk in idle time once the daemon is up.
+const loadXtermTerminal = () => import("./XtermTerminal");
+const XtermTerminal = lazy(() => loadXtermTerminal().then((module) => ({ default: module.XtermTerminal })));
+
+export function preloadXtermTerminal(): void {
+	void loadXtermTerminal().catch(() => undefined);
+}
 import { RestoreUnavailableDialog } from "./RestoreUnavailableDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
@@ -1365,6 +1378,8 @@ function AttachedTerminal({
 			    content box, so FitAddon still measures it correctly and the absolute
 			    overlays (empty state, banner) keep covering the full padding box. */}
 			<div className="relative min-h-0 flex-1 pl-2">
+				<LazyChunkBoundary>
+				<Suspense fallback={null}>
 				<XtermTerminal
 					ariaLabel={terminalTarget?.kind === "shell" ? t("terminal.shellAria") : t("terminal.sessionAria")}
 					fontSize={fontSize}
@@ -1384,6 +1399,8 @@ function AttachedTerminal({
 					supportsCursorColorScheme={provider === "cursor"}
 					theme={theme}
 				/>
+				</Suspense>
+				</LazyChunkBoundary>
 				{(showEmptyState || booting) && (
 					<div className="terminal-surface absolute inset-0 grid place-items-center font-mono text-control">
 						{session ? (

@@ -7733,6 +7733,11 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersKillSessionRequest'
       responses:
         "200":
           content:
@@ -10434,6 +10439,58 @@ paths:
         paint
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/workspace/resolve:
+    get:
+      operationId: resolveSessionWorkspacePath
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Absolute or workspace-relative file path to classify.
+        in: query
+        name: path
+        required: true
+        schema:
+          description: Absolute or workspace-relative file path to classify.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePathResolutionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Classify a path as a workspace file, a session artifact, or neither
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/workspace/search:
     get:
       operationId: searchSessionWorkspaceFiles
@@ -12926,6 +12983,11 @@ components:
       - active
       - hasBattery
       type: object
+    ControllersKillSessionRequest:
+      properties:
+        deleteArtifacts:
+          type: boolean
+      type: object
     ControllersPromptSessionsResponse:
       properties:
         sessions:
@@ -13849,6 +13911,8 @@ components:
           type: string
         settings:
           $ref: '#/components/schemas/ConversationTurnSettingsPayload'
+        supportsExcerpts:
+          type: boolean
         threadState:
           $ref: '#/components/schemas/ConversationThreadStatePayload'
         title:
@@ -15238,6 +15302,8 @@ components:
       type: object
     KillSessionResponse:
       properties:
+        artifactsDeleted:
+          type: boolean
         cleanupPending:
           type: boolean
         freed:
@@ -20550,6 +20616,23 @@ components:
       - stale
       - refreshing
       - degraded
+      type: object
+    WorkspacePathResolutionResponse:
+      properties:
+        kind:
+          enum:
+          - workspace
+          - artifact
+          - outside
+          type: string
+        path:
+          type: string
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - kind
+      - path
       type: object
     WorkspaceRepo:
       properties:
