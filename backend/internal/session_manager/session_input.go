@@ -3,6 +3,7 @@ package sessionmanager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ const (
 	agentOperationRestore           agentOperationKind = "restore"
 	agentOperationRetire            agentOperationKind = "retire"
 	agentOperationReconcile         agentOperationKind = "reconcile"
+	agentOperationArtifactDelete    agentOperationKind = "artifact-delete"
 	agentOperationCrewRole          agentOperationKind = "crew_role"
 	agentOperationInterfaceRecovery agentOperationKind = "interface_recovery"
 )
@@ -139,6 +141,21 @@ func (m *Manager) beginAgentOperation(ctx context.Context, id domain.SessionID, 
 		m.endAgentOperation(id, kind)
 		return ctx.Err()
 	}
+}
+
+// WithSessionExclusive runs fn while holding the per-session operation guard
+// that restore, kill and switch take, so fn cannot interleave with a restore
+// that would make the session live mid-way. A concurrent operation makes it
+// fail with ErrSwitchInProgress rather than wait.
+func (m *Manager) WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error {
+	if err := m.beginAgentOperation(ctx, id, agentOperationArtifactDelete); err != nil {
+		if errors.Is(err, errAgentOperationInProgress) {
+			err = ErrSwitchInProgress
+		}
+		return fmt.Errorf("session %s: %w", id, err)
+	}
+	defer m.endAgentOperation(id, agentOperationArtifactDelete)
+	return fn(ctx)
 }
 
 // beginAgentOperations reserves every currently-unowned session before waiting

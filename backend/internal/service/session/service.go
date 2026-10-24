@@ -82,6 +82,7 @@ type commander interface {
 	ResumeAgentWithMode(ctx context.Context, id domain.SessionID) (sessionmanager.RestoreResult, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	RequestKill(ctx context.Context, id domain.SessionID) (sessionmanager.KillResult, error)
+	WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	WaitForMessageDeliveryReady(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string, attachment *ports.SpawnAttachment) error
@@ -863,6 +864,18 @@ type artifactDeleter interface {
 // Only the user's archive choice calls this; kill, cleanup and the reaper
 // never delete artifacts.
 func (s *Service) DeleteArtifacts(ctx context.Context, id domain.SessionID) error {
+	// Restore holds the same per-session guard, so the terminated check and the
+	// deletion see one generation: a restore cannot make the session live between
+	// them and have its new artifacts deleted.
+	if s.manager == nil {
+		return s.deleteArtifactsLocked(ctx, id)
+	}
+	return toAPIError(s.manager.WithSessionExclusive(ctx, id, func(ctx context.Context) error {
+		return s.deleteArtifactsLocked(ctx, id)
+	}))
+}
+
+func (s *Service) deleteArtifactsLocked(ctx context.Context, id domain.SessionID) error {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return toAPIError(err)

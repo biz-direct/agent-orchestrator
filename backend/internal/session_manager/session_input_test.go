@@ -189,3 +189,31 @@ func eventuallySessionInput(t *testing.T, timeout time.Duration, fn func() bool)
 	}
 	t.Fatal("condition was not met before timeout")
 }
+
+func TestWithSessionExclusiveBlocksRestoreStyleOperations(t *testing.T) {
+	m := newInputLeaseTestManager()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- m.WithSessionExclusive(context.Background(), "worker-1", func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	err := m.beginAgentOperation(context.Background(), "worker-1", agentOperationRestore)
+	if !errors.Is(err, errAgentOperationInProgress) {
+		t.Fatalf("restore-style operation during exclusive section: err = %v, want in-progress", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("exclusive section: %v", err)
+	}
+	if err := m.beginAgentOperation(context.Background(), "worker-1", agentOperationRestore); err != nil {
+		t.Fatalf("restore after exclusive section released: %v", err)
+	}
+	m.endAgentOperation("worker-1", agentOperationRestore)
+}

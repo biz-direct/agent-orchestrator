@@ -5795,6 +5795,9 @@ func (f *fakeStore) GetSessionCleanupFacts(_ context.Context, id domain.SessionI
 	rec, ok := f.cleanupFacts[id]
 	return rec, ok, nil
 }
+func (f *fakeCommander) WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error {
+	return fn(ctx)
+}
 func (f *fakeCommander) RequestKill(ctx context.Context, id domain.SessionID) (sessionmanager.KillResult, error) {
 	freed, err := f.Kill(ctx, id)
 	return sessionmanager.KillResult{Freed: freed}, err
