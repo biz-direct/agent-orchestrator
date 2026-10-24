@@ -145,14 +145,23 @@ func (m *Manager) beginAgentOperation(ctx context.Context, id domain.SessionID, 
 
 // WithSessionExclusive runs fn while holding the per-session operation guard
 // that restore, kill and switch take, so fn cannot interleave with a restore
-// that would make the session live mid-way. A concurrent operation makes it
-// fail with ErrSwitchInProgress rather than wait.
+// that would make the session live mid-way. While another operation owns the
+// guard (for example an archive's background workspace cleanup) it waits until
+// ctx ends, then fails with ErrSwitchInProgress.
 func (m *Manager) WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error {
-	if err := m.beginAgentOperation(ctx, id, agentOperationArtifactDelete); err != nil {
-		if errors.Is(err, errAgentOperationInProgress) {
-			err = ErrSwitchInProgress
+	for {
+		err := m.beginAgentOperation(ctx, id, agentOperationArtifactDelete)
+		if err == nil {
+			break
 		}
-		return fmt.Errorf("session %s: %w", id, err)
+		if !errors.Is(err, errAgentOperationInProgress) {
+			return fmt.Errorf("session %s: %w", id, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("session %s: %w", id, ErrSwitchInProgress)
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	defer m.endAgentOperation(id, agentOperationArtifactDelete)
 	return fn(ctx)

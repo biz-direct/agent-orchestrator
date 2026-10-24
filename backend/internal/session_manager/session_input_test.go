@@ -217,3 +217,37 @@ func TestWithSessionExclusiveBlocksRestoreStyleOperations(t *testing.T) {
 	}
 	m.endAgentOperation("worker-1", agentOperationRestore)
 }
+
+func TestWithSessionExclusiveWaitsForBackgroundOperation(t *testing.T) {
+	m := newInputLeaseTestManager()
+	if err := m.beginAgentOperation(context.Background(), "worker-1", agentOperationKill); err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- m.WithSessionExclusive(context.Background(), "worker-1", func(context.Context) error {
+			close(ran)
+			return nil
+		})
+	}()
+	select {
+	case <-ran:
+		t.Fatal("exclusive section ran while the kill's background cleanup owned the guard")
+	case <-time.After(150 * time.Millisecond):
+	}
+	m.endAgentOperation("worker-1", agentOperationKill)
+	if err := <-done; err != nil {
+		t.Fatalf("exclusive section after cleanup finished: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := m.beginAgentOperation(context.Background(), "worker-1", agentOperationKill); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WithSessionExclusive(ctx, "worker-1", func(context.Context) error { return nil }); !errors.Is(err, ErrSwitchInProgress) {
+		t.Fatalf("err = %v, want ErrSwitchInProgress after the wait ends", err)
+	}
+	m.endAgentOperation("worker-1", agentOperationKill)
+}
