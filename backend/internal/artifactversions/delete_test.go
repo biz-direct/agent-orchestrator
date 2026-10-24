@@ -1,9 +1,13 @@
 package artifactversions
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 func (h *harness) dataDir() string {
@@ -79,5 +83,32 @@ func TestDeleteSessionEmptiesLeftoverTrash(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(leftover)); !os.IsNotExist(err) {
 		t.Fatalf("leftover trash still present: %v", err)
+	}
+}
+
+type failingDeleteStore struct{ versionStore }
+
+func (failingDeleteStore) DeleteSessionArtifactVersions(context.Context, domain.SessionID) error {
+	return errors.New("db is locked")
+}
+
+func TestDeleteSessionRestoresFilesWhenDroppingVersionRowsFails(t *testing.T) {
+	h := newHarness(t)
+	h.write("report.html", "<h1>v1</h1>")
+	h.tick()
+	h.tick()
+	h.cap.store = failingDeleteStore{h.cap.store}
+
+	if err := h.cap.DeleteSession(h.ctx, h.sess.ID); err == nil {
+		t.Fatal("DeleteSession succeeded, want the store error")
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "report.html")); err != nil {
+		t.Fatalf("artifact not restored after a late failure: %v", err)
+	}
+	if vs := h.versions("report.html"); len(vs) != 1 {
+		t.Fatalf("versions after a failed delete = %d, want 1", len(vs))
+	}
+	if trash, _ := os.ReadDir(filepath.Join(h.dataDir(), trashDir)); len(trash) != 0 {
+		t.Fatalf("trash entries = %v, want the files moved back", trash)
 	}
 }

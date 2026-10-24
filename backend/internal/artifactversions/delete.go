@@ -55,6 +55,14 @@ func (c *Capturer) DeleteSession(ctx context.Context, id domain.SessionID) error
 		return fmt.Errorf("delete artifacts %s: recreate dir: %w", id, err)
 	}
 	if err := c.store.DeleteSessionArtifactVersions(ctx, id); err != nil {
+		// The files are still intact in the trash: put them back so a failed
+		// delete leaves the session exactly as it was, and the caller can
+		// truthfully report the artifacts as kept.
+		if moved != "" {
+			if restoreErr := c.restoreFromTrash(dir, moved); restoreErr != nil {
+				c.logger.Warn("delete artifacts: could not restore files after a failed delete", "session", id, "path", moved, "err", restoreErr)
+			}
+		}
 		return err
 	}
 	if moved != "" {
@@ -63,6 +71,15 @@ func (c *Capturer) DeleteSession(ctx context.Context, id domain.SessionID) error
 		}
 	}
 	return nil
+}
+
+// restoreFromTrash swaps the moved directory back over the empty one recreated
+// after the rename.
+func (c *Capturer) restoreFromTrash(dir, moved string) error {
+	if err := os.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return os.Rename(moved, dir)
 }
 
 // emptyTrash removes what earlier deletes could not.
