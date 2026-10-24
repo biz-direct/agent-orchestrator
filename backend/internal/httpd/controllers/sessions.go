@@ -1934,12 +1934,12 @@ func (c *SessionsController) kill(w http.ResponseWriter, r *http.Request) {
 	var generation int64
 	generationKnown := false
 	if in.DeleteArtifacts {
-		if g, err := c.Svc.CleanupGeneration(r.Context(), sessionID(r)); err != nil {
+		g, err := c.Svc.CleanupGeneration(r.Context(), sessionID(r))
+		if err != nil {
 			envelope.WriteError(w, r, err)
 			return
-		} else {
-			generation, generationKnown = g, true
 		}
+		generation, generationKnown = g, true
 	}
 	result, err := c.Svc.RequestKill(r.Context(), sessionID(r))
 	if err != nil {
