@@ -5927,3 +5927,31 @@ func TestDeleteArtifactsAcceptsTheCanonicalArtifactDir(t *testing.T) {
 		t.Fatalf("deleted = %v, want [mer-1]", deleter.deleted)
 	}
 }
+
+// restoringCommander simulates a restore landing while DeleteArtifacts waits
+// for the session guard: the cleanup generation moves before the callback runs.
+type restoringCommander struct {
+	*fakeCommander
+	st *fakeStore
+}
+
+func (c *restoringCommander) WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error {
+	rec := c.st.sessions[id]
+	rec.CleanupGeneration++
+	c.st.sessions[id] = rec
+	return fn(ctx)
+}
+
+func TestDeleteArtifactsSkipsASessionRestoredWhileWaitingForTheGuard(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true}
+	deleter := &fakeArtifactDeleter{}
+	svc := NewWithDeps(Deps{Manager: &restoringCommander{fakeCommander: &fakeCommander{}, st: st}, Store: st, DataDir: t.TempDir(), ArtifactDeleter: deleter})
+
+	if err := svc.DeleteArtifacts(context.Background(), "mer-1"); err == nil {
+		t.Fatal("expected the stale deletion to be refused")
+	}
+	if len(deleter.deleted) != 0 {
+		t.Fatalf("deleted = %v, want none after the session was restored", deleter.deleted)
+	}
+}

@@ -865,52 +865,44 @@ type artifactDeleter interface {
 // never delete artifacts.
 func (s *Service) DeleteArtifacts(ctx context.Context, id domain.SessionID) error {
 	if s.manager == nil {
-		return s.deleteArtifactsLocked(ctx, id)
+		return s.deleteArtifactsLocked(ctx, id, nil)
 	}
-	run := func(ctx context.Context) error {
-		return s.manager.WithSessionExclusive(ctx, id, func(ctx context.Context) error {
-			return s.deleteArtifactsLocked(ctx, id)
-		})
-	}
-	// Restore holds the same per-session guard, so the terminated check and the
-	// deletion see one generation. The archive's own background workspace
-	// cleanup holds it too; wait briefly, then finish the deletion in the
-	// background rather than dropping the user's choice.
-	waitCtx, cancel := context.WithTimeout(ctx, artifactDeleteInlineWait)
-	err := run(waitCtx)
-	cancel()
-	if !errors.Is(err, sessionmanager.ErrSwitchInProgress) {
-		return toAPIError(err)
-	}
-	go func() {
-		bg, cancel := context.WithTimeout(s.backgroundContext, artifactDeleteDeferredWait)
-		defer cancel()
-		if err := run(bg); err != nil && s.logger != nil {
-			s.logger.Warn("deferred artifact deletion after archive", "session", id, "err", err)
-		}
-	}()
-	return ErrArtifactDeletionDeferred
-}
-
-// artifactDeleteInlineWait bounds how long an archive request waits for the
-// session's operation guard before deferring the deletion to the background.
-const artifactDeleteInlineWait = 2 * time.Second
-
-// artifactDeleteDeferredWait bounds the background retry, sized to outlast a
-// slow PreRemove cleanup.
-const artifactDeleteDeferredWait = 10 * time.Minute
-
-// ErrArtifactDeletionDeferred reports that artifact deletion is still queued
-// behind another operation on the session and will finish in the background.
-var ErrArtifactDeletionDeferred = errors.New("artifact deletion deferred until the session's cleanup finishes")
-
-func (s *Service) deleteArtifactsLocked(ctx context.Context, id domain.SessionID) error {
+	// Bind the deletion to the archive that asked for it: restoring bumps the
+	// cleanup generation, so a restore (and a later re-archive that kept its
+	// files) that lands while we wait for the guard cancels this deletion.
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return toAPIError(err)
 	}
 	if !ok {
 		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	generation := rec.CleanupGeneration
+	// The same per-session guard serializes this with restore, so the
+	// terminated check and the deletion see one generation. The archive's own
+	// background workspace cleanup holds it until it finishes; wait for it so
+	// the response reports the real outcome.
+	waitCtx, cancel := context.WithTimeout(ctx, artifactDeleteWait)
+	defer cancel()
+	return toAPIError(s.manager.WithSessionExclusive(waitCtx, id, func(ctx context.Context) error {
+		return s.deleteArtifactsLocked(ctx, id, &generation)
+	}))
+}
+
+// artifactDeleteWait bounds how long an archive request waits for the
+// session's operation guard, sized to outlast a slow PreRemove cleanup.
+const artifactDeleteWait = 2 * time.Minute
+
+func (s *Service) deleteArtifactsLocked(ctx context.Context, id domain.SessionID, generation *int64) error {
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil {
+		return toAPIError(err)
+	}
+	if !ok {
+		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	if generation != nil && rec.CleanupGeneration != *generation {
+		return apierr.Conflict("SESSION_RESTORED", "The session was restored after the archive request; its artifacts were kept.", nil)
 	}
 	if !rec.IsTerminated {
 		return apierr.Conflict("SESSION_NOT_TERMINATED", "Archive the session before deleting its artifacts.", nil)
