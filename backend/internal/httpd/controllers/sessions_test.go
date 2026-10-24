@@ -489,7 +489,11 @@ func (f *fakeSessionService) Kill(_ context.Context, id domain.SessionID) (bool,
 	return true, nil
 }
 
-func (f *fakeSessionService) DeleteArtifacts(_ context.Context, id domain.SessionID) error {
+func (f *fakeSessionService) CleanupGeneration(context.Context, domain.SessionID) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeSessionService) DeleteArtifacts(_ context.Context, id domain.SessionID, _ int64) error {
 	if f.deleteArtifactsErr != nil {
 		return f.deleteArtifactsErr
 	}

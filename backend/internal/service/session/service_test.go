@@ -5851,7 +5851,7 @@ func TestDeleteArtifactsDeletesThroughTheDeleterAndReconciles(t *testing.T) {
 	reconciler := &fakeOutputTypeReconciler{}
 	svc := NewWithDeps(Deps{Store: st, DataDir: t.TempDir(), OutputTypeReconciler: reconciler, ArtifactDeleter: deleter})
 
-	if err := svc.DeleteArtifacts(context.Background(), "mer-1"); err != nil {
+	if err := svc.DeleteArtifacts(context.Background(), "mer-1", 0); err != nil {
 		t.Fatal(err)
 	}
 	if len(deleter.deleted) != 1 || deleter.deleted[0] != "mer-1" {
@@ -5869,7 +5869,7 @@ func TestDeleteArtifactsReconcilesAndReportsAFailedDelete(t *testing.T) {
 	reconciler := &fakeOutputTypeReconciler{}
 	svc := NewWithDeps(Deps{Store: st, DataDir: t.TempDir(), OutputTypeReconciler: reconciler, ArtifactDeleter: deleter})
 
-	if err := svc.DeleteArtifacts(context.Background(), "mer-1"); err == nil {
+	if err := svc.DeleteArtifacts(context.Background(), "mer-1", 0); err == nil {
 		t.Fatal("DeleteArtifacts succeeded, want the deleter's error")
 	}
 	if len(reconciler.reconciled) != 1 {
@@ -5883,7 +5883,7 @@ func TestDeleteArtifactsRefusesLiveSession(t *testing.T) {
 	deleter := &fakeArtifactDeleter{}
 	svc := NewWithDeps(Deps{Store: st, DataDir: t.TempDir(), ArtifactDeleter: deleter})
 
-	err := svc.DeleteArtifacts(context.Background(), "mer-1")
+	err := svc.DeleteArtifacts(context.Background(), "mer-1", 0)
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) || apiErr.Code != "SESSION_NOT_TERMINATED" {
 		t.Fatalf("err = %v, want SESSION_NOT_TERMINATED", err)
@@ -5902,7 +5902,7 @@ func TestDeleteArtifactsRefusesAnArtifactDirOutsideTheDataDir(t *testing.T) {
 	deleter := &fakeArtifactDeleter{}
 	svc := NewWithDeps(Deps{Store: st, DataDir: t.TempDir(), ArtifactDeleter: deleter})
 
-	if err := svc.DeleteArtifacts(context.Background(), "mer-1"); err == nil {
+	if err := svc.DeleteArtifacts(context.Background(), "mer-1", 0); err == nil {
 		t.Fatal("DeleteArtifacts succeeded, want a refusal")
 	}
 	if len(deleter.deleted) != 0 {
@@ -5920,7 +5920,7 @@ func TestDeleteArtifactsAcceptsTheCanonicalArtifactDir(t *testing.T) {
 	deleter := &fakeArtifactDeleter{}
 	svc := NewWithDeps(Deps{Store: st, DataDir: dataDir, ArtifactDeleter: deleter})
 
-	if err := svc.DeleteArtifacts(context.Background(), "mer-1"); err != nil {
+	if err := svc.DeleteArtifacts(context.Background(), "mer-1", 0); err != nil {
 		t.Fatal(err)
 	}
 	if len(deleter.deleted) != 1 {
@@ -5928,27 +5928,24 @@ func TestDeleteArtifactsAcceptsTheCanonicalArtifactDir(t *testing.T) {
 	}
 }
 
-// restoringCommander simulates a restore landing while DeleteArtifacts waits
-// for the session guard: the cleanup generation moves before the callback runs.
+// restoringCommander stands in for the manager guard; the session has been
+// restored (generation 3) since the archive read generation 2.
 type restoringCommander struct {
 	*fakeCommander
 	st *fakeStore
 }
 
 func (c *restoringCommander) WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error {
-	rec := c.st.sessions[id]
-	rec.CleanupGeneration++
-	c.st.sessions[id] = rec
 	return fn(ctx)
 }
 
-func TestDeleteArtifactsSkipsASessionRestoredWhileWaitingForTheGuard(t *testing.T) {
+func TestDeleteArtifactsRefusesAStaleArchiveGeneration(t *testing.T) {
 	st := newFakeStore()
-	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true}
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, IsTerminated: true, CleanupGeneration: 3}
 	deleter := &fakeArtifactDeleter{}
 	svc := NewWithDeps(Deps{Manager: &restoringCommander{fakeCommander: &fakeCommander{}, st: st}, Store: st, DataDir: t.TempDir(), ArtifactDeleter: deleter})
 
-	if err := svc.DeleteArtifacts(context.Background(), "mer-1"); err == nil {
+	if err := svc.DeleteArtifacts(context.Background(), "mer-1", 2); err == nil {
 		t.Fatal("expected the stale deletion to be refused")
 	}
 	if len(deleter.deleted) != 0 {

@@ -861,23 +861,13 @@ type artifactDeleter interface {
 // DeleteArtifacts deletes a terminated session's artifact files, version
 // history included, and its version rows, then reconciles its OutputType. The
 // directory itself is kept, so a restored session starts with an empty one.
-// Only the user's archive choice calls this; kill, cleanup and the reaper
+// expectedGeneration is the cleanup generation read before the archive; a
+// session restored since then keeps its files. Only the user's archive choice calls this; kill, cleanup and the reaper
 // never delete artifacts.
-func (s *Service) DeleteArtifacts(ctx context.Context, id domain.SessionID) error {
+func (s *Service) DeleteArtifacts(ctx context.Context, id domain.SessionID, expectedGeneration int64) error {
 	if s.manager == nil {
-		return s.deleteArtifactsLocked(ctx, id, nil)
+		return s.deleteArtifactsLocked(ctx, id, &expectedGeneration)
 	}
-	// Bind the deletion to the archive that asked for it: restoring bumps the
-	// cleanup generation, so a restore (and a later re-archive that kept its
-	// files) that lands while we wait for the guard cancels this deletion.
-	rec, ok, err := s.store.GetSession(ctx, id)
-	if err != nil {
-		return toAPIError(err)
-	}
-	if !ok {
-		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
-	}
-	generation := rec.CleanupGeneration
 	// The same per-session guard serializes this with restore, so the
 	// terminated check and the deletion see one generation. The archive's own
 	// background workspace cleanup holds it until it finishes; wait for it so
@@ -885,8 +875,24 @@ func (s *Service) DeleteArtifacts(ctx context.Context, id domain.SessionID) erro
 	waitCtx, cancel := context.WithTimeout(ctx, artifactDeleteWait)
 	defer cancel()
 	return toAPIError(s.manager.WithSessionExclusive(waitCtx, id, func(ctx context.Context) error {
-		return s.deleteArtifactsLocked(ctx, id, &generation)
+		return s.deleteArtifactsLocked(ctx, id, &expectedGeneration)
 	}))
+}
+
+// CleanupGeneration returns the session's current cleanup generation, which
+// restore advances. An archive that will delete artifacts reads it before the
+// kill and passes it to DeleteArtifacts, binding the deletion to that archive:
+// a restore in between (even followed by a keep-artifacts re-archive) makes
+// the stale deletion refuse.
+func (s *Service) CleanupGeneration(ctx context.Context, id domain.SessionID) (int64, error) {
+	rec, ok, err := s.store.GetSession(ctx, id)
+	if err != nil {
+		return 0, toAPIError(err)
+	}
+	if !ok {
+		return 0, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	return rec.CleanupGeneration, nil
 }
 
 // artifactDeleteWait bounds how long an archive request waits for the

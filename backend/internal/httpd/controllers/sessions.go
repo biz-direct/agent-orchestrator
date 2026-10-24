@@ -100,7 +100,8 @@ type SessionService interface {
 	ListAgentSwitches(ctx context.Context, id domain.SessionID) ([]domain.AgentSwitch, error)
 	SubmitAgentHandoff(ctx context.Context, id domain.SessionID, switchID domain.AgentSwitchID, sourceGenerationID domain.AgentGenerationID, handoff json.RawMessage) (domain.AgentSwitch, error)
 	RequestKill(ctx context.Context, id domain.SessionID) (sessionmanager.KillResult, error)
-	DeleteArtifacts(ctx context.Context, id domain.SessionID) error
+	DeleteArtifacts(ctx context.Context, id domain.SessionID, expectedGeneration int64) error
+	CleanupGeneration(ctx context.Context, id domain.SessionID) (int64, error)
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (sessionsvc.RollbackOutcome, error)
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
 	Rename(ctx context.Context, id domain.SessionID, displayName string) error
@@ -1928,6 +1929,18 @@ func (c *SessionsController) kill(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
+	// Read before the kill: the generation identifies the archive that asked
+	// for the deletion, so a restore that lands afterwards cannot lose files.
+	var generation int64
+	generationKnown := false
+	if in.DeleteArtifacts {
+		if g, err := c.Svc.CleanupGeneration(r.Context(), sessionID(r)); err != nil {
+			envelope.WriteError(w, r, err)
+			return
+		} else {
+			generation, generationKnown = g, true
+		}
+	}
 	result, err := c.Svc.RequestKill(r.Context(), sessionID(r))
 	if err != nil {
 		envelope.WriteError(w, r, err)
@@ -1937,8 +1950,8 @@ func (c *SessionsController) kill(w http.ResponseWriter, r *http.Request) {
 	// the request: the caller would roll back an archive that happened. The
 	// response reports it instead and the files stay on disk.
 	artifactsDeleted := false
-	if in.DeleteArtifacts {
-		if err := c.Svc.DeleteArtifacts(r.Context(), sessionID(r)); err != nil {
+	if in.DeleteArtifacts && generationKnown {
+		if err := c.Svc.DeleteArtifacts(r.Context(), sessionID(r), generation); err != nil {
 			slog.WarnContext(r.Context(), "delete session artifacts after archive", "session", sessionID(r), "err", err)
 		} else {
 			artifactsDeleted = true
