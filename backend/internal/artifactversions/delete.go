@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/sessionartifacts"
@@ -51,19 +52,27 @@ func (c *Capturer) DeleteSession(ctx context.Context, id domain.SessionID) error
 	}
 	delete(c.observed, id)
 	delete(c.swept, id)
+	// Past this point the files sit in the trash but the delete is not
+	// committed. Any failure puts them back; if that fails too, the copy is
+	// quarantined where no trash sweep touches it.
+	rollback := func(cause error) error {
+		if moved == "" {
+			return cause
+		}
+		if err := c.restoreFromTrash(dir, moved); err != nil {
+			kept := moved + keptSuffix
+			if renameErr := os.Rename(moved, kept); renameErr != nil {
+				kept = moved
+			}
+			c.logger.Warn("delete artifacts: could not restore files after a failed delete; copy kept for manual recovery", "session", id, "path", kept, "err", err)
+		}
+		return cause
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("delete artifacts %s: recreate dir: %w", id, err)
+		return rollback(fmt.Errorf("delete artifacts %s: recreate dir: %w", id, err))
 	}
 	if err := c.store.DeleteSessionArtifactVersions(ctx, id); err != nil {
-		// The files are still intact in the trash: put them back so a failed
-		// delete leaves the session exactly as it was, and the caller can
-		// truthfully report the artifacts as kept.
-		if moved != "" {
-			if restoreErr := c.restoreFromTrash(dir, moved); restoreErr != nil {
-				c.logger.Warn("delete artifacts: could not restore files after a failed delete", "session", id, "path", moved, "err", restoreErr)
-			}
-		}
-		return err
+		return rollback(err)
 	}
 	if moved != "" {
 		if err := os.RemoveAll(moved); err != nil {
@@ -72,6 +81,10 @@ func (c *Capturer) DeleteSession(ctx context.Context, id domain.SessionID) error
 	}
 	return nil
 }
+
+// keptSuffix marks a trash entry that failed to restore: emptyTrash leaves it
+// alone, since it may be the only copy of a session's artifacts.
+const keptSuffix = ".kept"
 
 // restoreFromTrash swaps the moved directory back over the empty one recreated
 // after the rename.
@@ -89,6 +102,9 @@ func (c *Capturer) emptyTrash(trash string) {
 		return
 	}
 	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), keptSuffix) {
+			continue
+		}
 		if err := os.RemoveAll(filepath.Join(trash, entry.Name())); err != nil {
 			c.logger.Debug("delete artifacts: trash entry still locked", "path", entry.Name(), "err", err)
 		}

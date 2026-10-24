@@ -112,3 +112,40 @@ func TestDeleteSessionRestoresFilesWhenDroppingVersionRowsFails(t *testing.T) {
 		t.Fatalf("trash entries = %v, want the files moved back", trash)
 	}
 }
+
+// blockingDeleteStore fails the row delete after leaving a file in the
+// recreated directory, which makes restoring the moved copy fail too.
+type blockingDeleteStore struct {
+	versionStore
+	dir string
+}
+
+func (s blockingDeleteStore) DeleteSessionArtifactVersions(context.Context, domain.SessionID) error {
+	_ = os.WriteFile(filepath.Join(s.dir, "late.txt"), []byte("x"), 0o600)
+	return errors.New("db is locked")
+}
+
+func TestDeleteSessionKeepsAnUnrestorableCopyOutOfTheTrashSweep(t *testing.T) {
+	h := newHarness(t)
+	h.write("report.html", "<h1>v1</h1>")
+	h.tick()
+	h.tick()
+	h.cap.store = blockingDeleteStore{versionStore: h.cap.store, dir: h.dir}
+
+	if err := h.cap.DeleteSession(h.ctx, h.sess.ID); err == nil {
+		t.Fatal("DeleteSession succeeded, want the store error")
+	}
+	// Another delete sweeps the trash; the quarantined copy must survive it.
+	h.cap.store = failingDeleteStore{h.cap.store.(blockingDeleteStore).versionStore}
+	_ = h.cap.DeleteSession(h.ctx, "other-session")
+	found := false
+	_ = filepath.WalkDir(filepath.Join(h.dataDir(), trashDir), func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.Name() == "report.html" {
+			found = true
+		}
+		return nil
+	})
+	if !found {
+		t.Fatal("the only copy of the artifacts was swept from the trash")
+	}
+}
