@@ -15,7 +15,7 @@
 - **Arch/Omarchy:** `chmod +x agent-orchestrator-linux-x64.AppImage && ./agent-orchestrator-linux-x64.AppImage` (needs `fuse2`; or run with `--appimage-extract-and-run`).
 
 ## Upstream sync
-`sync-upstream.yml` merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch and opens a **draft** PR into `main`. It never merges anything itself, even when the merge is clean. Needs secret `SYNC_PAT` (repo + workflow scopes). Its schedule is unchanged (see PR #63); run it from the Actions tab when you want a sync.
+`sync-upstream.yml` merges `OrchestratorInc/agent-orchestrator` main into a `sync/upstream-<sha>` branch and opens a **draft** PR into `main`. It never merges anything itself, even when the merge is clean. Needs secret `SYNC_PAT` (repo + workflow scopes). It runs only on manual dispatch (Actions → "Sync upstream" → Run workflow); there is no schedule.
 
 Per sync:
 1. **Draft PR + triage list.** The workflow opens the draft PR (conflicts are committed raw and listed in a "Conflict inventory"). One Pullfrog pass resolves any conflicts onto the branch and writes a triage list into the PR body: one `- [ ]` line per upstream PR/commit with area, one-line summary, risk flag and a recommendation (take / override / revert). Items already decided in [`FORK_DECISIONS.md`](../FORK_DECISIONS.md) are pre-filled and marked `decided:`. Anything touching the app name/bundle id, updater, signing, telemetry/analytics/network calls, or files covered by fork overrides carries a `FLAG:`. The pass ends by adding `<!-- sync-triage:done -->`; a later run re-dispatches Pullfrog only if that marker is missing (timeout or failure), so a sync costs one agent pass.
@@ -39,7 +39,7 @@ Automatic on the fork: PR/push CI that guards code quality, plus the fork's own 
 | cli-e2e.yml | PR (backend/test paths), push main | keep on ubuntu+macOS; Windows dropped; concurrency added | real CLI/daemon coverage |
 | build-artifacts.yml | dispatch, workflow_call | keep | fork builds (mac arm64, linux AppImage) |
 | fork-release.yml | dispatch, `v*` tag | keep | fork releases |
-| sync-upstream.yml | cron, dispatch | keep | opens the draft sync PR; never merges |
+| sync-upstream.yml | dispatch only | keep | opens the draft sync PR; never merges |
 | sync-upstream-gate.yml | Pullfrog run finishing | keep | opens an `agent-review` issue when the sync triage pass fails |
 | pr-review-leaderboard.yml | pull_request_target | gated off | upstream PR stats |
 | deploy-docs.yml | push main (docs), dispatch | gated off | upstream GitHub Pages |

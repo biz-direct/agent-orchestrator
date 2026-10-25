@@ -145,7 +145,17 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// A genuinely dead session — terminated, or its pane already exited to a
 	// shell — has nowhere to deliver any nudge, merge-conflict included, so
 	// return once the non-delivery re-arm above has run.
-	if rec.IsTerminated || rec.Activity.State == domain.ActivityExited {
+	// The delivery gates below look at whoever will actually receive the nudge:
+	// the baton holder's session when a role holds it, so a parked owner does not
+	// block automatic work a live role should do. sendOnce re-checks the target.
+	gate := rec
+	if target, deliver, err := m.batonNudgeTarget(ctx, id); err == nil && deliver && target != id {
+		if trec, ok, err := m.store.GetSession(ctx, target); err == nil && ok {
+			gate = trec
+		}
+	}
+	// A terminated task is never nudged, whatever its holder's state.
+	if rec.IsTerminated || gate.IsTerminated || gate.Activity.State == domain.ActivityExited {
 		return rearmErr
 	}
 	// cannotNudge's remaining condition, needs-input, defers CI-failure and
@@ -161,7 +171,7 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 	// prompt is a genuine idle composer rather than a masked permission decision
 	// (the urgentNudgeWaitingInputSafe gate) — so only a provably-idle needs-input
 	// prompt is pasted into unsolicited.
-	needsInput := rec.Activity.State.NeedsInput()
+	needsInput := gate.Activity.State.NeedsInput()
 	// A single PR can trip several actionable conditions at once (failing CI,
 	// unresolved review comments, a merge conflict). Queue every applicable nudge
 	// and send them together, so each surfaces independently instead of one
@@ -945,6 +955,16 @@ func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key,
 	if m.guard == nil {
 		return sendOnceAccounted, nil
 	}
+	// Automatic work for the task goes only to the crew's baton holder. A nudge
+	// held back is suppressed, not accounted, so it fires once the baton moves.
+	target, deliver, err := m.batonNudgeTarget(ctx, id)
+	if err != nil {
+		return sendOnceSuppressed, err
+	}
+	if !deliver {
+		return sendOnceSuppressed, nil
+	}
+	id = target
 	m.react.mu.Lock()
 	defer m.react.mu.Unlock()
 
@@ -1072,4 +1092,18 @@ func reactionKeyTargetsPR(key, prURL string) bool {
 	}
 	rest := parts[1]
 	return rest == prURL || strings.HasPrefix(rest, prURL+":")
+}
+
+// batonNudgeRouter is the optional store capability that resolves which session
+// holds the crew write baton for a task. Stores without it route to the worker.
+type batonNudgeRouter interface {
+	ResolveNudgeTarget(ctx context.Context, owner domain.SessionID) (domain.SessionID, bool, error)
+}
+
+func (m *Manager) batonNudgeTarget(ctx context.Context, id domain.SessionID) (domain.SessionID, bool, error) {
+	router, ok := m.store.(batonNudgeRouter)
+	if !ok {
+		return id, true, nil
+	}
+	return router.ResolveNudgeTarget(ctx, id)
 }

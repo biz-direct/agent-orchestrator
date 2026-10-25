@@ -313,6 +313,8 @@ func (m *Manager) crewRolePrompt(ctx context.Context, id domain.SessionID) (stri
 		}
 		fmt.Fprintf(&b, "- %s (session %s)\n", sibRole, sib)
 	}
+	b.WriteString("\n### Write baton\n\n")
+	b.WriteString(m.batonPromptSection(ctx, ownerID, role))
 	if instructions := strings.TrimSpace(rec.Metadata.Prompt); instructions != "" {
 		b.WriteString("\n### Your role instructions\n\n")
 		b.WriteString(instructions)
@@ -353,4 +355,29 @@ func (m *Manager) ReconnectCrewRoles(ctx context.Context) {
 		}
 		m.endAgentOperation(id, agentOperationReconcile)
 	}
+}
+
+// batonReader is the optional store capability that reports the crew's write
+// baton holder.
+type batonReader interface {
+	GetCrewBaton(ctx context.Context, owner domain.SessionID) (domain.BatonHolder, error)
+}
+
+// batonPromptSection tells a role whether it may write right now. Only one
+// party at a time holds the baton; the daemon sends a notice whenever it moves.
+func (m *Manager) batonPromptSection(ctx context.Context, owner domain.SessionID, role string) string {
+	const readOnly = "You are read-only: you may read files, run commands and tests, and discuss, but do not edit, create, or delete files, commit, or push."
+	reader, ok := m.store.(batonReader)
+	if !ok {
+		return readOnly + "\n"
+	}
+	holder, err := reader.GetCrewBaton(ctx, owner)
+	if err != nil {
+		// Fail closed: an unknown holder must not be treated as permission to write.
+		return readOnly + "\n"
+	}
+	if holder.Kind == domain.BatonHolderRole && holder.Role == role {
+		return "You currently hold the write baton: you may change code, commit, and push on the task's branch. Only one party holds it at a time; a notice arrives if it moves.\n"
+	}
+	return fmt.Sprintf("The write baton is held by %s. %s A notice arrives if the baton moves to you.\n", holder, readOnly)
 }

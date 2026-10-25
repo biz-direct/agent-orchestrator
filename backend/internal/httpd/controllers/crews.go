@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	crewssvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crews"
@@ -16,6 +17,10 @@ import (
 // OpenAPI-backed 501s.
 type CrewsController struct {
 	Mgr crewssvc.Manager
+	// Callers attributes a request to an AO session. Moving the write baton is
+	// the human override, so any request that provably comes from a session is
+	// refused.
+	Callers PipelineCallerAuthority
 }
 
 // Register mounts the crew routes on the supplied router.
@@ -26,6 +31,48 @@ func (c *CrewsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/crew/roles", c.listRoles)
 	r.Post("/sessions/{sessionId}/crew/roles", c.addRole)
 	r.Delete("/sessions/{sessionId}/crew/roles/{role}", c.removeRole)
+	r.Get("/sessions/{sessionId}/crew/baton", c.getBaton)
+	r.Put("/sessions/{sessionId}/crew/baton", c.moveBaton)
+}
+
+func (c *CrewsController) getBaton(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/crew/baton")
+		return
+	}
+	out, err := c.Mgr.GetBaton(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *CrewsController) moveBaton(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/crew/baton")
+		return
+	}
+	fromSession, err := c.Callers.SessionCaller(r)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if fromSession {
+		envelope.WriteError(w, r, apierr.Forbidden("CREW_BATON_HUMAN_ONLY", "Only a person can move the write baton; orchestrators and roles cannot"))
+		return
+	}
+	var in crewssvc.MoveBatonInput
+	if err := decodeJSONStrict(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	out, err := c.Mgr.MoveBaton(r.Context(), sessionID(r), in)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
 }
 
 // CrewRoleList is the body of GET /sessions/{sessionId}/crew/roles.
