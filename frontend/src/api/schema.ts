@@ -4365,9 +4365,6 @@ export interface components {
             hasBattery: boolean;
             supported: boolean;
         };
-        ControllersKillSessionRequest: {
-            deleteArtifacts?: boolean;
-        };
         ControllersPromptSessionsResponse: {
             sessions: components["schemas"]["SessionManagerPromptSession"][];
         };
@@ -5206,7 +5203,6 @@ export interface components {
             runs: components["schemas"]["ReviewRun"][];
         };
         KillSessionResponse: {
-            artifactsDeleted?: boolean;
             cleanupPending?: boolean;
             freed?: boolean;
             ok: boolean;
@@ -16901,11 +16897,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ControllersKillSessionRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

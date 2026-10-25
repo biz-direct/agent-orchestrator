@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +81,6 @@ type commander interface {
 	ResumeAgentWithMode(ctx context.Context, id domain.SessionID) (sessionmanager.RestoreResult, error)
 	Kill(ctx context.Context, id domain.SessionID) (bool, error)
 	RequestKill(ctx context.Context, id domain.SessionID) (sessionmanager.KillResult, error)
-	WithSessionExclusive(ctx context.Context, id domain.SessionID, fn func(context.Context) error) error
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	WaitForMessageDeliveryReady(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string, attachment *ports.SpawnAttachment) error
@@ -237,9 +235,6 @@ type Service struct {
 	// service tests that construct Service directly; ClaimPR degrades to
 	// relying on the poller in that case.
 	outputTypeReconciler outputTypeReconciler
-	// artifactDeleter deletes a session's artifact files and version rows. Nil
-	// makes DeleteArtifacts fail rather than delete outside the capture lock.
-	artifactDeleter artifactDeleter
 }
 
 // SetChatProviderPreserver wires the live Chat lifetime observation after both
@@ -284,9 +279,6 @@ type Deps struct {
 	// succeeds but the pr OutputType only lands on the next artifact-output
 	// poll tick.
 	OutputTypeReconciler outputTypeReconciler
-	// ArtifactDeleter deletes a session's artifacts; daemon wiring passes the
-	// shared *artifactversions.Capturer so a delete cannot race a capture.
-	ArtifactDeleter artifactDeleter
 }
 
 // NewWithDeps wires a session service with optional PR-claim dependencies.
@@ -295,7 +287,7 @@ func NewWithDeps(d Deps) *Service {
 	if backgroundContext == nil {
 		backgroundContext = context.Background()
 	}
-	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, tracker: d.Tracker, clock: d.Clock, dataDir: d.DataDir, signalCapable: d.SignalCapable, telemetry: d.Telemetry, logger: d.Logger, backgroundContext: backgroundContext, agentReadiness: d.AgentReadiness, githubIdentity: d.GithubIdentity, titleRefinementSlots: make(chan struct{}, delegatedTaskTitleConcurrency), titleRefinementCancels: map[domain.SessionID]context.CancelFunc{}, outputTypeReconciler: d.OutputTypeReconciler, artifactDeleter: d.ArtifactDeleter}
+	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, tracker: d.Tracker, clock: d.Clock, dataDir: d.DataDir, signalCapable: d.SignalCapable, telemetry: d.Telemetry, logger: d.Logger, backgroundContext: backgroundContext, agentReadiness: d.AgentReadiness, githubIdentity: d.GithubIdentity, titleRefinementSlots: make(chan struct{}, delegatedTaskTitleConcurrency), titleRefinementCancels: map[domain.SessionID]context.CancelFunc{}, outputTypeReconciler: d.OutputTypeReconciler}
 	if s.prClaimer == nil {
 		if w, ok := d.Store.(ports.PRClaimer); ok {
 			s.prClaimer = w
@@ -850,87 +842,6 @@ func (s *Service) RequestKill(ctx context.Context, id domain.SessionID) (session
 	s.cancelTitleRefinement(id)
 	result, err := s.manager.RequestKill(ctx, id)
 	return result, toAPIError(err)
-}
-
-// artifactDeleter deletes a session's artifact files and version rows. The
-// production implementation is *artifactversions.Capturer.
-type artifactDeleter interface {
-	DeleteSession(ctx context.Context, id domain.SessionID) error
-}
-
-// DeleteArtifacts deletes a terminated session's artifact files, version
-// history included, and its version rows, then reconciles its OutputType. The
-// directory itself is kept, so a restored session starts with an empty one.
-// expectedGeneration is the cleanup generation read before the archive; a
-// session restored since then keeps its files. Only the user's archive choice calls this; kill, cleanup and the reaper
-// never delete artifacts.
-func (s *Service) DeleteArtifacts(ctx context.Context, id domain.SessionID, expectedGeneration int64) error {
-	if s.manager == nil {
-		return s.deleteArtifactsLocked(ctx, id, &expectedGeneration)
-	}
-	// The same per-session guard serializes this with restore, so the
-	// terminated check and the deletion see one generation. The archive's own
-	// background workspace cleanup holds it until it finishes; wait for it so
-	// the response reports the real outcome.
-	waitCtx, cancel := context.WithTimeout(ctx, artifactDeleteWait)
-	defer cancel()
-	return toAPIError(s.manager.WithSessionExclusive(waitCtx, id, func(ctx context.Context) error {
-		return s.deleteArtifactsLocked(ctx, id, &expectedGeneration)
-	}))
-}
-
-// CleanupGeneration returns the session's current cleanup generation, which
-// restore advances. An archive that will delete artifacts reads it before the
-// kill and passes it to DeleteArtifacts, binding the deletion to that archive:
-// a restore in between (even followed by a keep-artifacts re-archive) makes
-// the stale deletion refuse.
-func (s *Service) CleanupGeneration(ctx context.Context, id domain.SessionID) (int64, error) {
-	rec, ok, err := s.store.GetSession(ctx, id)
-	if err != nil {
-		return 0, toAPIError(err)
-	}
-	if !ok {
-		return 0, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
-	}
-	return rec.CleanupGeneration, nil
-}
-
-// artifactDeleteWait bounds how long an archive request waits for the
-// session's operation guard, sized to outlast a slow PreRemove cleanup.
-const artifactDeleteWait = 2 * time.Minute
-
-func (s *Service) deleteArtifactsLocked(ctx context.Context, id domain.SessionID, generation *int64) error {
-	rec, ok, err := s.store.GetSession(ctx, id)
-	if err != nil {
-		return toAPIError(err)
-	}
-	if !ok {
-		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
-	}
-	if generation != nil && rec.CleanupGeneration != *generation {
-		return apierr.Conflict("SESSION_RESTORED", "The session was restored after the archive request; its artifacts were kept.", nil)
-	}
-	if !rec.IsTerminated {
-		return apierr.Conflict("SESSION_NOT_TERMINATED", "Archive the session before deleting its artifacts.", nil)
-	}
-	if s.artifactDeleter == nil {
-		return fmt.Errorf("delete artifacts %s: no artifact deleter", id)
-	}
-	// The deleter only touches <dataDir>/artifacts/<id>. A row whose files live
-	// elsewhere (written under another data dir) is refused rather than
-	// reported deleted while its files stay where the UI reads them.
-	if stored := rec.Metadata.ArtifactDir; stored != "" && filepath.Clean(stored) != sessionartifacts.Dir(s.dataDir, id) {
-		return fmt.Errorf("delete artifacts %s: artifact dir %q is outside the data dir", id, stored)
-	}
-	err = s.artifactDeleter.DeleteSession(ctx, id)
-	// Reconcile even after a failure: the files may already be gone while the
-	// version rows were not dropped, and OutputType must follow what is on disk.
-	if s.outputTypeReconciler != nil {
-		if reconcileErr := s.outputTypeReconciler.ReconcileSessionOutputType(ctx, id); reconcileErr != nil && s.logger != nil {
-			s.logger.Warn("reconcile output type after deleting artifacts", "session", id, "err", reconcileErr)
-		}
-	}
-	return err
 }
 
 // RollbackSpawn deletes a seed-state session row, or falls back to a Kill if

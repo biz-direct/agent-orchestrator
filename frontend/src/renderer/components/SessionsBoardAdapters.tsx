@@ -38,7 +38,7 @@ import {
 import { cn } from "../lib/utils";
 import { AgentAvatar } from "./AgentAvatar";
 import { ProductExternalLink } from "./ProductExternalLink";
-import { SessionArchiveDialog, type SessionArchiveChoice } from "./SessionArchiveDialog";
+import { SessionArchiveDialog } from "./SessionArchiveDialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function toBoardSessionPresentation(
@@ -114,7 +114,7 @@ export function BoardSessionCardAdapter({
 	onOpen: () => void;
 	/** Opens the session with this artifact (by path) shown in the inspector. */
 	onOpenArtifact?: (path: string) => void;
-	onTerminate?: (choice: SessionArchiveChoice) => void;
+	onTerminate?: () => void;
 	session: WorkspaceSession;
 	usage?: SessionUsageSummary;
 }) {
@@ -192,7 +192,7 @@ function DesktopSessionCard({
 	memoryTone?: ChipTone;
 	onOpen?: () => void;
 	onOpenArtifact?: (path: string) => void;
-	onTerminate?: (choice: SessionArchiveChoice) => void;
+	onTerminate?: () => void;
 	session: WorkspaceSession;
 	usage?: SessionUsageSummary;
 }) {
@@ -215,9 +215,9 @@ function DesktopSessionCard({
 			<TooltipTrigger asChild>
 				<span className="inline-flex">
 					<SessionArchiveDialog
-						onConfirm={(choice) => {
+						onConfirm={() => {
 							setConfirmOpen(false);
-							onTerminate(choice);
+							onTerminate();
 						}}
 						onOpenChange={setConfirmOpen}
 						open={confirmOpen}

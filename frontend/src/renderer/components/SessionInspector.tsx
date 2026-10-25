@@ -91,7 +91,7 @@ import { useUiStore } from "../stores/ui-store";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { SessionArchiveDialog, type SessionArchiveChoice } from "./SessionArchiveDialog";
+import { SessionArchiveDialog } from "./SessionArchiveDialog";
 import { ReviewerSelect } from "./ReviewerSelect";
 import { agentLabel } from "../lib/agent-options";
 import { useAgentReadinessQuery, useEnsureAgentReadiness } from "../hooks/useAgentReadinessQuery";
@@ -1315,13 +1315,13 @@ function SessionControls({ session, hostId }: { session: WorkspaceSession; hostI
 	const canTerminateNow = session.status === "merged";
 	const isStandaloneSession = session.workspaceId === STANDALONE_WORKSPACE_ID;
 
-	const confirmTermination = ({ deleteArtifacts }: SessionArchiveChoice) => {
+	const confirmTermination = () => {
 		const workspaces = queryClient.getQueryData<WorkspaceSummary[]>(workspaceKey) ?? [];
 		const workspace = workspaces.find((w) => w.id === session.workspaceId);
 		const nextNav = resolveNextNavigationAfterSessionKill(workspace, session.id);
 		
 		setConfirmOpen(false);
-		terminate.mutate(hostId ? { ...session, hostId, deleteArtifacts } : { ...session, deleteArtifacts });
+		terminate.mutate(hostId ? { ...session, hostId } : session);
 		
 		if (nextNav.target === "session") {
 			void navigate(sessionNavigateTarget(session.workspaceId, nextNav.sessionId, hostId));

@@ -7733,11 +7733,6 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ControllersKillSessionRequest'
       responses:
         "200":
           content:
@@ -12983,11 +12978,6 @@ components:
       - active
       - hasBattery
       type: object
-    ControllersKillSessionRequest:
-      properties:
-        deleteArtifacts:
-          type: boolean
-      type: object
     ControllersPromptSessionsResponse:
       properties:
         sessions:
@@ -15302,8 +15292,6 @@ components:
       type: object
     KillSessionResponse:
       properties:
-        artifactsDeleted:
-          type: boolean
         cleanupPending:
           type: boolean
         freed:
