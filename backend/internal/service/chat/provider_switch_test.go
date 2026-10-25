@@ -688,4 +688,10 @@ func TestProviderSwitchHonorsTheHarnessInstallerLease(t *testing.T) {
 	if after != starts {
 		t.Fatal("a target provider started while the installer held its lease")
 	}
+
+	// Once the installer lets go, the source takes messages and the switch retries.
+	h.svc.SetHarnessUse(func(domain.AgentHarness) (func(), error) { return func() {}, nil })
+	if err := h.svc.SwitchProvider(ctx, testSession, domain.ProviderSwitchRequest{TargetHarness: domain.HarnessClaudeCode, IdempotencyKey: "leased-retry"}); err != nil {
+		t.Fatalf("retry after the installer finished: %v", err)
+	}
 }

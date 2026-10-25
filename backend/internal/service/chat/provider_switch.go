@@ -241,8 +241,16 @@ func (s *Service) switchProvider(ctx context.Context, id domain.SessionID, reque
 	if err := source.BeginIdleBranchHandoff(ctx); err != nil {
 		return &domain.ProviderSwitchError{Kind: domain.ProviderSwitchRefusalBusy, Detail: err.Error(), Cause: err}
 	}
+	abortSource := true
+	defer func() {
+		if abortSource {
+			source.AbortHandoff()
+		}
+	}()
+
 	// An installer must not replace the target's (or, on rollback, the source's)
 	// executable while this switch launches it; both leases are held until return.
+	// They come after the abort defer, so a refusal reopens the source's intake.
 	releaseTargetUse, err := s.beginHarnessUse(request.TargetHarness)
 	if err != nil {
 		return err
@@ -253,13 +261,6 @@ func (s *Service) switchProvider(ctx context.Context, id domain.SessionID, reque
 		return err
 	}
 	defer releaseSourceUse()
-	abortSource := true
-	defer func() {
-		if abortSource {
-			source.AbortHandoff()
-		}
-	}()
-
 	startCfg, sourceDriver, err := s.branchLaunchConfig(source)
 	if err != nil {
 		return &domain.ProviderSwitchError{Kind: domain.ProviderSwitchRefusalRecoveryRequired, Detail: "source launch configuration is unavailable", Cause: err}
