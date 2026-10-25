@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -33,10 +34,23 @@ var aggregatedEventNames = []string{
 	"ao.daemon.panic",
 }
 
+// telemetryHTTPClient lets tests intercept the PostHog transport; nil uses the
+// sink's default client.
+var telemetryHTTPClient interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 // newTelemetrySink also returns the live telemetry identity (nil when the data
 // dir is unknown), shared with the remote sink so a sign-in or opt-out seen by
 // the identity routes is what the exporter stamps and honors.
 func newTelemetrySink(cfg config.Config, store *sqlite.Store, log *slog.Logger) (ports.EventSink, ports.TelemetryIdentityStore) {
+	return newGatedTelemetrySink(cfg, store, log, nil)
+}
+
+// newGatedTelemetrySink is newTelemetrySink with an extra veto on the remote
+// chain: while allowed reports false nothing is exported, including a stored
+// daily summary that shutdown would otherwise flush. nil means no extra veto.
+func newGatedTelemetrySink(cfg config.Config, store *sqlite.Store, log *slog.Logger, allowed func() bool) (ports.EventSink, ports.TelemetryIdentityStore) {
 	if !cfg.Telemetry.Events {
 		return telemetryadapter.NoopSink{}, standaloneIdentity(cfg, log)
 	}
@@ -45,7 +59,7 @@ func newTelemetrySink(cfg config.Config, store *sqlite.Store, log *slog.Logger) 
 		return local, standaloneIdentity(cfg, log)
 	}
 	remote, err := telemetryadapter.NewPostHogSink(cfg.DataDir, cfg.Telemetry.PostHogKey, cfg.Telemetry.PostHogHost,
-		cfg.Telemetry.AppVersion, cfg.Agent, nil, log)
+		cfg.Telemetry.AppVersion, cfg.Agent, telemetryHTTPClient, log)
 	if err != nil {
 		log.Warn("telemetry remote sink disabled", "remote", cfg.Telemetry.Remote, "error", err)
 		return local, standaloneIdentity(cfg, log)
@@ -57,6 +71,12 @@ func newTelemetrySink(cfg config.Config, store *sqlite.Store, log *slog.Logger) 
 	// applies the generous tier to those same names as a structural backstop
 	// rather than the primary cost control, and still does the real limiting
 	// job for every event name that isn't aggregated.
+	// The persisted consent policy vetoes at the exporter itself, so buffered
+	// rollups, a stored daily summary flushed on shutdown and already-queued
+	// events cannot leave after consent is off.
+	if allowed != nil {
+		remote.SetExportAllowed(allowed)
+	}
 	rateLimited := telemetryadapter.NewRateLimitedSink(remote, aggregatedEventNames)
 	// CLI usage is already one event per command path and error kind. The
 	// minute cap would drop most of that daily burst. The day cap stays.
@@ -69,7 +89,9 @@ func newTelemetrySink(cfg config.Config, store *sqlite.Store, log *slog.Logger) 
 	remote.Identity().OnInstallRetired(daily.Discard)
 	// Opt-out is enforced ahead of aggregation: events folded into a rollup
 	// while opted out could flush after an opt back in.
-	gated := telemetryadapter.NewOptOutSink(daily, remote.Identity().ExportSuppressed)
+	gated := telemetryadapter.NewOptOutSink(daily, func() bool {
+		return remote.Identity().ExportSuppressed() || (allowed != nil && !allowed())
+	})
 	// The kill switch sits outermost on the remote chain so a silenced stream
 	// costs nothing downstream: no aggregation window, no rate-limit slot, no
 	// export. Local storage is unaffected, so silenced events stay debuggable.

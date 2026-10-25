@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -174,5 +175,50 @@ func TestPolicyGatedSinkFollowsThePersistedConsent(t *testing.T) {
 	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
 	if inner.events != 1 {
 		t.Fatal("a revoked consent kept exporting")
+	}
+}
+
+// Persisted consent is enforced where telemetry leaves the process: a stored
+// daily summary from an earlier run must not be flushed at shutdown while the
+// policy says no, and is exported once consent is on (so the seed is real).
+func TestGatedTelemetrySinkDoesNotFlushStoredSummaryWithoutConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed bool
+		want    int
+	}{{"consent off", false, 0}, {"consent on", true, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dataDir, "telemetry"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			stored := `{"day":"2026-01-01","counts":{"ao session\u0000usage":2},"sent":false}`
+			if err := os.WriteFile(filepath.Join(dataDir, "telemetry", "cli-usage-daily.json"), []byte(stored), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var requests atomic.Int32
+			telemetryHTTPClient = wiringTestRoundTripper(func(req *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+			})
+			t.Cleanup(func() { telemetryHTTPClient = nil })
+
+			cfg := config.Config{DataDir: dataDir, Telemetry: config.TelemetryConfig{
+				Events: true, EventsExplicit: true, Remote: config.TelemetryRemotePostHog,
+				PostHogKey: "phc_test", PostHogHost: "https://us.i.posthog.com",
+			}}
+			store, err := sqlitetest.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			sink, _ := newGatedTelemetrySink(cfg, store, slog.New(slog.DiscardHandler), func() bool { return tc.allowed })
+			if err := sink.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := int(requests.Load()); got != tc.want {
+				t.Fatalf("PostHog requests = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

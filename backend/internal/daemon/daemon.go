@@ -219,11 +219,12 @@ func Run(buildVersion string) error {
 	telemetryPolicy := policyauthority.New(filepath.Join(cfg.DataDir, policyauthority.FileName))
 	eventsAllowed := telemetryPolicy.EventsAllowed(context.Background(), cfg.Telemetry.Events, cfg.Telemetry.EventsExplicit)
 	sentryobs.SetPolicyEnabled(eventsAllowed)
-	telemetrySink, telemetryIdentity := newTelemetrySink(cfg, store, log)
 	// FORK: the persisted consent policy also vetoes product events, not just
-	// Sentry; a saved opt-out (or a legacy or unreadable record) wins over the env.
+	// Sentry; a saved opt-out (or a legacy or unreadable record) wins over the env,
+	// at intake and at the export boundary (stored summaries flushed on shutdown).
 	var productEventsAllowed atomic.Bool
 	productEventsAllowed.Store(eventsAllowed)
+	telemetrySink, telemetryIdentity := newGatedTelemetrySink(cfg, store, log, productEventsAllowed.Load)
 	telemetrySink = policyGatedSink(telemetrySink, &productEventsAllowed)
 	defer func() { _ = telemetrySink.Close(context.Background()) }()
 	installID := ""

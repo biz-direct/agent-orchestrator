@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -273,6 +274,9 @@ type PostHogSink struct {
 	// long HTTP timeout.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// exportAllowed is an optional extra consent veto; see SetExportAllowed.
+	exportAllowed atomic.Pointer[func() bool]
 }
 
 // NewPostHogSink starts a buffered PostHog exporter with a stable install ID.
@@ -313,7 +317,27 @@ func NewPostHogSink(dataDir, apiKey, host, appVersion, defaultAgent string, clie
 func (s *PostHogSink) Identity() *Identity { return s.ident }
 
 // suppressed reports an opt-out or an unpersistable identity: nothing is exported.
-func (s *PostHogSink) suppressed() bool { return s.ident != nil && s.ident.ExportSuppressed() }
+func (s *PostHogSink) suppressed() bool {
+	if s.ident != nil && s.ident.ExportSuppressed() {
+		return true
+	}
+	if gate := s.exportAllowed.Load(); gate != nil {
+		return !(*gate)()
+	}
+	return false
+}
+
+// SetExportAllowed adds a second, independent veto checked at intake and
+// immediately before every send, so events already queued (and rollups or stored
+// summaries flushed at shutdown) stop the moment it reports false. The shared
+// opt-out marker keeps working alongside it.
+func (s *PostHogSink) SetExportAllowed(allowed func() bool) {
+	if allowed == nil {
+		s.exportAllowed.Store(nil)
+		return
+	}
+	s.exportAllowed.Store(&allowed)
+}
 
 // Emit enqueues an event for best-effort export. An opted-out install exports
 // nothing, so the stream stops the moment the user flips the switch.
