@@ -28,6 +28,7 @@ type ConfirmDialogProps = {
 	cancelLabel?: string;
 	destructive?: boolean;
 	busy?: boolean;
+	confirmDisabled?: boolean;
 	error?: string | null;
 	onConfirm: () => void;
 	onOpenChange: (open: boolean) => void;
@@ -46,6 +47,7 @@ export function ConfirmDialog({
 	cancelLabel,
 	destructive,
 	busy,
+	confirmDisabled,
 	error,
 	onConfirm,
 	onOpenChange,
@@ -121,7 +123,7 @@ export function ConfirmDialog({
 						type="button"
 						variant="footer-primary"
 						className={cn(compactButtonClass, destructive && "bg-danger-strong hover:bg-danger-strong")}
-						disabled={busy}
+						disabled={busy || confirmDisabled}
 						onClick={onConfirm}
 					>
 						{confirmLabel}

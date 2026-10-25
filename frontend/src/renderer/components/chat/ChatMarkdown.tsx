@@ -37,11 +37,11 @@ import {
 	type MouseEvent as ReactMouseEvent,
 	type ReactNode,
 } from "react";
-import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
+import Markdown, { defaultUrlTransform, type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WrapText } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { isLoopbackHostname } from "../../lib/loopback";
+import { isHostLocalWebLink } from "../../lib/loopback";
 import { canonicalLanguage } from "../../lib/code-highlight";
 import { fenceOf } from "../../lib/markdown-fence";
 import { EMOJI_GRAPHEME, rehypeStreamFade } from "../../lib/rehype-stream-fade";
@@ -85,6 +85,7 @@ export const ActivityTitle = memo(function ActivityTitle({ text }: { text: strin
 });
 
 /** GitHub-flavoured markdown: tables, strikethrough, task lists, autolinks. */
+<<<<<<< HEAD
 const PLUGINS = [remarkGfm, remarkSessionLinks, remarkFileReferences];
 
 /** Marks a link the file-reference plugin made from plain text, not one the agent wrote. */
@@ -140,6 +141,9 @@ function visitFileReferences(node: MarkdownNode): void {
 	}
 }
 const STREAMING_REHYPE = [rehypeStreamFade];
+=======
+const PLUGINS = [remarkGfm, remarkSessionLinks];
+>>>>>>> upstream/main
 // Reduced motion gets plain text, not a span per character that never animates.
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 // How long a settled reply keeps its fade spans, so the last characters (and the final
@@ -207,18 +211,6 @@ export function ChatLinkProvider({
 	return <OpenChatLink.Provider value={value}>{children}</OpenChatLink.Provider>;
 }
 
-function isHostLocalWebLink(href: string): boolean {
-	try {
-		// react-markdown percent-encodes IPv6 brackets in href/src attributes.
-		const url = new URL(href.replace(/%5B|%5D/gi, (bracket) => decodeURIComponent(bracket)));
-		if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-		const host = url.hostname.replace(/\.$/, "");
-		return isLoopbackHostname(host) || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host) || host === "0.0.0.0" || host === "[::]";
-	} catch {
-		return false;
-	}
-}
-
 function chatUrlTransform(url: string, key: string): string | undefined {
 	// react-markdown correctly strips unknown schemes, but a Windows absolute
 	// path resembles one (C:). Preserve only hrefs that look like local paths;
@@ -227,6 +219,12 @@ function chatUrlTransform(url: string, key: string): string | undefined {
 	if (key === "href" && isPotentialWorkspaceFileLink(url)) return url;
 	return defaultUrlTransform(url);
 }
+
+/**
+ * True while the surrounding chat is rendering its first commit. A stable ref,
+ * not a value, so ending the opening never re-renders every reply.
+ */
+export const ChatOpeningRef = createContext<{ readonly current: boolean }>({ current: false });
 
 export const ChatMarkdown = memo(function ChatMarkdown({
 	text,
@@ -250,6 +248,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 	// beat past the end of the stream.
 	const [fading, setFading] = useState(streaming);
 	if (streaming && !fading) setFading(true);
+	// A reply already on screen when its chat opens (switching to a chat
+	// mid-stream) is not new; only characters that arrive afterwards fade in. A
+	// reply that arrives later fades from its first character.
+	const chatOpening = useContext(ChatOpeningRef);
+	const [settledOffset] = useState(() => (chatOpening.current ? text.length : 0));
+	const streamingRehype = useMemo<Options["rehypePlugins"]>(() => [[rehypeStreamFade, { settledOffset }]], [settledOffset]);
 	useEffect(() => {
 		if (streaming) return;
 		const timer = setTimeout(() => setFading(false), FADE_SHED_MS);
@@ -268,7 +272,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 			>
 				<Markdown
 					remarkPlugins={PLUGINS}
-					rehypePlugins={fading && !prefersReducedMotion() ? STREAMING_REHYPE : undefined}
+					rehypePlugins={fading && !prefersReducedMotion() ? streamingRehype : undefined}
 					components={COMPONENTS}
 					urlTransform={chatUrlTransform}
 				>
@@ -372,7 +376,11 @@ function compactEmoji(children: ReactNode): ReactNode {
 	return children;
 }
 
+<<<<<<< HEAD
 function MarkdownLink({ href, children, ...props }: { href?: string; children?: ReactNode; [FILE_REFERENCE_ATTRIBUTE]?: string }) {
+=======
+function MarkdownLink({ href, children, className }: { href?: string; children?: ReactNode; className?: string }) {
+>>>>>>> upstream/main
 	const safeOriginContent = useContext(SafeOriginContent);
 	const { open: onLinkOpen, openFile: onFileOpen, openSession: onSessionLinkOpen, remoteHost, sessionLinkHostId, sessionLinkSourceKind, workspacePaths, fileCatalog } = useContext(OpenChatLink);
 	const fileReference = props[FILE_REFERENCE_ATTRIBUTE] !== undefined;
@@ -429,7 +437,7 @@ function MarkdownLink({ href, children, ...props }: { href?: string; children?: 
 			}}
 			target="_blank"
 			rel="noreferrer noopener"
-			className="text-markdown-link underline decoration-markdown-link/45 underline-offset-2 transition-colors hover:text-markdown-link-hover hover:decoration-markdown-link-hover/75"
+			className={className ?? "text-markdown-link underline decoration-markdown-link/45 underline-offset-2 transition-colors hover:text-markdown-link-hover hover:decoration-markdown-link-hover/75"}
 		>
 			<ChatImageLinkScope>
 				<InsideMarkdownLink.Provider value>{children}</InsideMarkdownLink.Provider>
@@ -439,8 +447,8 @@ function MarkdownLink({ href, children, ...props }: { href?: string; children?: 
 }
 
 /** Render one safe in-app session or artifact link using the surrounding ChatLinkProvider. */
-export function SessionLabelLink({ href, children }: { href: string; children: ReactNode }) {
-	return <MarkdownLink href={href}>{children}</MarkdownLink>;
+export function SessionLabelLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
+	return <MarkdownLink href={href} className={className}>{children}</MarkdownLink>;
 }
 
 function MarkdownImage({ src, alt }: { src?: string | Blob; alt?: string }) {
@@ -560,10 +568,15 @@ function MermaidFence({ code }: { code: string }) {
 		: diagram;
 }
 
-/** Inline code naming a listed session artifact, linked to that artifact. */
-function ArtifactPathCode({ text, children }: { text: string; children: ReactNode }) {
+/** The workspaces this chat's session links resolve against: the local daemon's, a remote host's, or Cloud's. */
+export function useChatLinkWorkspaces() {
 	const { sessionLinkHostId, sessionLinkSourceKind } = useContext(OpenChatLink);
-	const { workspaces } = useSessionLinkSource(sessionLinkHostId, sessionLinkSourceKind);
+	return useSessionLinkSource(sessionLinkHostId, sessionLinkSourceKind).workspaces;
+}
+
+/** Inline code naming a listed session artifact, linked to that artifact. */
+export function ArtifactPathCode({ text, children }: { text: string; children: ReactNode }) {
+	const workspaces = useChatLinkWorkspaces();
 	const href = artifactLinkForPath(text, workspaces);
 	return href ? <MarkdownLink href={href}>{children}</MarkdownLink> : <>{children}</>;
 }

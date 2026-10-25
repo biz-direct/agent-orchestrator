@@ -233,7 +233,7 @@ describe("ArtifactsView", () => {
 		expect(mocks.post).toHaveBeenCalledWith("/api/v1/sessions", {
 			body: { kind: "worker", requestedOutput: "artifact", pipeline: { mode: "normal_worker" }, displayName: "New artifact", harness: "codex" },
 		});
-		expect(mocks.capture).toHaveBeenCalledWith("ao.renderer.artifact_create_requested", { scope: "standalone" });
+		expect(mocks.capture).not.toHaveBeenCalledWith("ao.renderer.artifact_create_requested", expect.anything());
 		expect(mocks.capture).toHaveBeenCalledWith("ao.renderer.artifact_create_succeeded", { scope: "standalone" });
 	});
 

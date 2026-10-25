@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,6 +29,13 @@ func (s *Service) RunBackgroundTask(ctx context.Context, harness domain.AgentHar
 	cfg.ProviderScopeID = s.newID()
 	cfg.ProviderIDsScoped = true
 	cfg.Ephemeral = true
+<<<<<<< HEAD
+=======
+	cfg.Effort = ""
+	cfg.ReadOnly = true
+	cfg.DisableNetwork = true
+	cfg.DisableTools = true
+>>>>>>> upstream/main
 	conversation, err := driver.Start(ctx, cfg)
 	if err != nil {
 		return "", fmt.Errorf("start background %s task: %w", harness, err)
@@ -38,6 +46,23 @@ func (s *Service) RunBackgroundTask(ctx context.Context, harness domain.AgentHar
 		}
 	}()
 
+<<<<<<< HEAD
+=======
+	// Send the generation request as the turn itself. The input can describe
+	// arbitrary work, and some providers act on it when it is sent unqualified.
+	if instructions := strings.TrimSpace(cfg.SystemPrompt); instructions != "" {
+		input, _ := json.Marshal(prompt)
+		prompt = instructions + "\n\nInput data (JSON string):\n" + string(input)
+	}
+	return runBackgroundTurn(ctx, harness, conversation, prompt)
+}
+
+func runBackgroundTurn(ctx context.Context, harness domain.AgentHarness, conversation ports.ChatConversation, prompt string) (string, error) {
+	settings, err := backgroundTaskSettings(ctx, conversation)
+	if err != nil {
+		return "", fmt.Errorf("configure background %s task: %w", harness, err)
+	}
+>>>>>>> upstream/main
 	turn, err := conversation.SendTurn(ctx, ports.ChatUserMessage{
 		Text:   prompt,
 		Origin: domain.MessageOriginAutomation,

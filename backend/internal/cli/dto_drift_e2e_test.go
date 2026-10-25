@@ -102,6 +102,10 @@ func (f *fakeAgentCatalog) Models(_ context.Context, agentID, _ string, _ bool) 
 	}, nil
 }
 
+func (f *fakeAgentCatalog) ModelCatalog(ctx context.Context, agentID, projectID string, refresh bool) (ports.AgentModelCatalog, error) {
+	return f.Models(ctx, agentID, projectID, refresh)
+}
+
 func (f *fakeAgentCatalog) RevalidateModels(ctx context.Context, agentID, projectID string) (ports.AgentModelCatalog, error) {
 	return f.Models(ctx, agentID, projectID, false)
 }
@@ -148,6 +152,10 @@ func (f *fakeProjectManager) Clone(_ context.Context, in projectsvc.CloneInput) 
 
 func (f *fakeProjectManager) PrepareClone(_ context.Context, in projectsvc.CloneInput) (projectsvc.ClonePreparationResult, error) {
 	return projectsvc.ClonePreparationResult{Path: "/tmp/" + in.RemoteURL, RemoteURL: in.RemoteURL}, nil
+}
+
+func (f *fakeProjectManager) CheckCloneDestination(_ context.Context, in projectsvc.CloneInput) (projectsvc.CloneDestination, error) {
+	return projectsvc.CloneDestination{RemoteURL: in.RemoteURL}, nil
 }
 
 func (f *fakeProjectManager) CleanupPreparedClone(context.Context, projectsvc.ClonePreparationCleanupInput) error {
@@ -310,10 +318,15 @@ func (f *fakeProjectManager) SetPermissions(_ context.Context, id domain.Project
 	return projectsvc.Project{ID: id, Config: &domain.ProjectConfig{AgentConfig: domain.AgentConfig{Permissions: in.Permissions}}}, nil
 }
 
+<<<<<<< HEAD
 func (f *fakeProjectManager) PreviewOrchestratorRulesFile(context.Context, domain.ProjectID, string) (projectsvc.OrchestratorRulesFilePreview, error) {
 	return projectsvc.OrchestratorRulesFilePreview{}, nil
 }
 
 func (f *fakeProjectManager) PreviewAgentRulesFile(context.Context, domain.ProjectID, string) (projectsvc.OrchestratorRulesFilePreview, error) {
 	return projectsvc.OrchestratorRulesFilePreview{}, nil
+=======
+func (f *fakeProjectManager) ForgetPermissions(_ context.Context, id domain.ProjectID) (projectsvc.Project, error) {
+	return projectsvc.Project{ID: id, Config: &domain.ProjectConfig{}}, nil
+>>>>>>> upstream/main
 }

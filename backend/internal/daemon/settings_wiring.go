@@ -23,11 +23,19 @@ func (s settingsStore) GetAppSettings(ctx context.Context) (settingssvc.Snapshot
 		return settingssvc.Snapshot{}, err
 	}
 	return settingssvc.Snapshot{
+<<<<<<< HEAD
 		DefaultSessionMode:      row.DefaultSessionMode,
 		CloudOffering:           row.CloudOffering,
 		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
 		GlobalWorkerRules:       row.GlobalWorkerRules,
 		UpdatedAt:               row.UpdatedAt,
+=======
+		DefaultSessionMode: row.DefaultSessionMode,
+		HarnessDefaults:    row.HarnessDefaults,
+		CloudOffering:      row.CloudOffering,
+		VersionRefresh:     row.VersionRefresh,
+		UpdatedAt:          row.UpdatedAt,
+>>>>>>> upstream/main
 	}, nil
 }
 
@@ -43,10 +51,19 @@ func (s settingsStore) SetCloudOffering(ctx context.Context, enabled bool, now t
 	return s.store.SetCloudOffering(ctx, enabled, now)
 }
 
+<<<<<<< HEAD
 func (s settingsStore) SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error {
 	return s.store.SetGlobalOrchestratorRules(ctx, rules, now)
 }
 
 func (s settingsStore) SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error {
 	return s.store.SetGlobalWorkerRules(ctx, rules, now)
+=======
+func (s settingsStore) SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error {
+	return s.store.SetVersionRefresh(ctx, enabled, now)
+}
+
+func (s settingsStore) SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault, now time.Time) error {
+	return s.store.SetHarnessDefault(ctx, agent, value, now)
+>>>>>>> upstream/main
 }

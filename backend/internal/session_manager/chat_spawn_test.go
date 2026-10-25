@@ -1856,7 +1856,7 @@ func TestChatSpawnInstallsAgentHooksBeforeControllerStart(t *testing.T) {
 			st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 			mgr := New(Deps{
 				Runtime:   &fakeRuntime{},
-				Agents:    switchTestAgents{domain.HarnessCommandCode: hooks},
+				Agents:    testAgentRegistry{domain.HarnessCommandCode: hooks},
 				Workspace: &fakeWorkspace{path: wsDir},
 				Store:     st,
 				Messenger: &fakeMessenger{},
@@ -1913,7 +1913,7 @@ func TestChatSpawnFailsWhenHookInstallFails(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	mgr := New(Deps{
 		Runtime:   &fakeRuntime{},
-		Agents:    switchTestAgents{domain.HarnessCommandCode: hooks},
+		Agents:    testAgentRegistry{domain.HarnessCommandCode: hooks},
 		Workspace: &fakeWorkspace{path: t.TempDir()},
 		Store:     st,
 		Messenger: &fakeMessenger{},
@@ -1940,9 +1940,11 @@ func TestChatSpawnFailsWhenHookInstallFails(t *testing.T) {
 
 // TestChatSpawnWritesCommandCodeSessionStartHook drives a fresh Chat spawn
 // through the real Command Code adapter and asserts the workspace actually
-// receives the SessionStart hook that injects the standing instructions. A
-// prompt file without this hook is the exact gap reported against fresh Chat
-// workers and orchestrators.
+// receives the managed hooks (SessionStart for the TUI lifecycle plus
+// PreToolUse/PostToolUse/Stop for activity). The SessionStart hook itself
+// never fires under `cmd acp` (issue #6784); Chat standing instructions ride
+// the first prompt preamble instead, so this asserts hook installation — not
+// Chat delivery.
 func TestChatSpawnWritesCommandCodeSessionStartHook(t *testing.T) {
 	dataDir := t.TempDir()
 	wsDir := t.TempDir()
@@ -1951,7 +1953,7 @@ func TestChatSpawnWritesCommandCodeSessionStartHook(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	mgr := New(Deps{
 		Runtime:   &fakeRuntime{},
-		Agents:    switchTestAgents{domain.HarnessCommandCode: commandcode.New()},
+		Agents:    testAgentRegistry{domain.HarnessCommandCode: commandcode.New()},
 		Workspace: &fakeWorkspace{path: wsDir},
 		Store:     st,
 		Messenger: &fakeMessenger{},

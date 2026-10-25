@@ -35,7 +35,17 @@ var (
 	// ErrPROwnedElsewhere means a named PR belongs to another active session,
 	// which a review trigger never takes over.
 	ErrPROwnedElsewhere = fmt.Errorf("%w: pull request owned by another session", ErrConflict)
+	// ErrHarnessInstallActive means the reviewer's harness is being installed,
+	// updated or removed, so a reviewer cannot start on it now.
+	ErrHarnessInstallActive = fmt.Errorf("%w: reviewer harness is being updated", ErrConflict)
 )
+
+// HarnessUseGate keeps reviewer launches from racing a harness update. The
+// release must be called once the reviewer's handle is recorded, so an update
+// that starts afterwards sees the reviewer as live.
+type HarnessUseGate interface {
+	TryBeginHarnessUse(harness domain.AgentHarness) (release func(), ok bool)
+}
 
 // Store is the persistence surface the engine needs. *sqlite.Store satisfies it
 // in production; tests use a fake.
@@ -83,6 +93,7 @@ type Projects interface {
 
 // Deps wires the engine.
 type Deps struct {
+<<<<<<< HEAD
 	Store    Store
 	Sessions Sessions
 	PRs      PRs
@@ -91,6 +102,15 @@ type Deps struct {
 	// Pipelines keeps automatic review from starting while a pipeline run owns
 	// the worker. Nil leaves ordinary review behavior unchanged.
 	Pipelines ports.PipelineGuard
+=======
+	// HarnessUse, when set, is held across each reviewer launch.
+	HarnessUse HarnessUseGate
+	Store      Store
+	Sessions   Sessions
+	PRs        PRs
+	Projects   Projects
+	Launcher   Launcher
+>>>>>>> upstream/main
 	// ChatRecoveryDone gates operations that could mistake a recovering reviewer for an exited one.
 	ChatRecoveryDone <-chan struct{}
 
@@ -101,6 +121,7 @@ type Deps struct {
 
 // Engine is the core code-review engine.
 type Engine struct {
+<<<<<<< HEAD
 	store     Store
 	sessions  Sessions
 	prs       PRs
@@ -109,6 +130,16 @@ type Engine struct {
 	pipelines ports.PipelineGuard
 	clock     func() time.Time
 	newID     func() string
+=======
+	harnessUse HarnessUseGate
+	store      Store
+	sessions   Sessions
+	prs        PRs
+	projects   Projects
+	launcher   Launcher
+	clock      func() time.Time
+	newID      func() string
+>>>>>>> upstream/main
 
 	chatRecoveryDone <-chan struct{}
 
@@ -133,6 +164,7 @@ func New(d Deps) *Engine {
 	}
 	return &Engine{
 		store:        d.Store,
+		harnessUse:   d.HarnessUse,
 		sessions:     d.Sessions,
 		prs:          d.PRs,
 		projects:     d.Projects,
@@ -633,6 +665,11 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 	if handleID == "" {
 		// Each pass gets a fresh reviewer process on the same stable terminal
 		// handle when there is no resumable live agent session to notify.
+		releaseHarness, err := e.beginHarnessUse(harness)
+		if err != nil {
+			return TriggerResult{}, failRuns(0, err)
+		}
+		defer releaseHarness()
 		if err := e.launcher.Preflight(ctx, harness, worker.Metadata.WorkspacePath, selectedMode); err != nil {
 			return TriggerResult{}, failRuns(0, fmt.Errorf("reviewer preflight: %w", err))
 		}
@@ -1076,6 +1113,11 @@ func (e *Engine) restorePersistedChatReviewerLocked(ctx stdctx.Context, worker d
 	if err != nil {
 		return RestoreReviewerResult{}, err
 	}
+	releaseHarness, err := e.beginHarnessUse(review.Harness)
+	if err != nil {
+		return RestoreReviewerResult{}, err
+	}
+	defer releaseHarness()
 	launch, err := e.launcher.RestoreTerminal(ctx, LaunchSpec{ReviewSessionID: review.ID, LaunchID: launchID, WorkerID: worker.ID, ProjectID: worker.ProjectID, ProjectEnv: projectEnv, Harness: review.Harness, WorkspacePath: worker.Metadata.WorkspacePath, AgentSessionID: review.AgentSessionID, ProviderConversationID: review.ProviderConversationID, PreviousRuns: previousRuns, InterfaceMode: review.InterfaceMode})
 	if err != nil {
 		return RestoreReviewerResult{}, fmt.Errorf("restore reviewer: %w", err)
@@ -1195,6 +1237,11 @@ func (e *Engine) restoreReviewerLocked(
 	if err != nil {
 		return RestoreReviewerResult{}, err
 	}
+	releaseHarness, err := e.beginHarnessUse(harness)
+	if err != nil {
+		return RestoreReviewerResult{}, err
+	}
+	defer releaseHarness()
 	launch, err := e.launcher.RestoreTerminal(ctx, LaunchSpec{
 		ReviewSessionID:      reviewRow.ID,
 		LaunchID:             launchID,
@@ -2014,4 +2061,17 @@ func (e *Engine) stopReviewChatWork(ctx stdctx.Context, review domain.Review) er
 		return fmt.Errorf("stop previous reviewer Chat: %w", err)
 	}
 	return e.store.SettleReviewChatWork(ctx, review.ID, e.clock())
+}
+
+// beginHarnessUse holds the harness against updates until the caller records
+// the reviewer it launches.
+func (e *Engine) beginHarnessUse(harness domain.ReviewerHarness) (func(), error) {
+	if e.harnessUse == nil {
+		return func() {}, nil
+	}
+	release, ok := e.harnessUse.TryBeginHarnessUse(domain.AgentHarness(harness))
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrHarnessInstallActive, harness)
+	}
+	return release, nil
 }

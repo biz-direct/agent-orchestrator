@@ -1108,13 +1108,22 @@ func TestSpawnModelFlagWiring(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestSpawnPipelineSelectionWiring(t *testing.T) {
 	cfg := setConfigEnv(t)
 	var bodies []spawnRequest
+=======
+// TestSpawnEffortFlagWiring asserts `ao spawn --effort` sends the reasoning
+// effort override to the daemon without touching project config.
+func TestSpawnEffortFlagWiring(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var req spawnRequest
+>>>>>>> upstream/main
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+<<<<<<< HEAD
 			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo","repo":"https://github.com/aoagents/agent-orchestrator","defaultBranch":"main"}}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/readiness/ensure":
 			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
@@ -1130,12 +1139,23 @@ func TestSpawnPipelineSelectionWiring(t *testing.T) {
 			default:
 				_, _ = io.WriteString(w, `{"session":{"id":"demo-3","status":"idle"}}`)
 			}
+=======
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/readiness/ensure":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("codex"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-21","status":"idle"}}`)
+>>>>>>> upstream/main
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(srv.Close)
 	writeRunFileFor(t, cfg, srv)
+<<<<<<< HEAD
 	deps := Deps{ProcessAlive: func(int) bool { return true }}
 	base := []string{"spawn", "--project", "demo", "--agent", "codex", "--name", "worker"}
 
@@ -1162,5 +1182,46 @@ func TestSpawnPipelineSelectionWiring(t *testing.T) {
 	}
 	if len(bodies) != 3 {
 		t.Fatal("refused combinations must not reach the daemon")
+=======
+
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "spawn", "--project", "demo", "--agent", "codex", "--name", "worker", "--effort", " high ")
+	if err != nil {
+		t.Fatalf("spawn failed: %v stderr=%s", err, errOut)
+	}
+	if req.Effort != "high" {
+		t.Fatalf("spawn request effort = %q, want high", req.Effort)
+	}
+}
+
+// TestSpawnEffortSurfacesDaemonUnsupportedEffort asserts `ao spawn --effort`
+// on a harness that cannot honor it fails with the daemon's UNSUPPORTED_EFFORT
+// envelope instead of a CLI-side harness allowlist: the daemon owns which
+// harnesses support effort, so the list cannot drift in the thin client.
+func TestSpawnEffortSurfacesDaemonUnsupportedEffort(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+			_, _ = io.WriteString(w, `{"status":"ok","project":{"id":"demo","name":"Demo","path":"/repo/demo"}}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agents/readiness/ensure":
+			_, _ = io.WriteString(w, authorizedAgentsJSON("gemini"))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"invalid","code":"UNSUPPORTED_EFFORT","message":"effort is only supported for codex, claude-code, and command-code agents","requestId":"req-1"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "spawn", "--project", "demo", "--agent", "gemini", "--name", "Worker", "--effort", "high")
+	if err == nil || ExitCode(err) != 1 {
+		t.Fatalf("err=%v exit=%d, want daemon error exit 1", err, ExitCode(err))
+	}
+	if !strings.Contains(err.Error(), "UNSUPPORTED_EFFORT") || !strings.Contains(err.Error(), "effort is only supported") {
+		t.Fatalf("err=%v, want daemon UNSUPPORTED_EFFORT envelope", err)
+>>>>>>> upstream/main
 	}
 }

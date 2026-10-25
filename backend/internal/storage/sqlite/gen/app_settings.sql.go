@@ -14,7 +14,11 @@ import (
 
 const getAppSettings = `-- name: GetAppSettings :one
 
+<<<<<<< HEAD
 SELECT id, default_session_mode, updated_at, cloud_offering, global_orchestrator_rules, global_worker_rules FROM app_settings WHERE id = 1
+=======
+SELECT id, default_session_mode, updated_at, cloud_offering, harness_defaults, version_refresh FROM app_settings WHERE id = 1
+>>>>>>> upstream/main
 `
 
 // Daemon-owned user preferences. One row, seeded by migration 0042, so a read
@@ -27,10 +31,32 @@ func (q *Queries) GetAppSettings(ctx context.Context) (AppSetting, error) {
 		&i.DefaultSessionMode,
 		&i.UpdatedAt,
 		&i.CloudOffering,
+<<<<<<< HEAD
 		&i.GlobalOrchestratorRules,
 		&i.GlobalWorkerRules,
+=======
+		&i.HarnessDefaults,
+		&i.VersionRefresh,
+>>>>>>> upstream/main
 	)
 	return i, err
+}
+
+const resetHarnessDefault = `-- name: ResetHarnessDefault :exec
+UPDATE app_settings
+SET harness_defaults = json_remove(harness_defaults, ?1),
+    updated_at = ?2
+WHERE id = 1
+`
+
+type ResetHarnessDefaultParams struct {
+	HarnessPath interface{}
+	UpdatedAt   time.Time
+}
+
+func (q *Queries) ResetHarnessDefault(ctx context.Context, arg ResetHarnessDefaultParams) error {
+	_, err := q.db.ExecContext(ctx, resetHarnessDefault, arg.HarnessPath, arg.UpdatedAt)
+	return err
 }
 
 const setCloudOffering = `-- name: SetCloudOffering :exec
@@ -61,6 +87,7 @@ func (q *Queries) SetDefaultSessionMode(ctx context.Context, arg SetDefaultSessi
 	return err
 }
 
+<<<<<<< HEAD
 const setGlobalOrchestratorRules = `-- name: SetGlobalOrchestratorRules :exec
 UPDATE app_settings SET global_orchestrator_rules = ?, updated_at = ? WHERE id = 1
 `
@@ -86,5 +113,36 @@ type SetGlobalWorkerRulesParams struct {
 
 func (q *Queries) SetGlobalWorkerRules(ctx context.Context, arg SetGlobalWorkerRulesParams) error {
 	_, err := q.db.ExecContext(ctx, setGlobalWorkerRules, arg.GlobalWorkerRules, arg.UpdatedAt)
+=======
+const setHarnessDefault = `-- name: SetHarnessDefault :exec
+UPDATE app_settings
+SET harness_defaults = json_set(harness_defaults, ?1, json(?2)),
+    updated_at = ?3
+WHERE id = 1
+`
+
+type SetHarnessDefaultParams struct {
+	HarnessPath interface{}
+	Config      interface{}
+	UpdatedAt   time.Time
+}
+
+func (q *Queries) SetHarnessDefault(ctx context.Context, arg SetHarnessDefaultParams) error {
+	_, err := q.db.ExecContext(ctx, setHarnessDefault, arg.HarnessPath, arg.Config, arg.UpdatedAt)
+	return err
+}
+
+const setVersionRefresh = `-- name: SetVersionRefresh :exec
+UPDATE app_settings SET version_refresh = ?, updated_at = ? WHERE id = 1
+`
+
+type SetVersionRefreshParams struct {
+	VersionRefresh bool
+	UpdatedAt      time.Time
+}
+
+func (q *Queries) SetVersionRefresh(ctx context.Context, arg SetVersionRefreshParams) error {
+	_, err := q.db.ExecContext(ctx, setVersionRefresh, arg.VersionRefresh, arg.UpdatedAt)
+>>>>>>> upstream/main
 	return err
 }

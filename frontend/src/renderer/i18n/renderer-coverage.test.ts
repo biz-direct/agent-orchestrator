@@ -28,6 +28,8 @@ const approvedLiterals: Record<string, readonly string[]> = {
 	"components/ProjectPromptsSettings.tsx": ["docs/orchestrator-rules.md", "docs/worker-rules.md"],
 	// Technical branch/prefix examples moved with the common settings fields.
 	"components/ProjectSettingsEditor.tsx": ["auto", "ao"],
+	// Key-cap hint beside Cancel.
+	"components/QuitConfirmDialog.tsx": ["Esc"],
 	"components/RemoteDirectoryPicker.tsx": ["/home/you/code"],
 	"components/SessionInspector.tsx": ["PR #"],
 	"components/Sidebar.tsx": ["Orchestrator.inc", "daemon"],

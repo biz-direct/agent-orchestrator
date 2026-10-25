@@ -1,3 +1,4 @@
+import { mediaCrossOrigin } from "../lib/file-media";
 import { useCallback, useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { type FileContents, type LineAnnotation } from "@pierre/diffs";
@@ -41,6 +42,7 @@ export function ReadOnlyFileView({
 	scope = "combined",
 	sessionId,
 	hostId,
+	imageUrl,
 	side = "after",
 }: {
 	annotation: FileAnnotationModel;
@@ -53,6 +55,8 @@ export function ReadOnlyFileView({
 	scope?: WorkspaceDiffScope;
 	sessionId: string;
 	hostId?: string;
+	/** Where to load an image file from, when not the workspace blob route (an artifact's raw URL). */
+	imageUrl?: string;
 	side?: "before" | "after";
 }) {
 	const { t } = useTranslation();
@@ -96,9 +100,10 @@ export function ReadOnlyFileView({
 			return (
 				<div className="grid place-items-center p-3">
 					<img
+						crossOrigin={mediaCrossOrigin(imageUrl ?? workspaceRawImageUrl(sessionId, detail.path, side, hostId, remoteBaseUrl))}
 						alt={detail.path}
 						className="max-h-[70vh] max-w-full object-contain"
-						src={workspaceRawImageUrl(sessionId, detail.path, side, hostId, remoteBaseUrl)}
+						src={imageUrl ?? workspaceRawImageUrl(sessionId, detail.path, side, hostId, remoteBaseUrl)}
 					/>
 				</div>
 			);
