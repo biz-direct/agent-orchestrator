@@ -804,7 +804,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     hibernated_at, stale_binary_since, stale_binary_version, stale_binary_launch, stale_binary_switch_failed_at,
     client_request_id, client_request_hash, client_request_committed,
     runtime_released_launch_id
-FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num
+FROM sessions WHERE (?1 <> 0 OR attached_to_session_id = '') ORDER BY project_id, num
 `
 
 type ListAllSessionsRow struct {
@@ -888,8 +888,8 @@ type ListAllSessionsRow struct {
 	RuntimeReleasedLaunchID          string
 }
 
-func (q *Queries) ListAllSessions(ctx context.Context) ([]ListAllSessionsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllSessions)
+func (q *Queries) ListAllSessions(ctx context.Context, includeAttached interface{}) ([]ListAllSessionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllSessions, includeAttached)
 	if err != nil {
 		return nil, err
 	}

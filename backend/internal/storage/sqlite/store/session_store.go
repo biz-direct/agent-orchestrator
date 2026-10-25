@@ -896,11 +896,23 @@ func (s *Store) ListSessions(ctx context.Context, project domain.ProjectID) ([]d
 	return mapListSessionsByProjectRows(rows), nil
 }
 
-// ListAllSessions returns every session across all projects.
+// ListAllSessions returns every board-visible session across all projects:
+// crew role sessions attached to a task stay out of it.
 func (s *Store) ListAllSessions(ctx context.Context) ([]domain.SessionRecord, error) {
-	rows, err := s.qr.ListAllSessions(ctx)
+	rows, err := s.qr.ListAllSessions(ctx, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list all sessions: %w", err)
+	}
+	return mapListAllSessionsRows(rows), nil
+}
+
+// ListAllSessionsIncludingAttached also returns attached role sessions. They own
+// real processes, so maintenance (harness updates, idle refresh) must see them
+// even though the board does not.
+func (s *Store) ListAllSessionsIncludingAttached(ctx context.Context) ([]domain.SessionRecord, error) {
+	rows, err := s.qr.ListAllSessions(ctx, 1)
+	if err != nil {
+		return nil, fmt.Errorf("list all sessions including attached: %w", err)
 	}
 	return mapListAllSessionsRows(rows), nil
 }

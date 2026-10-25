@@ -56,6 +56,27 @@ func (m *Manager) SwitchTUIProvider(ctx context.Context, id domain.SessionID, re
 		return &domain.ProviderSwitchError{Kind: domain.ProviderSwitchRefusalPendingInteraction, Detail: "answer the pending provider interaction before switching"}
 	}
 
+	// An installer must not replace the target's (or, on rollback, the source's)
+	// executable while this switch launches it, so both leases are held until
+	// the switch returns.
+	acquire := func(harness domain.AgentHarness) (func(), error) {
+		release, err := m.beginHarnessUse(harness)
+		if err != nil {
+			return nil, &domain.ProviderSwitchError{Kind: domain.ProviderSwitchRefusalBusy, Detail: fmt.Sprintf("%s is being updated; try again once it finishes", harness), Cause: err}
+		}
+		return release, nil
+	}
+	releaseTarget, err := acquire(target)
+	if err != nil {
+		return err
+	}
+	defer releaseTarget()
+	releaseSource, err := acquire(rec.Harness)
+	if err != nil {
+		return err
+	}
+	defer releaseSource()
+
 	// Everything the relaunch needs is read before the source is stopped, so a
 	// failed lookup cannot leave the session without a provider.
 	project, err := m.loadProject(ctx, rec.ProjectID)

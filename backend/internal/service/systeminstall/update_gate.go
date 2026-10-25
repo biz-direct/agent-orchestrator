@@ -120,7 +120,7 @@ func (s *Service) effectiveUpdateLevel(level UpdateWhileRunning) UpdateWhileRunn
 // harnessInUse lists the live sessions and reviewers that run target.
 func (s *Service) harnessInUse(ctx context.Context, target Target) (sessions, reviewers []domain.SessionID, err error) {
 	if s.sessions != nil {
-		records, err := s.sessions.ListAllSessions(ctx)
+		records, err := listProcessOwningSessions(ctx, s.sessions)
 		if err != nil {
 			return nil, nil, fmt.Errorf("systeminstall: list sessions before harness operation: %w", err)
 		}
@@ -237,4 +237,15 @@ func (s *Service) updateInUse(ctx context.Context, target Target, advisory Updat
 		level = UpdateWhileRunningBlocked
 	}
 	return &UpdateInUse{LiveSessions: len(ids), SessionIDs: ids, Level: level}
+}
+
+// listProcessOwningSessions includes attached crew role sessions when the lister
+// can enumerate them: they run harness processes without being on the board.
+func listProcessOwningSessions(ctx context.Context, l SessionLister) ([]domain.SessionRecord, error) {
+	if all, ok := l.(interface {
+		ListAllSessionsIncludingAttached(context.Context) ([]domain.SessionRecord, error)
+	}); ok {
+		return all.ListAllSessionsIncludingAttached(ctx)
+	}
+	return l.ListAllSessions(ctx)
 }

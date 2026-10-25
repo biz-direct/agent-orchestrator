@@ -177,3 +177,28 @@ func TestSwitchTargetThatMissesItsPromptLeavesTheSessionToTheRollback(t *testing
 }
 
 func ptr(s string) *string { return &s }
+
+// The switch launches the target (and, on rollback, the source) like a spawn or
+// restore, so a held installer gate must refuse it before anything is stopped.
+func TestSwitchTUIProviderHonorsTheHarnessInstallerGate(t *testing.T) {
+	m, st, rt, _ := newManager()
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		Mode:     domain.SessionModeTUI,
+		Activity: domain.Activity{State: domain.ActivityIdle},
+	}
+	gate := &rejectingHarnessUseGate{}
+	m.SetHarnessUseGate(gate)
+
+	err := m.SwitchTUIProvider(ctx, "mer-1", domain.ProviderSwitchRequest{TargetHarness: domain.HarnessCodex})
+	var switchErr *domain.ProviderSwitchError
+	if !errors.As(err, &switchErr) || !errors.Is(err, ErrHarnessInstallActive) {
+		t.Fatalf("SwitchTUIProvider error = %v, want a refusal wrapping ErrHarnessInstallActive", err)
+	}
+	if gate.harness != domain.HarnessCodex {
+		t.Fatalf("gated harness = %q, want the target", gate.harness)
+	}
+	if rt.created != 0 {
+		t.Fatal("a runtime was created while the installer owned the gate")
+	}
+}

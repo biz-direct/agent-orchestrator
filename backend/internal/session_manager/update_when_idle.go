@@ -47,7 +47,14 @@ func (u *updateStops) release(id domain.SessionID) {
 
 // liveHarnessSessions lists the sessions whose process runs harness.
 func (m *Manager) liveHarnessSessions(ctx context.Context, harness domain.AgentHarness) ([]domain.SessionRecord, error) {
-	recs, err := m.store.ListAllSessions(ctx)
+	list := m.store.ListAllSessions
+	// Attached crew role sessions run real processes the board does not show.
+	if all, ok := m.store.(interface {
+		ListAllSessionsIncludingAttached(context.Context) ([]domain.SessionRecord, error)
+	}); ok {
+		list = all.ListAllSessionsIncludingAttached
+	}
+	recs, err := list(ctx)
 	if err != nil {
 		return nil, err
 	}
