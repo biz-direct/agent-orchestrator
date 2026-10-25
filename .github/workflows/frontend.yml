@@ -8,9 +8,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review runs the suite once a draft is marked ready; drafts skip it.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "frontend/**"
-      - ".github/workflows/**"
       - "contracts/cloud/**"
       - "packages/cloud-client/**"
       - "packages/product-ui/**"
@@ -25,6 +26,8 @@ concurrency:
 
 jobs:
   mac-update-helper:
+    # macOS minutes bill at 10x: run on main pushes only, not on every PR push.
+    if: github.event_name != 'pull_request'
     # Keep this on Intel to exercise the x64 release target natively while
     # Swift cross-compiles and lipo-verifies the arm64 helper.
     runs-on: macos-26-intel
@@ -54,6 +57,7 @@ jobs:
           "$HOME/.ao/build-cache/update-helper/state-tests"
 
   test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -138,6 +142,7 @@ jobs:
         run: npm run test:browser-postcondition-integration
 
   renderer-smoke:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # RENDERER smoke (issue #2483, renderer slice) — the Playwright specs that run
     # the renderer under `dev:web` with an injected window.ao + fake CDC/snapshot.
     # This is fast renderer-regression coverage; it is NOT the canonical T0/P0

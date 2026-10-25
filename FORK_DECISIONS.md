@@ -40,6 +40,7 @@ Rules for agents:
 | - | ci | flag-off | fork#16 | Upstream-only workflows are skipped on the fork with a job-level `if: github.repository == 'OrchestratorInc/agent-orchestrator'` instead of being deleted, to keep merges clean. Listed in `docs/fork-ci.md`. | 2026-10-08 | A new upstream workflow: gate it the same way or take it deliberately. |
 | - | updater | override | fork-release.yml (build check) | The updater feed repo is baked to `github.repository` (this fork) at build time and verified by the build; releases publish `latest-*.yml`. | 2026-10-08 | Upstream changes to the updater provider, feed script (`frontend/scripts/feed.mjs`), app name or bundle id. |
 | #55 | artifacts | override | 63575d4b5 (fork#55) | Artifact sessions do not start the default pipeline. | 2026-10-12 | Upstream changes to artifact spawn, pipeline defaults or `artifact view` requests. |
+| - | ci | override | fork#CI-usage | CI minutes are capped on the Free plan (macOS bills 10x): PR CI skips drafts and runs on `ready_for_review`; the macOS jobs (frontend `mac-update-helper`, CLI E2E macOS leg) run on `main` pushes only; `frontend.yml` no longer triggers on any `.github/workflows/**` change. | 2026-10-14 | When the plan or the included minutes change, or upstream rewrites go.yml / frontend.yml / cli-e2e.yml. |
 | #54 | billing | take | none | Billing P1s from review judged out of scope: the fork does not use AO Cloud billing. Not fixed or reverted. | 2026-10-12 | Only if the fork starts using AO Cloud billing. |
 
 ## Sync decisions
