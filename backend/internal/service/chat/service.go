@@ -120,6 +120,8 @@ type Service struct {
 	prewarming         sync.Map // domain.AgentHarness -> struct{}
 	providerSwitches   sync.Map // domain.SessionID -> chan struct{}, one switch at a time
 	terminalSwitcher   TerminalProviderSwitcher
+	// harnessUse, when set, takes a harness's installer lease (late-bound by the daemon).
+	harnessUse func(domain.AgentHarness) (func(), error)
 }
 
 // SetExecutionGate installs the pipeline execution gate after daemon wiring.

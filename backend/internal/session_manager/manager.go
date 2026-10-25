@@ -582,6 +582,12 @@ func (m *Manager) TryBeginHarnessUse(harness domain.AgentHarness) (func(), bool)
 	return release, err == nil
 }
 
+// BeginHarnessUse exposes the installer interlock to services that launch a
+// harness on the manager's behalf (Chat provider switches).
+func (m *Manager) BeginHarnessUse(harness domain.AgentHarness) (func(), error) {
+	return m.beginHarnessUse(harness)
+}
+
 func (m *Manager) beginHarnessUse(harness domain.AgentHarness) (func(), error) {
 	if m.harnessUseGate == nil {
 		return func() {}, nil

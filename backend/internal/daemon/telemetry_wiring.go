@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	telemetryadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry"
@@ -125,4 +126,12 @@ func startGitHubLoginResolver(ctx context.Context, cfg config.Config, ident port
 			}
 		}
 	}()
+}
+
+// policyGatedSink drops every product event while the persisted consent policy
+// (telemetry_policy.json) says no, whatever the environment enables. It sits
+// outside the exporter chain, so the shared telemetry_opt_out marker stays an
+// additional veto rather than the only one.
+func policyGatedSink(next ports.EventSink, allowed *atomic.Bool) ports.EventSink {
+	return telemetryadapter.NewOptOutSink(next, func() bool { return !allowed.Load() })
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,5 +146,33 @@ func TestNewTelemetrySink_DefaultConfigIsNoop(t *testing.T) {
 	sink, _ := newTelemetrySink(cfg, nil, slog.New(slog.DiscardHandler))
 	if _, ok := sink.(telemetryadapter.NoopSink); !ok {
 		t.Fatalf("default config sink = %T, want NoopSink", sink)
+	}
+}
+
+type countingSink struct{ events int }
+
+func (s *countingSink) Emit(context.Context, ports.TelemetryEvent) { s.events++ }
+func (s *countingSink) Close(context.Context) error                { return nil }
+
+// A saved opt-out must veto product events even when the environment turns
+// telemetry on, and lifting it must let them through again.
+func TestPolicyGatedSinkFollowsThePersistedConsent(t *testing.T) {
+	var allowed atomic.Bool
+	inner := &countingSink{}
+	sink := policyGatedSink(inner, &allowed)
+
+	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
+	if inner.events != 0 {
+		t.Fatalf("exported %d events while the policy said no", inner.events)
+	}
+	allowed.Store(true)
+	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
+	if inner.events != 1 {
+		t.Fatalf("exported %d events after consent, want 1", inner.events)
+	}
+	allowed.Store(false)
+	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
+	if inner.events != 1 {
+		t.Fatal("a revoked consent kept exporting")
 	}
 }

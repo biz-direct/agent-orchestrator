@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -219,6 +220,11 @@ func Run(buildVersion string) error {
 	eventsAllowed := telemetryPolicy.EventsAllowed(context.Background(), cfg.Telemetry.Events, cfg.Telemetry.EventsExplicit)
 	sentryobs.SetPolicyEnabled(eventsAllowed)
 	telemetrySink, telemetryIdentity := newTelemetrySink(cfg, store, log)
+	// FORK: the persisted consent policy also vetoes product events, not just
+	// Sentry; a saved opt-out (or a legacy or unreadable record) wins over the env.
+	var productEventsAllowed atomic.Bool
+	productEventsAllowed.Store(eventsAllowed)
+	telemetrySink = policyGatedSink(telemetrySink, &productEventsAllowed)
 	defer func() { _ = telemetrySink.Close(context.Background()) }()
 	installID := ""
 	if telemetryIdentity != nil {
@@ -246,7 +252,7 @@ func Run(buildVersion string) error {
 			"agent": cfg.Agent,
 		},
 	})
-	if telemetryIdentity != nil && cfg.Telemetry.Events {
+	if telemetryIdentity != nil && cfg.Telemetry.Events && eventsAllowed {
 		marked, err := telemetryIdentity.MarkInstalledEvent(context.Background())
 		if err != nil {
 			log.Warn("record telemetry install event", "error", err)
@@ -264,7 +270,10 @@ func Run(buildVersion string) error {
 	// graceful shutdown inside Server.Run and stops the background goroutines.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go telemetryPolicy.Watch(ctx, time.Second, cfg.Telemetry.Events, cfg.Telemetry.EventsExplicit, eventsAllowed, sentryobs.SetPolicyEnabled)
+	go telemetryPolicy.Watch(ctx, time.Second, cfg.Telemetry.Events, cfg.Telemetry.EventsExplicit, eventsAllowed, func(allowed bool) {
+		productEventsAllowed.Store(allowed)
+		sentryobs.SetPolicyEnabled(allowed)
+	})
 	startGitHubLoginResolver(ctx, cfg, telemetryIdentity, log)
 	cdcPipe, err := startCDC(ctx, store, log)
 	if err != nil {
@@ -567,6 +576,11 @@ func Run(buildVersion string) error {
 		},
 	})
 	sessMgr = wiredSessMgr
+	if m, ok := wiredSessMgr.(interface {
+		BeginHarnessUse(domain.AgentHarness) (func(), error)
+	}); ok {
+		chatSvc.SetHarnessUse(m.BeginHarnessUse)
+	}
 	if switcher, ok := wiredSessMgr.(chatsvc.TerminalProviderSwitcher); ok {
 		chatSvc.SetTerminalProviderSwitcher(switcher)
 	}

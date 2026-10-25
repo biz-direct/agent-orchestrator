@@ -24,6 +24,23 @@ func (s *Service) SetTerminalProviderSwitcher(switcher TerminalProviderSwitcher)
 	s.terminalSwitcher = switcher
 }
 
+// SetHarnessUse gives provider switches the installer interlock ordinary launches use.
+func (s *Service) SetHarnessUse(begin func(domain.AgentHarness) (func(), error)) {
+	s.harnessUse = begin
+}
+
+// beginHarnessUse holds id's harness installer lease; a nil binding holds nothing.
+func (s *Service) beginHarnessUse(harness domain.AgentHarness) (func(), error) {
+	if s.harnessUse == nil {
+		return func() {}, nil
+	}
+	release, err := s.harnessUse(harness)
+	if err != nil {
+		return nil, &domain.ProviderSwitchError{Kind: domain.ProviderSwitchRefusalBusy, Detail: fmt.Sprintf("%s is being updated; try again once it finishes", harness), Cause: err}
+	}
+	return release, nil
+}
+
 type providerSwitchActivityDetail struct {
 	Event         string              `json:"event"`
 	SourceHarness domain.AgentHarness `json:"sourceHarness"`
@@ -224,6 +241,18 @@ func (s *Service) switchProvider(ctx context.Context, id domain.SessionID, reque
 	if err := source.BeginIdleBranchHandoff(ctx); err != nil {
 		return &domain.ProviderSwitchError{Kind: domain.ProviderSwitchRefusalBusy, Detail: err.Error(), Cause: err}
 	}
+	// An installer must not replace the target's (or, on rollback, the source's)
+	// executable while this switch launches it; both leases are held until return.
+	releaseTargetUse, err := s.beginHarnessUse(request.TargetHarness)
+	if err != nil {
+		return err
+	}
+	defer releaseTargetUse()
+	releaseSourceUse, err := s.beginHarnessUse(source.harness)
+	if err != nil {
+		return err
+	}
+	defer releaseSourceUse()
 	abortSource := true
 	defer func() {
 		if abortSource {

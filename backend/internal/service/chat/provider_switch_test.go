@@ -656,3 +656,36 @@ func TestRetryOfADeliveredMessageDoesNotSwitchBack(t *testing.T) {
 		t.Fatalf("harness after the retry = %q, want the later switch's opencode", rec.Harness)
 	}
 }
+
+// A switch launches the target (and, on rollback, the source) like any other
+// launch, so a held installer lease must refuse it before the source stops.
+func TestProviderSwitchHonorsTheHarnessInstallerLease(t *testing.T) {
+	h, _, driver := newEditHarness(t, false)
+	ctx := context.Background()
+	completeTurn(t, h, "keep this context", "provider-turn-1")
+	h.awaitSnapshot(t, func(snapshot store.ConversationSnapshot) bool { return len(snapshot.Messages) == 2 })
+
+	var leased []domain.AgentHarness
+	installing := errors.New("installer active")
+	h.svc.SetHarnessUse(func(harness domain.AgentHarness) (func(), error) {
+		leased = append(leased, harness)
+		return nil, installing
+	})
+	driver.mu.Lock()
+	starts := len(driver.startConfigs)
+	driver.mu.Unlock()
+	err := h.svc.SwitchProvider(ctx, testSession, domain.ProviderSwitchRequest{TargetHarness: domain.HarnessClaudeCode, IdempotencyKey: "leased"})
+	var refusal *domain.ProviderSwitchError
+	if !errors.As(err, &refusal) || refusal.Kind != domain.ProviderSwitchRefusalBusy || !errors.Is(err, installing) {
+		t.Fatalf("SwitchProvider error = %v, want a busy refusal wrapping the installer error", err)
+	}
+	if len(leased) != 1 || leased[0] != domain.HarnessClaudeCode {
+		t.Fatalf("leased = %v, want the target first", leased)
+	}
+	driver.mu.Lock()
+	after := len(driver.startConfigs)
+	driver.mu.Unlock()
+	if after != starts {
+		t.Fatal("a target provider started while the installer held its lease")
+	}
+}
