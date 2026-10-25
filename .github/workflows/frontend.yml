@@ -42,6 +42,21 @@ jobs:
           node-version: 24
       - name: Test native helper build configuration
         run: node --test scripts/build-update-helper.node-test.mjs
+      - name: Test wake helper build configuration
+        run: node --test scripts/build-wake-helper.node-test.mjs
+      - name: Compile and test wake helper
+        run: |
+          node scripts/build-wake-helper.mjs --arch x64
+          lipo wake-helper/ao-wake -verify_arch x86_64
+          node scripts/build-wake-helper.mjs --arch arm64
+          lipo wake-helper/ao-wake -verify_arch arm64
+          mkdir -p "$HOME/.ao/build-cache/wake-helper/tests"
+          xcrun swiftc -module-cache-path "$HOME/.ao/build-cache/wake-helper/tests" native/wake-helper/WakePolicy.swift native/wake-helper/PolicyTests.swift -o "$HOME/.ao/build-cache/wake-helper/policy-tests"
+          "$HOME/.ao/build-cache/wake-helper/policy-tests"
+          xcrun swiftc -module-cache-path "$HOME/.ao/build-cache/wake-helper/tests" native/wake-helper/WakePolicy.swift native/wake-helper/WakeLights.swift native/wake-helper/WakeEffects.swift native/wake-helper/EffectsTests.swift -o "$HOME/.ao/build-cache/wake-helper/effects-tests"
+          "$HOME/.ao/build-cache/wake-helper/effects-tests"
+          xcrun swiftc -module-cache-path "$HOME/.ao/build-cache/wake-helper/tests" native/wake-helper/WakePolicy.swift native/wake-helper/WakeLowPower.swift native/wake-helper/LowPowerTests.swift -o "$HOME/.ao/build-cache/wake-helper/low-power-tests"
+          "$HOME/.ao/build-cache/wake-helper/low-power-tests"
       - name: Test repair installer packaging and guards
         run: node --test scripts/build-mac-repair-installer.node-test.mjs
       - name: Compile helper for both macOS architectures
@@ -124,6 +139,14 @@ jobs:
       - name: Install docs dependencies
         run: npm ci --prefix src/docs
 
+      # Re-extracts the docs catalogs, then fails if any locale is missing a
+      # translation for a string in the source.
+      - name: Check docs translations
+        run: npm run check:i18n --prefix src/docs
+
+      - name: Test docs
+        run: npm test --prefix src/docs
+
       - name: Build docs
         run: npm run build --prefix src/docs
 
@@ -137,6 +160,23 @@ jobs:
         env:
           AO_AGENT_BROWSER_TEST_BINARY: ${{ github.workspace }}/frontend/agent-browser/agent-browser
         run: npx vitest run
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify terminal origin boundary in real Electron
+        working-directory: backend
+        run: |
+          # Keep lazy-download output out of the executable-path capture.
+          node ../frontend/node_modules/electron/install.js
+          AO_MUX_ELECTRON="$(node -p "require('../frontend/node_modules/electron')")" xvfb-run -a go test -count=1 -run '^TestMuxOriginElectron$' ./internal/httpd
+
+      - name: Verify daemon browser boundary in real Electron
+        working-directory: backend
+        run: |
+          AO_BOUNDARY_ELECTRON="$(node -p "require('../frontend/node_modules/electron')")" xvfb-run -a go test -count=1 -run '^TestBrowserBoundaryElectron$' ./internal/httpd
 
       - name: Run guarded-navigation browser integration
         run: npm run test:browser-postcondition-integration

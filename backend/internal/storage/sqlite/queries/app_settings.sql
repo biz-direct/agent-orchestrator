@@ -15,3 +15,18 @@ UPDATE app_settings SET global_orchestrator_rules = ?, updated_at = ? WHERE id =
 
 -- name: SetGlobalWorkerRules :exec
 UPDATE app_settings SET global_worker_rules = ?, updated_at = ? WHERE id = 1;
+
+-- name: SetVersionRefresh :exec
+UPDATE app_settings SET version_refresh = ?, updated_at = ? WHERE id = 1;
+
+-- name: SetHarnessDefault :exec
+UPDATE app_settings
+SET harness_defaults = json_set(harness_defaults, sqlc.arg(harness_path), json(sqlc.arg(config))),
+    updated_at = sqlc.arg(updated_at)
+WHERE id = 1;
+
+-- name: ResetHarnessDefault :exec
+UPDATE app_settings
+SET harness_defaults = json_remove(harness_defaults, sqlc.arg(harness_path)),
+    updated_at = sqlc.arg(updated_at)
+WHERE id = 1;

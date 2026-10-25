@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,14 +18,14 @@ import (
 )
 
 func TestNewTelemetrySink_DefaultsToNoopWhenDisabled(t *testing.T) {
-	sink := newTelemetrySink(config.Config{}, nil, slog.Default())
+	sink, _ := newTelemetrySink(config.Config{}, nil, slog.Default())
 	if _, ok := sink.(telemetryadapter.NoopSink); !ok {
 		t.Fatalf("sink type = %T, want telemetry.NoopSink", sink)
 	}
 }
 
 func TestNewTelemetrySink_MetricsOnlyDoesNotEnableEvents(t *testing.T) {
-	sink := newTelemetrySink(config.Config{Telemetry: config.TelemetryConfig{Metrics: true}}, nil, slog.Default())
+	sink, _ := newTelemetrySink(config.Config{Telemetry: config.TelemetryConfig{Metrics: true}}, nil, slog.Default())
 	if _, ok := sink.(telemetryadapter.NoopSink); !ok {
 		t.Fatalf("sink type = %T, want telemetry.NoopSink when only metrics are enabled", sink)
 	}
@@ -36,7 +39,7 @@ func TestNewTelemetrySink_UsesLocalSQLiteWhenEnabled(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	sink := newTelemetrySink(config.Config{Telemetry: config.TelemetryConfig{Events: true}, DataDir: dataDir}, store, slog.Default())
+	sink, _ := newTelemetrySink(config.Config{Telemetry: config.TelemetryConfig{Events: true}, DataDir: dataDir}, store, slog.Default())
 	local, ok := sink.(*telemetryadapter.LocalSQLiteSink)
 	if !ok {
 		t.Fatalf("sink type = %T, want *telemetry.LocalSQLiteSink", sink)
@@ -52,7 +55,7 @@ func TestNewTelemetrySink_FanoutIncludesPostHogWhenConfigured(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	sink := newTelemetrySink(config.Config{
+	sink, _ := newTelemetrySink(config.Config{
 		DataDir: dataDir,
 		Telemetry: config.TelemetryConfig{
 			Events:      true,
@@ -72,18 +75,11 @@ type wiringTestRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f wiringTestRoundTripper) Do(req *http.Request) (*http.Response, error) { return f(req) }
 
-// TestTelemetryWiringAggregatesUsageErrorsAndPreservesCountOnTheWire builds
-// the real aggregation -> rate-limit -> PostHog chain (the same shape
-// newTelemetrySink wires up), using the actual aggregatedEventNames list, and
-// asserts an event named exactly as httpd/router.go emits it
-// ("ao.cli.usage_errors") both gets folded into one rollup AND that the
-// rollup's count survives PostHog's remote payload allowlist onto the wire.
-// This is the test that would have caught two real bugs during review: an
-// aggregatedEventNames entry that didn't match the emitted event name
-// (silently skipping aggregation for that name), and count/window_start/
-// window_end being absent from the allowlist (silently stripped before
-// reaching PostHog even once aggregation ran correctly).
-func TestTelemetryWiringAggregatesUsageErrorsAndPreservesCountOnTheWire(t *testing.T) {
+// TestTelemetryWiringDailyUsageSummaryPreservesCountOnTheWire builds the
+// daily summary in front of PostHog, the shape newTelemetrySink wires up, and
+// asserts ao.cli.usage_errors becomes one event whose count survives the
+// allowlist. Raw error text must not.
+func TestTelemetryWiringDailyUsageSummaryPreservesCountOnTheWire(t *testing.T) {
 	requests := make(chan map[string]any, 1)
 	remote, err := telemetryadapter.NewPostHogSink(t.TempDir(), "phc_test", "https://us.i.posthog.com", "", "",
 		wiringTestRoundTripper(func(req *http.Request) (*http.Response, error) {
@@ -99,26 +95,24 @@ func TestTelemetryWiringAggregatesUsageErrorsAndPreservesCountOnTheWire(t *testi
 		t.Fatalf("NewPostHogSink: %v", err)
 	}
 
-	rateLimited := telemetryadapter.NewRateLimitedSink(remote, aggregatedEventNames)
-	// flushEvery is intentionally long: the test controls flushing via
-	// Close(), not the background ticker, so it can't be flaky on timing.
-	aggregated := telemetryadapter.NewAggregatingSink(rateLimited, aggregatedEventNames, time.Hour)
-
+	daily := telemetryadapter.NewDailySummarySink(remote, filepath.Join(t.TempDir(), "cli-usage.json"))
+	day := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < 3; i++ {
-		aggregated.Emit(context.Background(), ports.TelemetryEvent{
-			Name:   "ao.cli.usage_errors",
-			Source: "cli",
-			Level:  ports.TelemetryLevelWarn,
+		daily.Emit(context.Background(), ports.TelemetryEvent{
+			Name:       "ao.cli.usage_errors",
+			Source:     "cli",
+			OccurredAt: day,
+			Level:      ports.TelemetryLevelWarn,
 			Payload: map[string]any{
-				"component":  "cli",
-				"operation":  "command_parse",
-				"error_kind": "usage",
+				"component":    "cli",
+				"operation":    "command_parse",
+				"error_kind":   "usage",
+				"command_path": "ao session",
+				"error":        "do not send raw text",
 			},
 		})
 	}
-	if err := aggregated.Close(context.Background()); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	daily.FlushCompleted(context.Background(), day.Add(24*time.Hour))
 
 	select {
 	case req := <-requests:
@@ -133,14 +127,14 @@ func TestTelemetryWiringAggregatesUsageErrorsAndPreservesCountOnTheWire(t *testi
 		if !ok || count != 3 {
 			t.Fatalf("properties.count = %#v, want 3 (rollup count must survive the PostHog allowlist)", props["count"])
 		}
-		if ws, ok := props["window_start"].(string); !ok || ws == "" {
-			t.Fatalf("properties.window_start = %#v, want a non-empty timestamp string", props["window_start"])
-		}
-		if we, ok := props["window_end"].(string); !ok || we == "" {
-			t.Fatalf("properties.window_end = %#v, want a non-empty timestamp string", props["window_end"])
-		}
 		if props["component"] != "cli" || props["operation"] != "command_parse" {
-			t.Fatalf("rollup lost sample dims: %#v", props)
+			t.Fatalf("summary lost sample dims: %#v", props)
+		}
+		if props["command_path"] != "ao session" || props["error_kind"] != "usage" {
+			t.Fatalf("command properties = %#v", props)
+		}
+		if props["error"] != nil {
+			t.Fatalf("raw error reached PostHog: %#v", props["error"])
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("PostHog sink did not send the aggregated rollup")
@@ -150,8 +144,81 @@ func TestTelemetryWiringAggregatesUsageErrorsAndPreservesCountOnTheWire(t *testi
 // A default (fresh install) config must build no sink that can reach the network.
 func TestNewTelemetrySink_DefaultConfigIsNoop(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir()}
-	sink := newTelemetrySink(cfg, nil, slog.New(slog.DiscardHandler))
+	sink, _ := newTelemetrySink(cfg, nil, slog.New(slog.DiscardHandler))
 	if _, ok := sink.(telemetryadapter.NoopSink); !ok {
 		t.Fatalf("default config sink = %T, want NoopSink", sink)
+	}
+}
+
+type countingSink struct{ events int }
+
+func (s *countingSink) Emit(context.Context, ports.TelemetryEvent) { s.events++ }
+func (s *countingSink) Close(context.Context) error                { return nil }
+
+// A saved opt-out must veto product events even when the environment turns
+// telemetry on, and lifting it must let them through again.
+func TestPolicyGatedSinkFollowsThePersistedConsent(t *testing.T) {
+	var allowed atomic.Bool
+	inner := &countingSink{}
+	sink := policyGatedSink(inner, &allowed)
+
+	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
+	if inner.events != 0 {
+		t.Fatalf("exported %d events while the policy said no", inner.events)
+	}
+	allowed.Store(true)
+	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
+	if inner.events != 1 {
+		t.Fatalf("exported %d events after consent, want 1", inner.events)
+	}
+	allowed.Store(false)
+	sink.Emit(context.Background(), ports.TelemetryEvent{Name: "ao.daemon.started"})
+	if inner.events != 1 {
+		t.Fatal("a revoked consent kept exporting")
+	}
+}
+
+// Persisted consent is enforced where telemetry leaves the process: a stored
+// daily summary from an earlier run must not be flushed at shutdown while the
+// policy says no, and is exported once consent is on (so the seed is real).
+func TestGatedTelemetrySinkDoesNotFlushStoredSummaryWithoutConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed bool
+		want    int
+	}{{"consent off", false, 0}, {"consent on", true, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dataDir, "telemetry"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			stored := `{"day":"2026-01-01","counts":{"ao session\u0000usage":2},"sent":false}`
+			if err := os.WriteFile(filepath.Join(dataDir, "telemetry", "cli-usage-daily.json"), []byte(stored), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var requests atomic.Int32
+			telemetryHTTPClient = wiringTestRoundTripper(func(req *http.Request) (*http.Response, error) {
+				requests.Add(1)
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+			})
+			t.Cleanup(func() { telemetryHTTPClient = nil })
+
+			cfg := config.Config{DataDir: dataDir, Telemetry: config.TelemetryConfig{
+				Events: true, EventsExplicit: true, Remote: config.TelemetryRemotePostHog,
+				PostHogKey: "phc_test", PostHogHost: "https://us.i.posthog.com",
+			}}
+			store, err := sqlitetest.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			sink, _ := newGatedTelemetrySink(cfg, store, slog.New(slog.DiscardHandler), func() bool { return tc.allowed })
+			if err := sink.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got := int(requests.Load()); got != tc.want {
+				t.Fatalf("PostHog requests = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }

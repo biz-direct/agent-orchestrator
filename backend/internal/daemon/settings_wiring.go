@@ -24,9 +24,11 @@ func (s settingsStore) GetAppSettings(ctx context.Context) (settingssvc.Snapshot
 	}
 	return settingssvc.Snapshot{
 		DefaultSessionMode:      row.DefaultSessionMode,
+		HarnessDefaults:         row.HarnessDefaults,
 		CloudOffering:           row.CloudOffering,
 		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
 		GlobalWorkerRules:       row.GlobalWorkerRules,
+		VersionRefresh:          row.VersionRefresh,
 		UpdatedAt:               row.UpdatedAt,
 	}, nil
 }
@@ -49,4 +51,12 @@ func (s settingsStore) SetGlobalOrchestratorRules(ctx context.Context, rules str
 
 func (s settingsStore) SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error {
 	return s.store.SetGlobalWorkerRules(ctx, rules, now)
+}
+
+func (s settingsStore) SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error {
+	return s.store.SetVersionRefresh(ctx, enabled, now)
+}
+
+func (s settingsStore) SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault, now time.Time) error {
+	return s.store.SetHarnessDefault(ctx, agent, value, now)
 }

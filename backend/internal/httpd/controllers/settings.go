@@ -20,7 +20,9 @@ type SettingsService interface {
 	SetCloudOffering(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	SetGlobalOrchestratorRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
 	SetGlobalWorkerRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
+	SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault) (settingssvc.Snapshot, error)
 	SetChatHibernationEnabled(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
+	SetVersionRefresh(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	ChatHarnesses(candidates []domain.AgentHarness) []domain.AgentHarness
 	Offering() settingssvc.Offering
 }
@@ -42,6 +44,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Patch("/settings/global-orchestrator-rules", c.setGlobalOrchestratorRules)
 	r.Patch("/settings/global-worker-rules", c.setGlobalWorkerRules)
 	r.Patch("/settings/chat-hibernation", c.setChatHibernation)
+	r.Patch("/settings/version-refresh", c.setVersionRefresh)
+	r.Patch("/settings/harness-defaults/{agent}", c.setHarnessDefault)
 }
 
 func (c *SettingsController) get(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +190,28 @@ func (c *SettingsController) setChatHibernation(w http.ResponseWriter, r *http.R
 	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
 }
 
+func (c *SettingsController) setVersionRefresh(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/version-refresh")
+		return
+	}
+	var req UpdateVersionRefreshRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	if req.Enabled == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation",
+			"VERSION_REFRESH_INVALID", "enabled must be true or false", nil)
+		return
+	}
+	snapshot, err := c.Svc.SetVersionRefresh(r.Context(), *req.Enabled)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
+}
+
 func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsResponse {
 	// Reported so the client can warn that choosing chat narrows which agents are
 	// available, instead of letting the user discover it at spawn time.
@@ -197,6 +223,7 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 	offering := c.Svc.Offering()
 	return SettingsResponse{
 		DefaultSessionMode:      string(snapshot.DefaultSessionMode),
+		HarnessDefaults:         snapshot.HarnessDefaults,
 		ChatHarnesses:           names,
 		Client:                  offering.Client,
 		LocalEnabled:            offering.LocalEnabled,
@@ -207,5 +234,36 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 		GlobalOrchestratorRules: snapshot.GlobalOrchestratorRules,
 		GlobalWorkerRules:       snapshot.GlobalWorkerRules,
 		ChatHibernationEnabled:  snapshot.ChatHibernationEnabled,
+		VersionRefresh:          snapshot.VersionRefresh,
 	}
+}
+
+func (c *SettingsController) setHarnessDefault(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/settings/harness-defaults/{agent}")
+		return
+	}
+	var req UpdateHarnessDefaultRequest
+	if !decodeConversationBody(w, r, &req) {
+		return
+	}
+	if req.DisabledModels == nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", "HARNESS_DEFAULT_INVALID", "disabledModels is required; use an empty list to offer every model", nil)
+		return
+	}
+	agent := domain.AgentHarness(chi.URLParam(r, "agent"))
+	snapshot, err := c.Svc.SetHarnessDefault(r.Context(), agent, domain.HarnessDefault{DisabledModels: *req.DisabledModels})
+	if errors.Is(err, settingssvc.ErrUnknownHarness) {
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "HARNESS_NOT_FOUND", err.Error(), nil)
+		return
+	}
+	if errors.Is(err, settingssvc.ErrInvalidHarnessDefault) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "validation", "HARNESS_DEFAULT_INVALID", err.Error(), nil)
+		return
+	}
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, c.response(snapshot))
 }

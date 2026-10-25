@@ -39,6 +39,11 @@ func TestAttachedSessionsAreHiddenFromEverySessionListing(t *testing.T) {
 			t.Fatalf("%s must hide attached rows from every consumer (board, reaper, observers): %+v", name, got)
 		}
 	}
+	// Maintenance still has to see it: an attached session owns a live process
+	// that a harness update must not replace or stop.
+	if got, err := s.ListAllSessionsIncludingAttached(ctx); err != nil || len(got) != 2 {
+		t.Fatalf("ListAllSessionsIncludingAttached = %d rows, err=%v; want owner and attached", len(got), err)
+	}
 	// It is still addressable by id, which is how its conversation is served.
 	if _, ok, err := s.GetSession(ctx, attached.ID); err != nil || !ok {
 		t.Fatalf("attached row must be readable by id: ok=%v err=%v", ok, err)

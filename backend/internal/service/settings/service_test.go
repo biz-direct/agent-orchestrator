@@ -26,6 +26,9 @@ func (*hibernationSettingsStore) SetGlobalWorkerRules(context.Context, string, t
 func (*hibernationSettingsStore) SetGlobalOrchestratorRules(context.Context, string, time.Time) error {
 	return nil
 }
+func (*hibernationSettingsStore) SetVersionRefresh(context.Context, bool, time.Time) error {
+	return nil
+}
 
 func TestChatHibernationGateResetsOnDaemonBoot(t *testing.T) {
 	ctx := context.Background()
@@ -165,5 +168,39 @@ func TestSetGlobalOrchestratorRules(t *testing.T) {
 	_, err = svc.SetGlobalOrchestratorRules(context.Background(), strings.Repeat("x", domain.MaxOrchestratorRulesBytes+1))
 	if !errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
 		t.Fatalf("err = %v, want too large", err)
+	}
+}
+
+func (*hibernationSettingsStore) SetHarnessDefault(context.Context, domain.AgentHarness, domain.HarnessDefault, time.Time) error {
+	return nil
+}
+
+type versionRefreshStore struct {
+	hibernationSettingsStore
+	refresh bool
+	reads   int
+}
+
+func (s *versionRefreshStore) GetAppSettings(context.Context) (Snapshot, error) {
+	s.reads++
+	return Snapshot{VersionRefresh: s.refresh}, nil
+}
+
+func (s *versionRefreshStore) SetVersionRefresh(_ context.Context, enabled bool, _ time.Time) error {
+	s.refresh = enabled
+	return nil
+}
+
+func TestVersionRefreshToggleIsReadOnceAndCached(t *testing.T) {
+	ctx := context.Background()
+	store := &versionRefreshStore{refresh: true}
+	svc := New(store, nil, Offering{}, nil)
+	first := svc.VersionRefreshEnabled(ctx)
+	if second := svc.VersionRefreshEnabled(ctx); !first || !second || store.reads != 1 {
+		t.Fatalf("enabled reads = %d, want one cached read", store.reads)
+	}
+	snapshot, err := svc.SetVersionRefresh(ctx, false)
+	if err != nil || snapshot.VersionRefresh || svc.VersionRefreshEnabled(ctx) {
+		t.Fatalf("turn off: snapshot=%+v err=%v enabled=%t", snapshot, err, svc.VersionRefreshEnabled(ctx))
 	}
 }

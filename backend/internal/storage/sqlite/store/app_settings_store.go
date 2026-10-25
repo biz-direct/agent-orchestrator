@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 // AppSettings is the durable preference set. Field-compatible with
 // service/settings.Snapshot, which the daemon wiring adapts.
 type AppSettings struct {
+	HarnessDefaults map[string]domain.HarnessDefault
 	// DefaultSessionMode is the interface a new session gets when the spawn does
 	// not name one. Never applied to an existing session: only an explicit
 	// interface transition changes a live session's committed mode, so
@@ -31,7 +33,10 @@ type AppSettings struct {
 	// GlobalWorkerRules are standing instructions added to every worker prompt
 	// on this daemon. Empty means none.
 	GlobalWorkerRules string
-	UpdatedAt         time.Time
+	// VersionRefresh moves idle open sessions to a harness release installed
+	// while they ran.
+	VersionRefresh bool
+	UpdatedAt      time.Time
 }
 
 // GetAppSettings reads the preference row.
@@ -40,13 +45,19 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 	if err != nil {
 		return AppSettings{}, fmt.Errorf("read app settings: %w", err)
 	}
+	defaults := make(map[string]domain.HarnessDefault)
+	if err := json.Unmarshal([]byte(row.HarnessDefaults), &defaults); err != nil {
+		return AppSettings{}, fmt.Errorf("read harness defaults: %w", err)
+	}
 	return AppSettings{
+		HarnessDefaults: defaults,
 		// Normalized on read: a value written by a build that knows a mode this
 		// one does not must still resolve to something dispatchable.
 		DefaultSessionMode:      domain.NormalizeSessionMode(row.DefaultSessionMode),
 		CloudOffering:           row.CloudOffering,
 		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
 		GlobalWorkerRules:       row.GlobalWorkerRules,
+		VersionRefresh:          row.VersionRefresh,
 		UpdatedAt:               row.UpdatedAt,
 	}, nil
 }
@@ -104,4 +115,33 @@ func (s *Store) SetGlobalWorkerRules(ctx context.Context, rules string, now time
 		return fmt.Errorf("set global worker rules: %w", err)
 	}
 	return nil
+}
+
+// SetVersionRefresh persists whether open sessions move to new harness releases.
+func (s *Store) SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.SetVersionRefresh(ctx, gen.SetVersionRefreshParams{
+		VersionRefresh: enabled,
+		UpdatedAt:      now,
+	}); err != nil {
+		return fmt.Errorf("set version refresh: %w", err)
+	}
+	return nil
+}
+
+// SetHarnessDefault updates one entry atomically so concurrent saves for other
+// harnesses cannot overwrite each other. Empty values remove the override.
+func (s *Store) SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	path := `$."` + string(agent) + `"`
+	if value.IsZero() {
+		return s.qw.ResetHarnessDefault(ctx, gen.ResetHarnessDefaultParams{HarnessPath: path, UpdatedAt: now})
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return s.qw.SetHarnessDefault(ctx, gen.SetHarnessDefaultParams{HarnessPath: path, Config: string(data), UpdatedAt: now})
 }

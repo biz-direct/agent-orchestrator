@@ -204,9 +204,6 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 	useEnsureAgentReadiness({ hostId });
 	const persist = async (values: ProjectSettingsDraft): Promise<SettingsSaveResult> => {
 		const savedKey = JSON.stringify(values);
-		void captureRendererEvent("ao.renderer.settings_save_requested", {
-			project_id: projectId,
-		});
 		// Validate a changed file through the owning daemon before persisting it.
 		const file = values.orchestratorRulesFile?.trim() ?? "";
 		if (file && file !== (config.orchestratorRulesFile ?? "").trim()) {
@@ -408,7 +405,7 @@ function SettingsBody({ project, projectId, hostId, hostConnected, onSaved, sect
 			onSave={commit}
 			rulesFileError={rulesFileError}
 		/>}
-		modelScope={() => projectId} defaultReviewer={(draft) => WORKER_DEFAULT_REVIEWERS[draft.workerAgent] ?? "claude-code"}
+		modelScope={() => ""} defaultReviewer={(draft) => WORKER_DEFAULT_REVIEWERS[draft.workerAgent] ?? "claude-code"}
 		reviewerWarning={reviewerTrustWarning} save={save} saveUnchanged onSaveState={onSaveState}
 		modelHostId={hostId}
 		renderAgent={(props) => <LocalAgentPicker {...props} projectId={projectId} hostId={hostId} agentsQuery={agentsQuery} />} />;

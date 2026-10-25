@@ -318,10 +318,10 @@ func TestRoleRemovalAndOwnerKillRefuseWhileTheRoleIsBeingResumed(t *testing.T) {
 	}
 	stoppedBefore := len(launcher.stopped)
 
-	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); !errors.Is(err, ErrSwitchInProgress) {
+	if err := m.StopCrewRole(context.Background(), owner.ID, "builder"); !errors.Is(err, ErrOperationInProgress) {
 		t.Fatalf("removal must be refused while the role is being resumed: %v", err)
 	}
-	if _, err := m.Kill(context.Background(), owner.ID); !errors.Is(err, ErrSwitchInProgress) {
+	if _, err := m.Kill(context.Background(), owner.ID); !errors.Is(err, ErrOperationInProgress) {
 		t.Fatalf("the worker kill must be refused too: %v", err)
 	}
 	if len(launcher.stopped) != stoppedBefore || st.sessions[role.ID].IsTerminated || ws.destroyed != 0 || st.sessions[owner.ID].IsTerminated {
@@ -347,7 +347,7 @@ func TestRoleRemovalAndDirectKillAreRefusedWhileTheRoleIsStarting(t *testing.T) 
 	}
 	role := startRole(t, m, owner, "builder")
 
-	if !errors.Is(removeErr, ErrSwitchInProgress) || !errors.Is(killErr, ErrSwitchInProgress) {
+	if !errors.Is(removeErr, ErrOperationInProgress) || !errors.Is(killErr, ErrOperationInProgress) {
 		t.Fatalf("both must be refused mid-creation: remove=%v kill=%v", removeErr, killErr)
 	}
 	if role.ID != roleID || st.sessions[role.ID].IsTerminated || len(launcher.started) != 1 || ws.destroyed != 0 {

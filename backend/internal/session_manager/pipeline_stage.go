@@ -89,7 +89,7 @@ func (m *Manager) terminateAttachedSession(ctx context.Context, id domain.Sessio
 	if role != "" {
 		if err := m.beginAgentOperation(ctx, id, agentOperationKill); err != nil {
 			if errors.Is(err, errAgentOperationInProgress) {
-				err = ErrSwitchInProgress
+				err = ErrOperationInProgress
 			}
 			return fmt.Errorf("terminate crew role %s (%s): %w", role, id, err)
 		}
