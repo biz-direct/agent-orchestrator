@@ -100,11 +100,17 @@ func TestEventsAllowedFollowsTheFileOverTheEnvironment(t *testing.T) {
 	if reader.EventsAllowed(ctx, true, true) {
 		t.Fatal("opted out in the app: want events off")
 	}
+	// Fork policy: a v1/v2 record predates the off-by-default rule, so its
+	// events_enabled cannot be read as an explicit opt-in.
 	write(`{"schema_version":1,"events_enabled":true,"consent_generation":"`+generation+`","updated_at":"2026-08-28T10:15:30.000Z"}`, 0o600)
+	if reader.EventsAllowed(ctx, true, true) {
+		t.Fatal("legacy v1 record: want events off until the user opts in again")
+	}
+	write(`{"schema_version":3,"events_enabled":true,"consent_generation":"`+generation+`","consent_production_enabled":false,"updated_at":"2026-08-28T10:15:30.000Z"}`, 0o600)
 	if !reader.EventsAllowed(ctx, true, true) {
 		t.Fatal("opted in: want events on")
 	}
-	write(`{"schema_version":1,"events_enabled":true,"consent_generation":"`+generation+`","updated_at":"2026-08-28T10:15:30.000Z"}`, 0o644)
+	write(`{"schema_version":3,"events_enabled":true,"consent_generation":"`+generation+`","consent_production_enabled":false,"updated_at":"2026-08-28T10:15:30.000Z"}`, 0o644)
 	if reader.EventsAllowed(ctx, true, true) {
 		t.Fatal("unsafe file: want events off")
 	}

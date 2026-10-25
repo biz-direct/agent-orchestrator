@@ -55,6 +55,7 @@ import { STANDALONE_WORKSPACE_ID } from "../types/workspace";
 import { AgentModelCombobox } from "./settings/AgentModelCombobox";
 import { EffortPicker, type EffortAvailability } from "./settings/EffortPicker";
 import { useModelTuning } from "./settings/ModelTuningControls";
+import { SettingsOptionMenu } from "./settings/SettingsOptionMenu";
 import {
 	readTaskComposerPreferences,
 	rememberTaskComposerPreference,

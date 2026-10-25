@@ -30,18 +30,11 @@ WHERE session_id = sqlc.arg(session_id) AND path = sqlc.arg(path)
   AND version < sqlc.arg(min_version)
 RETURNING sha256;
 
-<<<<<<< HEAD
-=======
 -- name: DeleteSessionArtifactPathVersions :many
 DELETE FROM session_artifact_versions
 WHERE session_id = sqlc.arg(session_id) AND path = sqlc.arg(path)
 RETURNING sha256;
 
--- name: DeleteSessionArtifactVersions :exec
-DELETE FROM session_artifact_versions
-WHERE session_id = sqlc.arg(session_id);
-
->>>>>>> upstream/main
 -- name: CountSessionArtifactVersionsBySHA :one
 SELECT COUNT(*) FROM session_artifact_versions
 WHERE session_id = sqlc.arg(session_id) AND sha256 = sqlc.arg(sha256);

@@ -909,8 +909,6 @@ WHERE conversation_turns.conversation_id = sqlc.arg(conversation_id)
   ))
 ORDER BY conversation_turns.requested_at, conversation_turns.rowid;
 
-<<<<<<< HEAD
-=======
 -- The latest non-discarded turn uses the same active lineage and ordering as
 -- SelectConversationTurns, independently of where late timeline items occur.
 -- name: SelectLatestConversationTurn :one
@@ -948,7 +946,6 @@ WHERE conversation_turns.conversation_id = sqlc.arg(conversation_id)
 ORDER BY conversation_turns.requested_at DESC, conversation_turns.rowid DESC
 LIMIT 1;
 
->>>>>>> upstream/main
 -- Turns represented by one bounded timeline page. Active turns are included
 -- even before their first item arrives, so the live-turn controls never vanish.
 -- name: SelectConversationTurnsPage :many

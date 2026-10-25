@@ -81,6 +81,10 @@ func (m *Manager) RunBackgroundTask(
 	if !ok {
 		return "", ports.ErrChatUnsupported
 	}
+	return m.runBackgroundTask(ctx, id, systemPrompt, prompt, runner.RunBackgroundTask)
+}
+
+func (m *Manager) runBackgroundTask(ctx context.Context, id domain.SessionID, systemPrompt, prompt string, run func(context.Context, domain.AgentHarness, ports.ChatStartConfig, string) (string, error)) (string, error) {
 	rec, err := m.getRecord(ctx, id)
 	if err != nil {
 		return "", err
@@ -88,7 +92,7 @@ func (m *Manager) RunBackgroundTask(
 	if rec.IsTerminated {
 		return "", fmt.Errorf("session %s is terminated", id)
 	}
-	// Existing background titles and suggestions use the provider's default effort.
+	// Existing background titles use the provider's default effort.
 	rec.Metadata.Effort = ""
 	return m.runRecordBackgroundTask(ctx, rec, systemPrompt, prompt, run)
 }
@@ -129,7 +133,7 @@ func (m *Manager) runRecordBackgroundTask(ctx context.Context, rec domain.Sessio
 	deleteProtectedEnv(env, EnvSessionID, envKeysCaseInsensitive)
 	pinRuntimePermissionEnv(env, config.Permissions)
 
-	return runner.RunBackgroundTask(ctx, rec.Harness, ports.ChatStartConfig{
+	return run(ctx, rec.Harness, ports.ChatStartConfig{
 		DataDir:       m.dataDir,
 		WorkspacePath: workspace,
 		Env:           env,
@@ -415,7 +419,6 @@ type SessionModeDefaults interface {
 	DefaultSessionMode(ctx context.Context) domain.SessionMode
 }
 
-<<<<<<< HEAD
 // GlobalOrchestratorRulesReader supplies the daemon-wide orchestrator rules
 // added to every project's orchestrator prompt. A read error fails the prompt
 // build instead of silently dropping the layer.
@@ -430,8 +433,6 @@ type GlobalWorkerRulesReader interface {
 	GlobalWorkerRules(ctx context.Context) (string, error)
 }
 
-// resolveSessionMode applies the precedence for a spawn:
-=======
 // resolveSessionMode applies startSessionMode with the daemon-owned default,
 // read here, at spawn time, so changing the preference affects only sessions
 // created afterwards. An existing session changes only through an explicit,
@@ -446,7 +447,6 @@ func (m *Manager) resolveSessionMode(ctx context.Context, kind domain.SessionKin
 }
 
 // startSessionMode is the precedence for a spawn's controller mode:
->>>>>>> upstream/main
 //
 //  1. the mode the caller explicitly requested;
 //  2. Chat for an orchestrator;

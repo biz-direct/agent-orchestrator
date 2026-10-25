@@ -2,12 +2,9 @@ package chat_test
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
 	"encoding/json"
 	"errors"
 	"strings"
->>>>>>> upstream/main
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -17,9 +14,14 @@ import (
 
 type backgroundTestConversation struct {
 	*terminatingConversation
+	interaction ports.ChatEventKind
 }
 
 func (c *backgroundTestConversation) StartDeferredTurn(providerTurnID string) error {
+	if c.interaction != "" {
+		c.emit(ports.ChatEvent{Kind: c.interaction, ProviderTurnID: providerTurnID})
+		return nil
+	}
 	c.emit(
 		ports.ChatEvent{Kind: ports.ChatEventMessageCompleted, ProviderTurnID: providerTurnID, Text: "Fix renderer"},
 		ports.ChatEvent{Kind: ports.ChatEventTurnCompleted, ProviderTurnID: providerTurnID, TurnState: domain.TurnStateCompleted},
@@ -50,10 +52,10 @@ func TestRunBackgroundTaskUsesNativeDriverAndTerminatesIt(t *testing.T) {
 	if err != nil || title != "Fix renderer" {
 		t.Fatalf("RunBackgroundTask = %q, %v", title, err)
 	}
-	if started.SessionID != "background-task-id" || started.ProviderScopeID != "scope-id" || !started.ProviderIDsScoped || !started.Ephemeral {
+	if started.SessionID != "background-task-id" || started.ProviderScopeID != "scope-id" || !started.ProviderIDsScoped || !started.Ephemeral || !started.ReadOnly || !started.DisableNetwork {
 		t.Fatalf("start identity = %#v", started)
 	}
-	if started.Model != "small" || started.Effort != "low" || started.Env["CODEX_HOME"] != "/account" {
+	if started.Model != "small" || started.Effort != "" || started.Env["CODEX_HOME"] != "/account" {
 		t.Fatalf("start config = %#v", started)
 	}
 	if !started.DisableTools || started.SystemPrompt != "title only" {
@@ -67,8 +69,6 @@ func TestRunBackgroundTaskUsesNativeDriverAndTerminatesIt(t *testing.T) {
 		t.Fatal("background provider was not terminated")
 	}
 }
-<<<<<<< HEAD
-=======
 
 func TestRunBackgroundTaskQuotesInputAsData(t *testing.T) {
 	for _, harness := range []domain.AgentHarness{domain.HarnessClaudeCode, domain.HarnessCodex, domain.HarnessKimi} {
@@ -214,4 +214,3 @@ func TestRunBackgroundTaskRejectsInteractionAndTerminatesProvider(t *testing.T) 
 		})
 	}
 }
->>>>>>> upstream/main

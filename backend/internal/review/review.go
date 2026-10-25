@@ -93,16 +93,6 @@ type Projects interface {
 
 // Deps wires the engine.
 type Deps struct {
-<<<<<<< HEAD
-	Store    Store
-	Sessions Sessions
-	PRs      PRs
-	Projects Projects
-	Launcher Launcher
-	// Pipelines keeps automatic review from starting while a pipeline run owns
-	// the worker. Nil leaves ordinary review behavior unchanged.
-	Pipelines ports.PipelineGuard
-=======
 	// HarnessUse, when set, is held across each reviewer launch.
 	HarnessUse HarnessUseGate
 	Store      Store
@@ -110,7 +100,9 @@ type Deps struct {
 	PRs        PRs
 	Projects   Projects
 	Launcher   Launcher
->>>>>>> upstream/main
+	// Pipelines keeps automatic review from starting while a pipeline run owns
+	// the worker. Nil leaves ordinary review behavior unchanged.
+	Pipelines ports.PipelineGuard
 	// ChatRecoveryDone gates operations that could mistake a recovering reviewer for an exited one.
 	ChatRecoveryDone <-chan struct{}
 
@@ -121,25 +113,15 @@ type Deps struct {
 
 // Engine is the core code-review engine.
 type Engine struct {
-<<<<<<< HEAD
-	store     Store
-	sessions  Sessions
-	prs       PRs
-	projects  Projects
-	launcher  Launcher
-	pipelines ports.PipelineGuard
-	clock     func() time.Time
-	newID     func() string
-=======
 	harnessUse HarnessUseGate
 	store      Store
 	sessions   Sessions
 	prs        PRs
 	projects   Projects
 	launcher   Launcher
+	pipelines  ports.PipelineGuard
 	clock      func() time.Time
 	newID      func() string
->>>>>>> upstream/main
 
 	chatRecoveryDone <-chan struct{}
 

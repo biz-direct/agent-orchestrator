@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import { Bot, KeyRound, Loader2, MonitorCog, Play, ScrollText, TriangleAlert, Wrench, X, type LucideIcon } from "lucide-react";
-=======
 import { Bot, FolderGit2, KeyRound, Loader2, MonitorCog, Play, ScrollText, TriangleAlert, Wrench, X, type LucideIcon } from "lucide-react";
->>>>>>> upstream/main
 import * as Dialog from "@radix-ui/react-dialog";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -105,12 +101,9 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 		{ id: "general", label: t("settings.project.general"), icon: MonitorCog },
 		{ id: "agents", label: t("settings.project.agents"), icon: Bot },
 	];
-<<<<<<< HEAD
 	if (!isCloudProjectSettings) {
 		projectSections.push({ id: "prompts", label: t("settings.prompts"), icon: ScrollText });
 	}
-	// Scripts, environment, and cues are local-daemon features; remote hosts and Cloud projects do not expose them.
-=======
 	// Scripts are project settings on local and Cloud projects alike (a Cloud
 	// session's worker runs them). Environment and cues are local-daemon
 	// features; remote hosts expose none of these.
@@ -121,7 +114,6 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 		projectSections.push({ id: "instructions", label: t("settings.project.instructions", { defaultValue: "Instructions" }), icon: ScrollText });
 	}
 	if (!remoteHostId) projectSections.push({ id: "scripts", label: t("settings.project.scripts"), icon: Wrench });
->>>>>>> upstream/main
 	if (!remoteHostId && !isCloudProjectSettings) {
 		projectSections.push({ id: "environment", label: t("settings.project.environment"), icon: KeyRound });
 		projectSections.push({ id: "cues", label: t("cues.title"), icon: Play });
@@ -209,16 +201,12 @@ function useSettingsLayer(settingsModal: SettingsModal | null) {
 		if (settingsModal?.scope === "global") {
 			setActiveSection(globalSettingsItem(settingsModal.section ?? "general", { cloudEnabled, developerMode, diagnostics, customCoder, selfServeBilling }).id);
 		}
-<<<<<<< HEAD
-	}, [cloudEnabled, developerMode, diagnostics, hasCoder, selfServeBilling, settingsModal]);
+	}, [cloudEnabled, developerMode, diagnostics, customCoder, selfServeBilling, settingsModal]);
 	useEffect(() => {
 		if (settingsModal?.scope === "project") {
 			setActiveProjectSection(isCloudProjectSettings && (settingsModal.section === "cues" || settingsModal.section === "prompts") ? "general" : settingsModal.section ?? "general");
 		}
 	}, [isCloudProjectSettings, settingsModal]);
-=======
-	}, [cloudEnabled, developerMode, diagnostics, customCoder, selfServeBilling, settingsModal]);
->>>>>>> upstream/main
 	// Project scope resets only when a project is opened, never when a gate
 	// settles, so a reported save state survives the offering loading.
 	useEffect(() => {

@@ -32,11 +32,6 @@ import {
 	useStageAttachments,
 	useWorkspaceFilePaths,
 } from "../../hooks/useConversation";
-<<<<<<< HEAD
-import { useAgentSwitchProviderCatalogs } from "../../hooks/useAgentSwitchProviderCatalogs";
-=======
-import { useConversationPromptSuggestion } from "../../hooks/useConversationPromptSuggestion";
->>>>>>> upstream/main
 import { useRememberProjectPermissions } from "../../hooks/useRememberProjectPermissions";
 import { useLatestCallback } from "../../hooks/useStable";
 import { useSessionBrowserLink } from "../../hooks/useSessionBrowserLink";
@@ -495,37 +490,6 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 			}
 		}
 	}, [autoOpenLinkInBrowser, isLoading, paths, snapshot, uiSessionId]);
-<<<<<<< HEAD
-	const observedSuccessfulSwitch = Boolean(
-		agentSwitch &&
-			observedSettledSwitchId === agentSwitch.id &&
-			switchPresentation?.outcome === "success",
-	);
-	useEffect(() => {
-		if (!observedSuccessfulSwitch || !agentSwitch || !switchPresentation) return;
-		settleAgentSwitch(agentSwitch, switchPresentation);
-	}, [agentSwitch, observedSuccessfulSwitch, settleAgentSwitch, switchPresentation]);
-	const shownSwitchPresentation =
-		switchPresentation?.outcome === "failure" && dismissedFailureSwitchId === agentSwitch?.id
-			? undefined
-			: switchPresentation?.outcome === "success"
-				? transientSuccessSwitchId === agentSwitch?.id
-					? transientSuccessNotice?.presentation
-					: undefined
-				: switchPresentation ?? transientSuccessNotice?.presentation;
-	const switchLocksChat = Boolean(
-		switchPresentation?.lockAgentTerminal && !switchPresentation.allowSourceInput,
-	);
-=======
-	const promptSuggestion = useConversationPromptSuggestion(snapshot, Boolean(
-		targetChatControllerReady && !controllerBusy && !localEchos.length &&
-		!commands.rollbackPending && !commands.editMessagePending && !commands.activateBranchPending && !commands.compacting &&
-		!session.isTerminated && session.provisionState !== "failed" && session.provisionState !== "provisioning" &&
-		!isLoading && !error && !refreshError && !unavailable &&
-		!controllerTransitioning && !agentResuming && !newWorkDisabled && !arriving &&
-		chatInFront,
-	), hostId);
->>>>>>> upstream/main
 	const renderShellFallback = Boolean(shellTarget && session);
 	// A switch from the terminal shows the chat before the daemon has a
 	// conversation to read. The starting snapshot stands in for the whole
@@ -625,11 +589,6 @@ export const SessionChatSurface = memo(function SessionChatSurface({
 				assetBaseUrl={assetBaseUrl}
 				remoteHostId={hostId}
 				snapshot={renderSnapshot}
-<<<<<<< HEAD
-				agentInputDisabled={switchLocksChat || handoffDialogOpen}
-=======
-				promptSuggestion={promptSuggestion}
->>>>>>> upstream/main
 				newWorkDisabled={newWorkDisabled}
 				onLinkOpen={openLinkInBrowser}
 				onSessionLinkOpen={openSessionLink}

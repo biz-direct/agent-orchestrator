@@ -336,15 +336,10 @@ SELECT id, project_id, num, issue_id, kind, harness,
     requested_output,
     provision_state, provision_error, provision_steps, branch_state, branch_naming, temporary_branch, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts,
-<<<<<<< HEAD
-    hibernated_at
-FROM sessions WHERE project_id IS ? AND attached_to_session_id = '' ORDER BY num;
-=======
     hibernated_at, stale_binary_since, stale_binary_version, stale_binary_launch, stale_binary_switch_failed_at,
     client_request_id, client_request_hash, client_request_committed,
     runtime_released_launch_id
-FROM sessions WHERE project_id IS ? ORDER BY num;
->>>>>>> upstream/main
+FROM sessions WHERE project_id IS ? AND attached_to_session_id = '' ORDER BY num;
 
 -- name: ListAllSessions :many
 SELECT id, project_id, num, issue_id, kind, harness,
@@ -363,15 +358,10 @@ SELECT id, project_id, num, issue_id, kind, harness,
     requested_output,
     provision_state, provision_error, provision_steps, branch_state, branch_naming, temporary_branch, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts,
-<<<<<<< HEAD
-    hibernated_at
-FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num;
-=======
     hibernated_at, stale_binary_since, stale_binary_version, stale_binary_launch, stale_binary_switch_failed_at,
     client_request_id, client_request_hash, client_request_committed,
     runtime_released_launch_id
-FROM sessions ORDER BY project_id, num;
->>>>>>> upstream/main
+FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num;
 
 -- name: ListChatHibernationCandidates :many
 SELECT id FROM sessions

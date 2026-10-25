@@ -103,18 +103,15 @@ func (m *Manager) InterfaceTransitionStatus(
 	if rec.IsTerminated {
 		status.ReasonCode = "SESSION_TERMINATED"
 		status.Reason = "Terminated sessions must be restored before switching interfaces."
-<<<<<<< HEAD
 	} else if role, rerr := m.crewRoleOf(ctx, id); rerr != nil {
 		status.ReasonCode = "INTERFACE_HANDOFF_UNSUPPORTED"
 		status.Reason = fmt.Sprintf("crew role state could not be determined: %v", rerr)
 	} else if role != "" {
 		status.ReasonCode = "INTERFACE_HANDOFF_UNSUPPORTED"
 		status.Reason = fmt.Sprintf("The %s role runs only as a Chat conversation and cannot switch to a terminal.", role)
-=======
 	} else if interfaceWorkspaceUnavailable(rec) {
 		status.ReasonCode = "WORKSPACE_UNAVAILABLE"
 		status.Reason = "This session's workspace was never set up. Retry start before switching interfaces."
->>>>>>> upstream/main
 	} else if target == domain.SessionModeChat && (m.chat == nil || !m.chat.SupportsChat(rec.Harness)) {
 		status.ReasonCode = "CHAT_UNSUPPORTED"
 		status.Reason = fmt.Sprintf("%s does not support Chat UI.", rec.Harness)

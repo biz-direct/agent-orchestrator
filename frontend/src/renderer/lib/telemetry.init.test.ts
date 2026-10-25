@@ -10,23 +10,18 @@ const posthogStub = {
 	capture: vi.fn((_event?: string, _properties?: Record<string, unknown>): object | undefined => ({})),
 	captureException: vi.fn(),
 	addExceptionStep: vi.fn(),
-<<<<<<< HEAD
-	opt_in_capturing: vi.fn(),
-	opt_out_capturing: vi.fn(),
-	reset: vi.fn(),
-=======
 	identify: vi.fn(),
 	reset: vi.fn(),
 	setPersonProperties: vi.fn(),
 	opt_in_capturing: vi.fn(),
 	opt_out_capturing: vi.fn(),
->>>>>>> upstream/main
 };
 
 function mockPosthog() {
 	vi.doMock("posthog-js/dist/module.full.no-external", () => ({
 		default: posthogStub,
-		PostHog: class {},
+		// A revoked client is replaced, never revived, so re-consent builds a new instance.
+		PostHog: class { constructor() { return posthogStub as never; } },
 	}));
 }
 
@@ -120,7 +115,6 @@ describe("initTelemetry recovery", () => {
 		expect(() => applyRendererTelemetryPolicy(false)).not.toThrow();
 	});
 
-<<<<<<< HEAD
 	it("never constructs the SDK when main withholds the bootstrap (no opt-in)", async () => {
 		mockPosthog();
 		vi.doMock("./bridge", () => ({
@@ -195,7 +189,8 @@ describe("initTelemetry recovery", () => {
 		expect(posthogStub.reset).not.toHaveBeenCalled();
 		await captureRendererEvent("ao.renderer.route_viewed", { surface: "home" });
 		expect(posthogStub.capture).not.toHaveBeenCalled();
-=======
+	});
+
 	it("deduplicates updater failures at the real capture boundary", async () => {
 		const captureRendererEvent = await initializedUpdateCapture();
 		const failure = { phase: "download", error_category: "network", to_version: "2.0.0" };
@@ -416,7 +411,9 @@ describe("PostHog identity and opt-out", () => {
 		await initTelemetry();
 		await applyAnalyticsOptOut(true);
 		expect(posthogStub.opt_out_capturing).toHaveBeenCalledTimes(1);
-		expect(posthogStub.reset).toHaveBeenCalledTimes(1);
+		// Fork: the client is torn down through the consent path; reset() would clear
+		// the SDK consent store and let capture resume.
+		expect(posthogStub.reset).not.toHaveBeenCalled();
 
 		await identifyCloudUser({ id: "user_01H", email: "dev@example.com" });
 		expect(posthogStub.identify).not.toHaveBeenCalled();
@@ -487,6 +484,5 @@ describe("PostHog identity and opt-out", () => {
 		expect(await init).toBe(false);
 		expect(posthogStub.init).not.toHaveBeenCalled();
 		expect(posthogStub.opt_in_capturing).not.toHaveBeenCalled();
->>>>>>> upstream/main
 	});
 });

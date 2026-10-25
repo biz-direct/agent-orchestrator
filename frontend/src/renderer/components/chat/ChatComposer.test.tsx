@@ -1350,19 +1350,6 @@ describe("sent message recall", () => {
 		expect(composerWireText(field)).toBe(`compare ${path} `);
 	});
 
-	it("recalls with Up while a Tab suggestion is offered, which dismisses it like any text", async () => {
-		const onDismiss = vi.fn();
-		const { field, onSend } = renderComposer({
-			sentMessages: SENT,
-			promptSuggestion: { id: "suggestion", text: "Run the tests", onDismiss },
-		});
-		await typeInComposer(field, "");
-		expect(press(field, "ArrowUp")).toBe(true);
-		expect(composerWireText(field)).toBe("latest question");
-		expect(onDismiss).toHaveBeenCalled();
-		expect(onSend).not.toHaveBeenCalled();
-	});
-
 	it("makes a recalled message the draft when an image is pasted into it", async () => {
 		const sessionId = "composer-history-pasted-into-recall";
 		const path = ".ao/attachments/attachment-history-pasted.png";

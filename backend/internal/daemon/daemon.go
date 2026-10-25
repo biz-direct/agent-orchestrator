@@ -525,9 +525,6 @@ func Run(buildVersion string) error {
 
 	persistentHostsReconciled := make(chan struct{})
 	reviewerChatsRecovered := make(chan struct{})
-<<<<<<< HEAD
-	sessionSvc, reviewSvc, wiredSessMgr, err := startSession(ctx, cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, notificationWriter, agents, agentSvc, managedPreview, browserBroker, browserAuthority, chatLauncher{svc: chatSvc, persistentHostReconcileDone: persistentHostsReconciled}, reviewerChatsRecovered, settingsSvc, policyCoordinator, tracker, codexOperationGate, log)
-=======
 	reviewers, err := reviewer.NewResolver()
 	if err != nil {
 		stop()
@@ -537,8 +534,7 @@ func Run(buildVersion string) error {
 		}
 		return fmt.Errorf("reviewer resolver: %w", err)
 	}
-	sessionSvc, reviewSvc, wiredSessMgr, err := startSession(ctx, cfg, runtimeAdapter, store, lcStack.LCM, lcStack.ArtifactVersions, messenger, telemetrySink, notificationWriter, agents, agentSvc, managedPreview, browserBroker, browserAuthority, chatLauncher{svc: chatSvc, persistentHostReconcileDone: persistentHostsReconciled}, reviewerChatsRecovered, settingsSvc, tracker, codexOperationGate, reviewers, log)
->>>>>>> upstream/main
+	sessionSvc, reviewSvc, wiredSessMgr, err := startSession(ctx, cfg, runtimeAdapter, store, lcStack.LCM, messenger, telemetrySink, notificationWriter, agents, agentSvc, managedPreview, browserBroker, browserAuthority, chatLauncher{svc: chatSvc, persistentHostReconcileDone: persistentHostsReconciled}, reviewerChatsRecovered, settingsSvc, tracker, codexOperationGate, reviewers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -571,8 +567,6 @@ func Run(buildVersion string) error {
 		},
 	})
 	sessMgr = wiredSessMgr
-<<<<<<< HEAD
-=======
 	if switcher, ok := wiredSessMgr.(chatsvc.TerminalProviderSwitcher); ok {
 		chatSvc.SetTerminalProviderSwitcher(switcher)
 	}
@@ -601,18 +595,6 @@ func Run(buildVersion string) error {
 			}
 		})
 	}
-	if runner, ok := sessMgr.(interface {
-		RunPromptSuggestionTask(context.Context, domain.SessionID, string, string, string) (string, error)
-	}); ok {
-		chatSvc.SetPromptSuggestionRunner(func(requestCtx context.Context, id domain.SessionID, turnID, systemPrompt, prompt string) (string, error) {
-			taskCtx, cancel := context.WithCancel(requestCtx)
-			stopOnShutdown := context.AfterFunc(ctx, cancel)
-			defer stopOnShutdown()
-			defer cancel()
-			return runner.RunPromptSuggestionTask(taskCtx, id, turnID, systemPrompt, prompt)
-		})
-	}
->>>>>>> upstream/main
 	if fenced, ok := sessMgr.(interface{ SetPersistentHostReconcileDone(<-chan struct{}) }); ok {
 		fenced.SetPersistentHostReconcileDone(persistentHostsReconciled)
 	}
@@ -1013,13 +995,10 @@ func Run(buildVersion string) error {
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Awake:              awakeSvc,
 		Projects:           projectSvc,
-<<<<<<< HEAD
 		Pipelines:          pipelinessvc.New(store),
 		Crews:              crewRoleService(crewssvc.New(store), store, sessMgr),
 		PipelineRuns:       pipelineRunSvc,
-=======
 		ArtifactVersions:   lcStack.ArtifactVersions,
->>>>>>> upstream/main
 		HostID:             hostIdentity.HostID,
 		Endpoints:          bs,
 		Agents:             agentSvc,
@@ -1501,7 +1480,6 @@ func stabilizeWorkingDirectory(dataDir string) error {
 	return nil
 }
 
-<<<<<<< HEAD
 // crewRoleService enables role sessions when the session manager can host them.
 func crewRoleService(svc *crewssvc.Service, store crewssvc.SessionStore, sessMgr any) *crewssvc.Service {
 	if host, ok := sessMgr.(ports.CrewRoleHost); ok {
@@ -1522,7 +1500,8 @@ func crewRoleService(svc *crewssvc.Service, store crewssvc.SessionStore, sessMgr
 func promptService(mgr sessionLifecycle) controllers.PromptService {
 	svc, _ := mgr.(controllers.PromptService)
 	return svc
-=======
+}
+
 // newAgentAccounts builds the Claude Code and Codex account catalog. Each
 // account is a config folder under the state dir; "This computer" is the CLI's
 // own folder, which AO never changes the login of.
@@ -1538,5 +1517,4 @@ func newAgentAccounts(cfg config.Config, store *sqlite.Store, codexHome string, 
 		&agentaccount.Codex{Binary: codexagent.New().ResolveBinary, Accounts: codexAccounts, DeviceHome: codexHome},
 	}
 	return agentaccounts.New(store, providers, filepath.Join(cfg.StateDir, "agent-accounts"), nil, log)
->>>>>>> upstream/main
 }

@@ -1211,7 +1211,6 @@ func TestSendDuringHibernationAcceptsThenWakesNativeConversation(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 // ownerGate is an execution gate that also reports pipeline ownership.
 type ownerGate struct {
 	owned bool
@@ -1251,7 +1250,9 @@ func TestHibernateChatKeepsPipelineExecutorAwake(t *testing.T) {
 	h.svc.SetExecutionGate(ownerGate{})
 	if slept, err := h.svc.HibernateChat(context.Background(), testSession); err != nil || !slept || conv.calls.Load() != 1 {
 		t.Fatalf("session without a pipeline: slept=%v err=%v stops=%d", slept, err, conv.calls.Load())
-=======
+	}
+}
+
 // A switch on a chat that went to sleep wakes it first, as a message would,
 // instead of being refused because the source agent is not running.
 func TestProviderSwitchWakesASleepingChatFirst(t *testing.T) {
@@ -1268,6 +1269,5 @@ func TestProviderSwitchWakesASleepingChatFirst(t *testing.T) {
 	err := h.svc.SwitchProvider(ctx, testSession, domain.ProviderSwitchRequest{TargetHarness: domain.HarnessCodex})
 	if !woken || err == nil || !strings.Contains(err.Error(), "could not be woken") {
 		t.Fatalf("woken=%v err=%v; want the switch to wake the chat first", woken, err)
->>>>>>> upstream/main
 	}
 }

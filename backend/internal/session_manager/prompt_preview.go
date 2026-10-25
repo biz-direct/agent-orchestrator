@@ -95,7 +95,7 @@ var ErrUnknownPromptMode = errors.New("unknown prompt mode")
 // when the caller names none: orchestrators default to Chat, workers follow the
 // daemon preference, and either falls back to TUI when Chat is unavailable.
 func (m *Manager) effectivePromptMode(ctx context.Context, kind domain.SessionKind) domain.SessionMode {
-	mode := m.resolveSessionMode(ctx, "")
+	mode := m.resolveSessionMode(ctx, kind, "")
 	if kind == domain.KindOrchestrator {
 		mode = domain.SessionModeChat
 	}

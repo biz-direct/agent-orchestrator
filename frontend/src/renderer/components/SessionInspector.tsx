@@ -53,11 +53,7 @@ import { formatTimeCompact } from "../lib/format-time";
 import { AgentAvatar } from "./AgentAvatar";
 import { SessionArtifactsView, type ArtifactOpenRequest } from "./SessionArtifactsView";
 import { OrchestratorChildrenSection } from "./OrchestratorChildrenSection";
-<<<<<<< HEAD
 import { SessionPipelineSection } from "./SessionPipelineSection";
-import { TopbarButton } from "./TopbarButton";
-=======
->>>>>>> upstream/main
 import { ProductExternalLink } from "./ProductExternalLink";
 import { CopyButton } from "./chat/CopyButton";
 import { ScriptRunPanel } from "./ScriptRunPanel";
@@ -77,13 +73,9 @@ import { sessionWorkspaceFilesQueryKey, sessionWorkspaceHistoryQueryOptions, use
 import { useCloudCp } from "../hooks/useCloudCp";
 import { useSessionBrowserLink } from "../hooks/useSessionBrowserLink";
 import { clearTerminateSessionState, useTerminateSession } from "../hooks/useTerminateSession";
-<<<<<<< HEAD
 import { formatEstimatedCost, type EstimatedCost } from "../lib/format-cost";
-import { prBrowserUrl, prCanMerge, prCardPresentation, prNounKeys, sessionPRDisplaySummaries } from "../lib/pr-display";
-import { formatTokenCount } from "../lib/format-token-count";
-=======
 import { prBrowserUrl, prCanMerge, prCardPresentation, prNounKeys, prRepositoryFromUrl, prsSpanRepositories, sessionPRDisplaySummaries } from "../lib/pr-display";
->>>>>>> upstream/main
+import { formatTokenCount } from "../lib/format-token-count";
 import type { SessionArtifact, WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import {
 	openPRs,

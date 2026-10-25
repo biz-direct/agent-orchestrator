@@ -194,12 +194,9 @@ func buildSystemPromptSections(cfg systemPromptConfig) []PromptSection {
 	default:
 		return nil
 	}
-<<<<<<< HEAD
+	builtin(userOrientationPrompt())
 	builtin(publishingScopePrompt())
 	builtin(systemPromptGuard())
-=======
-	sections = append(sections, userOrientationPrompt(), publishingScopePrompt(), systemPromptGuard())
->>>>>>> upstream/main
 	for _, section := range cfg.AdditionalSections {
 		if section := strings.TrimSpace(section); section != "" {
 			sections = append(sections, newPromptSection(PromptLayerRuntime, section))

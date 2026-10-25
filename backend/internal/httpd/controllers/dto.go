@@ -3522,7 +3522,6 @@ type UpdateSessionInterfaceRequest struct {
 	DefaultSessionMode string `json:"defaultSessionMode" enum:"chat,tui"`
 }
 
-<<<<<<< HEAD
 // UpdateGlobalOrchestratorRulesRequest replaces this daemon's global
 // orchestrator rules.
 type UpdateGlobalOrchestratorRulesRequest struct {
@@ -3563,13 +3562,13 @@ type EffectivePromptResponse struct {
 // PromptSessionsResponse is the body of GET /api/v1/prompts/sessions.
 type PromptSessionsResponse struct {
 	Sessions []sessionmanager.PromptSession `json:"sessions"`
-=======
+}
+
 // UpdateHarnessDefaultRequest replaces one harness's picker preference.
 type UpdateHarnessDefaultRequest struct {
 	// DisabledModels lists the model ids (each up to 256 characters) clients
 	// should leave out of their pickers. An empty list offers every catalog model.
 	DisabledModels *[]string `json:"disabledModels" required:"true" maxItems:"20000"`
->>>>>>> upstream/main
 }
 
 // UpdateCloudOfferingRequest flips the user's cloud toggle.

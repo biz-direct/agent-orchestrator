@@ -165,21 +165,14 @@ type AgentSwitchFailureReceipt struct {
 }
 
 type AppSetting struct {
-<<<<<<< HEAD
 	ID                      int64
 	DefaultSessionMode      domain.SessionMode
 	UpdatedAt               time.Time
 	CloudOffering           bool
 	GlobalOrchestratorRules string
+	HarnessDefaults         string
+	VersionRefresh          bool
 	GlobalWorkerRules       string
-=======
-	ID                 int64
-	DefaultSessionMode domain.SessionMode
-	UpdatedAt          time.Time
-	CloudOffering      bool
-	HarnessDefaults    string
-	VersionRefresh     bool
->>>>>>> upstream/main
 }
 
 type Automation struct {
@@ -939,7 +932,6 @@ type SessionInterfaceTransitionMessage struct {
 	AuthoredByUser  bool
 }
 
-<<<<<<< HEAD
 type SessionPipelineIntent struct {
 	SessionID   string
 	ProjectID   string
@@ -951,7 +943,8 @@ type SessionPipelineIntent struct {
 	RunID       string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-=======
+}
+
 type SessionTerminalTurn struct {
 	ID              int64
 	SessionID       string
@@ -961,7 +954,6 @@ type SessionTerminalTurn struct {
 	AgentResponse   string
 	RequestedAt     time.Time
 	RespondedAt     sql.NullTime
->>>>>>> upstream/main
 }
 
 type SessionWorktree struct {

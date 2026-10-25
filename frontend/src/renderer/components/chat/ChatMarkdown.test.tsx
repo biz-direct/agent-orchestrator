@@ -4,11 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aoBridge } from "../../lib/bridge";
 import { setApiBaseUrl } from "../../lib/api-client";
 import { renderMermaidDiagram } from "../../lib/mermaid-diagram";
-<<<<<<< HEAD
-import { ActivityTitle, ChatLinkProvider, ChatMarkdown, WorkspaceFileLinkedText } from "./ChatMarkdown";
-=======
-import { ActivityTitle, ChatLinkProvider, ChatMarkdown, ChatOpeningRef } from "./ChatMarkdown";
->>>>>>> upstream/main
+import { ActivityTitle, ChatLinkProvider, ChatMarkdown, ChatOpeningRef, WorkspaceFileLinkedText } from "./ChatMarkdown";
 import { ChatImageSourceProvider } from "./chat-image-source";
 
 const sessionPreview = vi.hoisted(() => vi.fn());

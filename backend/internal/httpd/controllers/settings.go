@@ -18,12 +18,9 @@ type SettingsService interface {
 	Get(ctx context.Context) (settingssvc.Snapshot, error)
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode) (settingssvc.Snapshot, error)
 	SetCloudOffering(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
-<<<<<<< HEAD
 	SetGlobalOrchestratorRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
 	SetGlobalWorkerRules(ctx context.Context, rules string) (settingssvc.Snapshot, error)
-=======
 	SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault) (settingssvc.Snapshot, error)
->>>>>>> upstream/main
 	SetChatHibernationEnabled(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	SetVersionRefresh(ctx context.Context, enabled bool) (settingssvc.Snapshot, error)
 	ChatHarnesses(candidates []domain.AgentHarness) []domain.AgentHarness
@@ -225,8 +222,8 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 	}
 	offering := c.Svc.Offering()
 	return SettingsResponse{
-<<<<<<< HEAD
 		DefaultSessionMode:      string(snapshot.DefaultSessionMode),
+		HarnessDefaults:         snapshot.HarnessDefaults,
 		ChatHarnesses:           names,
 		Client:                  offering.Client,
 		LocalEnabled:            offering.LocalEnabled,
@@ -237,19 +234,7 @@ func (c *SettingsController) response(snapshot settingssvc.Snapshot) SettingsRes
 		GlobalOrchestratorRules: snapshot.GlobalOrchestratorRules,
 		GlobalWorkerRules:       snapshot.GlobalWorkerRules,
 		ChatHibernationEnabled:  snapshot.ChatHibernationEnabled,
-=======
-		DefaultSessionMode:     string(snapshot.DefaultSessionMode),
-		HarnessDefaults:        snapshot.HarnessDefaults,
-		ChatHarnesses:          names,
-		Client:                 offering.Client,
-		LocalEnabled:           offering.LocalEnabled,
-		CloudOffering:          snapshot.CloudOffering,
-		ChatHibernationEnabled: snapshot.ChatHibernationEnabled,
-		VersionRefresh:         snapshot.VersionRefresh,
-		CloudEnabled:           offering.CloudEnabled(snapshot),
-		CloudControlPlaneURL:   offering.CloudControlPlaneURL,
-		TrackerIntakeEnabled:   offering.TrackerIntakeEnabled,
->>>>>>> upstream/main
+		VersionRefresh:          snapshot.VersionRefresh,
 	}
 }
 

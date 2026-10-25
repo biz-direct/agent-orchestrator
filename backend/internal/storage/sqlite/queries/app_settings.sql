@@ -10,13 +10,12 @@ UPDATE app_settings SET default_session_mode = ?, updated_at = ? WHERE id = 1;
 -- name: SetCloudOffering :exec
 UPDATE app_settings SET cloud_offering = ?, updated_at = ? WHERE id = 1;
 
-<<<<<<< HEAD
 -- name: SetGlobalOrchestratorRules :exec
 UPDATE app_settings SET global_orchestrator_rules = ?, updated_at = ? WHERE id = 1;
 
 -- name: SetGlobalWorkerRules :exec
 UPDATE app_settings SET global_worker_rules = ?, updated_at = ? WHERE id = 1;
-=======
+
 -- name: SetVersionRefresh :exec
 UPDATE app_settings SET version_refresh = ?, updated_at = ? WHERE id = 1;
 
@@ -31,4 +30,3 @@ UPDATE app_settings
 SET harness_defaults = json_remove(harness_defaults, sqlc.arg(harness_path)),
     updated_at = sqlc.arg(updated_at)
 WHERE id = 1;
->>>>>>> upstream/main

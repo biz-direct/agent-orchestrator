@@ -154,17 +154,6 @@ func (q *Queries) CommitSessionControllerEpoch(ctx context.Context, arg CommitSe
 	return result.RowsAffected()
 }
 
-<<<<<<< HEAD
-const getAttachedSessionIDForAttempt = `-- name: GetAttachedSessionIDForAttempt :one
-SELECT id FROM sessions WHERE attached_for_attempt_id = ?
-`
-
-func (q *Queries) GetAttachedSessionIDForAttempt(ctx context.Context, attachedForAttemptID string) (domain.SessionID, error) {
-	row := q.db.QueryRowContext(ctx, getAttachedSessionIDForAttempt, attachedForAttemptID)
-	var id domain.SessionID
-	err := row.Scan(&id)
-	return id, err
-=======
 const countStaleBinarySessions = `-- name: CountStaleBinarySessions :many
 SELECT harness, COUNT(*) AS sessions FROM sessions
 WHERE is_terminated = 0 AND hibernated_at IS NULL AND activity_state <> 'exited'
@@ -200,7 +189,17 @@ func (q *Queries) CountStaleBinarySessions(ctx context.Context) ([]CountStaleBin
 		return nil, err
 	}
 	return items, nil
->>>>>>> upstream/main
+}
+
+const getAttachedSessionIDForAttempt = `-- name: GetAttachedSessionIDForAttempt :one
+SELECT id FROM sessions WHERE attached_for_attempt_id = ?
+`
+
+func (q *Queries) GetAttachedSessionIDForAttempt(ctx context.Context, attachedForAttemptID string) (domain.SessionID, error) {
+	row := q.db.QueryRowContext(ctx, getAttachedSessionIDForAttempt, attachedForAttemptID)
+	var id domain.SessionID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getClientRequestSession = `-- name: GetClientRequestSession :one
@@ -802,15 +801,10 @@ SELECT id, project_id, num, issue_id, kind, harness,
     requested_output,
     provision_state, provision_error, provision_steps, branch_state, branch_naming, temporary_branch, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts,
-<<<<<<< HEAD
-    hibernated_at
-FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num
-=======
     hibernated_at, stale_binary_since, stale_binary_version, stale_binary_launch, stale_binary_switch_failed_at,
     client_request_id, client_request_hash, client_request_committed,
     runtime_released_launch_id
-FROM sessions ORDER BY project_id, num
->>>>>>> upstream/main
+FROM sessions WHERE attached_to_session_id = '' ORDER BY project_id, num
 `
 
 type ListAllSessionsRow struct {
@@ -1102,15 +1096,10 @@ SELECT id, project_id, num, issue_id, kind, harness,
     requested_output,
     provision_state, provision_error, provision_steps, branch_state, branch_naming, temporary_branch, is_task_preparation, automation_run_id, automation_launch_completed,
     claude_activity_facts, codex_activity_facts,
-<<<<<<< HEAD
-    hibernated_at
-FROM sessions WHERE project_id IS ? AND attached_to_session_id = '' ORDER BY num
-=======
     hibernated_at, stale_binary_since, stale_binary_version, stale_binary_launch, stale_binary_switch_failed_at,
     client_request_id, client_request_hash, client_request_committed,
     runtime_released_launch_id
-FROM sessions WHERE project_id IS ? ORDER BY num
->>>>>>> upstream/main
+FROM sessions WHERE project_id IS ? AND attached_to_session_id = '' ORDER BY num
 `
 
 type ListSessionsByProjectRow struct {

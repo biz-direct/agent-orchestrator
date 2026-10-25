@@ -262,7 +262,7 @@ func TestRunBackgroundTaskUsesResolvedWorkerHarnessAndConfig(t *testing.T) {
 		Metadata: domain.SessionMetadata{
 			WorkspacePath: "/ws/mer-1",
 			Model:         "selected-model",
-			Effort:        "low",
+			Effort:        "xhigh",
 			Permissions:   ports.PermissionModeAcceptEdits,
 		},
 	}
@@ -277,7 +277,7 @@ func TestRunBackgroundTaskUsesResolvedWorkerHarnessAndConfig(t *testing.T) {
 	}
 	task := launcher.background[0]
 	if launcher.backgroundHarnesses[0] != rec.Harness || task.WorkspacePath == rec.Metadata.WorkspacePath ||
-		task.Model != rec.Metadata.Model || task.Effort != rec.Metadata.Effort || task.Permissions != ports.PermissionModeAcceptEdits {
+		task.Model != rec.Metadata.Model || task.Effort != "" || task.Permissions != ports.PermissionModeAcceptEdits {
 		t.Fatalf("background task = %#v", task)
 	}
 	if _, err := os.Stat(task.WorkspacePath); !errors.Is(err, os.ErrNotExist) {
@@ -291,6 +291,9 @@ func TestRunBackgroundTaskUsesResolvedWorkerHarnessAndConfig(t *testing.T) {
 	}
 	if _, ok := task.Env[EnvSessionID]; ok {
 		t.Fatalf("background task inherited %s: %#v", EnvSessionID, task.Env)
+	}
+	if worker := st.sessions[rec.ID]; worker.Metadata.Model != rec.Metadata.Model || worker.Metadata.Effort != rec.Metadata.Effort {
+		t.Fatalf("background task changed worker model/effort: %#v", worker.Metadata)
 	}
 }
 

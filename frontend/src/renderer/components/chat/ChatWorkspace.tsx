@@ -144,16 +144,10 @@ import {
 	workerUpdatesOf,
 } from "./WorkerUpdates";
 import { HumanMessageEditor } from "./HumanMessageEditor";
-<<<<<<< HEAD
-import { ChatLinkProvider } from "./ChatMarkdown";
+import { ChatLinkProvider, ChatOpeningRef } from "./ChatMarkdown";
 import type { WorkspaceFileCatalog } from "../../lib/workspace-file-links";
 import { ChatImageSourceProvider } from "./chat-image-source";
-=======
-import { ChatLinkProvider, ChatOpeningRef } from "./ChatMarkdown";
-import { ChatImageSourceProvider } from "./chat-image-source";
 import type { AgentSwitchProps } from "./AgentSwitchPicker";
-import type { ComposerPromptSuggestion } from "./ComposerEditor";
->>>>>>> upstream/main
 import { ChatComposer, type ChatComposerHandle, type StoredComposerAttachment } from "./ChatComposer";
 import { ContextMeter } from "./ContextMeter";
 import { stagedAttachmentParts, attachmentName } from "./messageAttachments";

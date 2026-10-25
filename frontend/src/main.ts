@@ -42,12 +42,7 @@ import {
 } from "./main/auto-updater";
 import { listFeatureBuilds, getActiveFeatureBuild } from "./main/feature-builds";
 import { initMainSentry, sanitizeRendererCapture } from "./main/sentry-main";
-<<<<<<< HEAD
 import { TelemetryPolicyAuthority, readTelemetryOptInSync, resolveDesktopDataDir } from "./main/telemetry-policy-file";
-import { DaemonTelemetryPolicyClient } from "./main/daemon-telemetry-policy-client";
-=======
-import { TelemetryPolicyAuthority, resolveDesktopDataDir } from "./main/telemetry-policy-file";
->>>>>>> upstream/main
 import { DesktopTelemetryController } from "./main/desktop-telemetry-controller";
 import { TelemetryIdentityController } from "./main/telemetry-identity";
 import { readUpdateSettings, type UpdateSettings, type UpdateStatus } from "./main/update-settings";
@@ -3390,18 +3385,7 @@ app.whenReady().then(async () => {
 		);
 	}
 	void refreshGitHubOwners();
-<<<<<<< HEAD
-	const visibilityKillSwitched = (process.env.AO_TELEMETRY_DISABLED_EVENTS ?? "").split(",").some((name) => name.trim() === "ao.agent_switch.visibility_failure");
-	// The approved release gate is intentionally closed. Tests inject the
-	// dedicated no-cache sender; the shipping composition creates no visibility
-	// network transport until that gate is separately approved.
-	agentSwitchVisibilityController = new AgentSwitchVisibilityController({ send: async () => undefined, killSwitched: visibilityKillSwitched, diagnostic: (code) => console.warn("agent switch visibility diagnostic:", code) });
-	for (const shellContents of trustedShellWebContents.values()) agentSwitchVisibilityController.registerWindow(shellContents.id);
 	const authority = new TelemetryPolicyAuthority({ dataDir: desktopDataDir, platform: process.platform });
-	const daemonPolicy = new DaemonTelemetryPolicyClient(() => daemonStatus.state === "ready" && daemonStatus.port ? `http://127.0.0.1:${daemonStatus.port}` : null, (url, init) => net.fetch(url, init));
-=======
-	const authority = new TelemetryPolicyAuthority({ dataDir: desktopDataDir, packagedDefault: app.isPackaged, platform: process.platform });
->>>>>>> upstream/main
 	const policyController = new DesktopTelemetryController({
 		authority,
 		environmentAllowsEvents: rendererTelemetryEnabled(process.env, app.isPackaged),

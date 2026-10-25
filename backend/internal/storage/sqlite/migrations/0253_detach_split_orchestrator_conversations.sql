@@ -1,4 +1,5 @@
 -- +goose Up
+-- Numbered in the fork range (upstream 0197): the fork already shipped 0197 as session_requested_output.
 -- Older builds left a Chat orchestrator bound to two conversations (#6523): the
 -- session-scoped row that held what the user typed while it provisioned, and the
 -- project row its controller ran on. Every reader keyed on current_session_id

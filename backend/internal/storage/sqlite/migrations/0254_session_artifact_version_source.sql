@@ -1,4 +1,5 @@
 -- +goose Up
+-- Numbered in the fork range (upstream 0200) so it runs after 0252 creates session_artifact_versions.
 -- +goose StatementBegin
 ALTER TABLE session_artifact_versions
     ADD COLUMN source TEXT NOT NULL DEFAULT 'agent' CHECK (source IN ('agent', 'user'));

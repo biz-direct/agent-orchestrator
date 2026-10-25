@@ -414,7 +414,6 @@ func memoryPressure(svc controllers.SessionMemoryService) controllers.MemoryPres
 	return nil
 }
 
-<<<<<<< HEAD
 // pipelineSelector returns the run service as the spawn path's pipeline
 // selector, or a true nil interface when pipelines are not wired.
 func pipelineSelector(m pipelineruns.Manager) controllers.PipelineSelector {
@@ -430,7 +429,8 @@ func pipelineSelector(m pipelineruns.Manager) controllers.PipelineSelector {
 // stays cooperative.
 func pipelineCallers(deps APIDeps) controllers.PipelineCallerAuthority {
 	return controllers.PipelineCallerAuthority{Sessions: deps.Sessions, Capabilities: deps.SessionCapabilities}
-=======
+}
+
 // newAgentAccountsController moves sessions through the session service when
 // it can, so a move maps errors like every other session command.
 func newAgentAccountsController(deps APIDeps) *controllers.AgentAccountsController {
@@ -449,5 +449,4 @@ func agentBrowserURL(raw string) *url.URL {
 		return nil
 	}
 	return u
->>>>>>> upstream/main
 }

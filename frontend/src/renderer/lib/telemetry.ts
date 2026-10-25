@@ -300,11 +300,15 @@ export function withTelemetryContext(properties: TelemetryProperties): Telemetry
 let cloudUser: { id: string; email: string } | null = null;
 let githubLogin: string | null = null;
 let identifiedId: string | null = null;
-let posthogReady = false;
 let analyticsOptedOut = false;
 
+// The SDK exists and the user currently consents (the fork's consent path).
+function sdkLive(): boolean {
+	return sdkCreated && captureActive;
+}
+
 function registerBaseProperties(): void {
-	posthog.register({
+	client.register({
 		...telemetryContext,
 		surface: "renderer",
 		...(githubLogin ? { github_actor: githubLogin } : {}),
@@ -325,9 +329,9 @@ export async function identifyCloudUser(user: { id: string; email: string }): Pr
 	// was pending; this continuation must not identify who is no longer current.
 	if (analyticsOptedOut || cloudUser?.id !== user.id) return;
 	// Switching accounts without a sign-out: never layer B onto A's person.
-	if (identifiedId !== null) posthog.reset();
+	if (identifiedId !== null) client.reset();
 	registerBaseProperties();
-	posthog.identify(user.id, {
+	client.identify(user.id, {
 		email: user.email,
 		ao_cloud_user_id: user.id,
 		...(githubLogin ? { github_login: githubLogin } : {}),
@@ -342,15 +346,15 @@ export async function identifyCloudUser(user: { id: string; email: string }): Pr
  */
 export function clearCloudUser(): void {
 	cloudUser = null;
-	if (!posthogReady || identifiedId === null) return;
+	if (!sdkLive() || identifiedId === null) return;
 	identifiedId = null;
-	posthog.reset();
+	client.reset();
 	registerBaseProperties();
 }
 
 /**
  * Applies the in-app analytics opt-out. Opting out stops capture and calls
- * posthog.reset() so no identity survives in the SDK. Opting back in resumes
+ * client.reset() so no identity survives in the SDK. Opting back in resumes
  * capture, initializing the client first if this launch started opted out.
  * ponytail: after an in-session opt-in the SDK uses a fresh anonymous ID until
  * the next launch chooses an install ID or a fresh anonymous ID from the
@@ -366,20 +370,17 @@ export async function applyAnalyticsOptOut(optedOut: boolean): Promise<void> {
 		} catch {
 			// Storage is best-effort; capture is already gated on the flag.
 		}
-		if (posthogReady) {
-			posthog.opt_out_capturing();
-			posthog.reset();
-		}
+		// FORK: tear the client down through the consent path instead of reset():
+		// reset() would clear the SDK's consent store and let capture resume.
+		// Dropping the client also drops the identity it held.
+		applyRendererTelemetryPolicy(false);
 		identifiedId = null;
 		return;
 	}
-	if (posthogReady) {
-		posthog.opt_in_capturing({ captureEventName: false });
-		registerBaseProperties();
-	} else {
-		initPromise = null;
-		await initTelemetry();
-	}
+	// Opting back in only re-arms init; the bootstrap stays withheld until the
+	// fork's own consent is on, so this never turns telemetry on by itself.
+	applyRendererTelemetryPolicy(true);
+	await initTelemetry();
 	if (cloudUser) await identifyCloudUser(cloudUser);
 }
 
@@ -397,7 +398,7 @@ async function syncGithubLogin(): Promise<void> {
 		if (!login) continue;
 		githubLogin = login;
 		registerBaseProperties();
-		if (identifiedId) posthog.setPersonProperties({ github_login: login });
+		if (identifiedId) client.setPersonProperties({ github_login: login });
 		return;
 	}
 }
@@ -1185,13 +1186,13 @@ export async function initTelemetry(): Promise<boolean> {
 		installId = bootstrap.installId;
 		disabledEventMatchers = bootstrap.disabledEvents ?? [];
 		const channel = releaseChannelFrom(await readUpdateSettingsForTelemetry());
-<<<<<<< HEAD
-		// Consent may have been revoked while the settings read was in flight.
-		if (epoch !== consentEpoch) return false;
+		// Consent may have been revoked, or the user may have opted out, while the
+		// settings read was in flight.
+		if (epoch !== consentEpoch || analyticsOptedOut) return false;
 		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform, channel);
 		const sdk = sdkCreated ? undefined : await loadPostHogModule();
-		// Consent may have been revoked while the SDK was loading.
-		if (epoch !== consentEpoch) return false;
+		// Consent may have been revoked, or an opt-out may have landed, while the SDK was loading.
+		if (epoch !== consentEpoch || analyticsOptedOut) return false;
 		captureActive = true;
 		if (sdk) {
 			// A revoked client is never reused: requests it still has in flight
@@ -1202,28 +1203,11 @@ export async function initTelemetry(): Promise<boolean> {
 			killTransport = installTransportGuard(client);
 			sdkCreated = true;
 		}
-		client.opt_in_capturing();
-		client.register({
-			...telemetryContext,
-			surface: "renderer",
-		});
-=======
-		// The user may have opted out while the awaits above were pending; applyAnalyticsOptOut
-		// could only set the flag then, so honor it before any client exists.
-		if (analyticsOptedOut) return false;
-		telemetryContext = buildTelemetryContext(bootstrap.appVersion, bootstrap.platform, channel);
-		posthog = await loadPostHog();
-		// Loading the SDK is asynchronous; an opt-out in that gap must prevent
-		// both SDK initialization and the unconditional opt-in below.
-		if (analyticsOptedOut) return false;
-		posthog.init(POSTHOG_KEY, buildPostHogConfig(bootstrap.distinctId));
 		// A previous launch's opt-out is remembered by the SDK; the AO marker is the
 		// source of truth and the bootstrap is only handed out when it is absent.
-		posthog.opt_in_capturing({ captureEventName: false });
-		posthogReady = true;
+		client.opt_in_capturing({ captureEventName: false });
 		registerBaseProperties();
 		void syncGithubLogin();
->>>>>>> upstream/main
 		// Typed renderer fault intake has its own main-owned policy gate. PostHog
 		// product analytics are intentionally independent of that preference.
 		void initSentry({
@@ -1396,7 +1380,7 @@ export async function captureRendererEvent(event: string, properties?: Record<st
 				}
 				let sent = false;
 				try {
-					sent = Boolean(posthog.capture(dailyName, withTelemetryContext(await sanitizeRendererProperties(dailyName, daily))));
+					sent = Boolean(client.capture(dailyName, withTelemetryContext(await sanitizeRendererProperties(dailyName, daily))));
 				} catch {
 					sent = false;
 				}
@@ -1411,17 +1395,13 @@ export async function captureRendererEvent(event: string, properties?: Record<st
 	}
 	if (storage && event === "ao.renderer.update_downloaded") clearUpdateFailures(storage, sanitizedProperties.to_version);
 	const safeProperties = withTelemetryContext(sanitizedProperties);
-<<<<<<< HEAD
-	client.capture(postHogEventName(event), safeProperties);
-=======
 	let captured = false;
 	try {
-		captured = Boolean(posthog.capture(postHogEventName(event), safeProperties));
+		captured = Boolean(client.capture(postHogEventName(event), safeProperties));
 		return captured;
 	} finally {
 		if (!captured && releaseUpdateFailureClaim) releaseUpdateFailureClaim();
 	}
->>>>>>> upstream/main
 }
 
 export async function captureRendererException(error: unknown, properties?: Record<string, unknown>): Promise<void> {

@@ -72,16 +72,11 @@ func (r *Reader) Read(ctx context.Context) (Snapshot, error) {
 	if err := decoder.Decode(&record); err != nil || !record.versionShapeValid() || uuid.Validate(record.ConsentGeneration) != nil || !validTimestamp(record.UpdatedAt) {
 		return Snapshot{}, errors.New("telemetry policy authority fields are invalid")
 	}
-<<<<<<< HEAD
 	// Fork policy: telemetry is off unless the user explicitly opted in. Only a
 	// schema v3 record can carry that opt-in; v1/v2 records predate the rule and
 	// their events_enabled may merely reflect the old packaged default.
-	return ports.AgentSwitchFailureAuthoritySnapshot{
-		Present: true, EventsEnabled: record.EventsEnabled && record.SchemaVersion >= 3, ConsentGeneration: record.ConsentGeneration,
-=======
 	return Snapshot{
-		Present: true, EventsEnabled: record.EventsEnabled, ConsentGeneration: record.ConsentGeneration,
->>>>>>> upstream/main
+		Present: true, EventsEnabled: record.EventsEnabled && record.SchemaVersion >= 3, ConsentGeneration: record.ConsentGeneration,
 		ConsentProductionEnabled: record.ConsentProductionEnabled != nil && *record.ConsentProductionEnabled,
 	}, nil
 }

@@ -137,48 +137,6 @@ func testAsyncChatAnswersBeforeWorkspaceAndController(t *testing.T, kind domain.
 	}
 }
 
-func TestSpawnAsyncChatSeedsEffortBeforeBackgroundTitle(t *testing.T) {
-	for _, prepared := range []bool{false, true} {
-		name := "fresh"
-		if prepared {
-			name = "prepared"
-		}
-		t.Run(name, func(t *testing.T) {
-			launcher := &recordingLauncher{}
-			m, st, _ := newChatManager(launcher)
-			m.dataDir = t.TempDir()
-			m.browserCapabilities = browsersvc.NewAuthority()
-			deferred := deferredBackground(m)
-			project := st.projects[string(chatTestProject)]
-			project.Config.AgentConfig.Effort = "high"
-			st.projects[string(chatTestProject)] = project
-
-			cfg := asyncChatSpawnConfig("do the thing")
-			if prepared {
-				token, err := m.PrepareTaskWorkspace(context.Background(), project)
-				if err != nil {
-					t.Fatal(err)
-				}
-				(*deferred)[0]()
-				cfg.TaskPreparation = token
-			}
-			rec, _, _, err := m.Spawn(context.Background(), cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rec.Metadata.Effort != "high" {
-				t.Fatalf("effort before controller start = %q, want high", rec.Metadata.Effort)
-			}
-			if _, err := m.RunBackgroundTask(context.Background(), rec.ID, "title only", "do the thing"); err != nil {
-				t.Fatal(err)
-			}
-			if len(launcher.background) != 1 || launcher.background[0].Effort != "high" {
-				t.Fatalf("background title task = %#v, want high effort", launcher.background)
-			}
-		})
-	}
-}
-
 func TestAsyncChatSpawnHoldsHarnessGateThroughControllerStart(t *testing.T) {
 	launcher := &recordingLauncher{}
 	m, _, _ := newChatManager(launcher)

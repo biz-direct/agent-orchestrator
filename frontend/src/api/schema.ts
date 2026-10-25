@@ -4196,11 +4196,7 @@ export interface paths {
         patch: operations["updateCloudOffering"];
         trace?: never;
     };
-<<<<<<< HEAD
     "/api/v1/settings/global-orchestrator-rules": {
-=======
-    "/api/v1/settings/harness-defaults/{agent}": {
->>>>>>> upstream/main
         parameters: {
             query?: never;
             header?: never;
@@ -4213,7 +4209,6 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-<<<<<<< HEAD
         /** Set the global orchestrator rules for this daemon */
         patch: operations["updateGlobalOrchestratorRules"];
         trace?: never;
@@ -4233,10 +4228,23 @@ export interface paths {
         head?: never;
         /** Set the global worker rules for this daemon */
         patch: operations["updateGlobalWorkerRules"];
-=======
+        trace?: never;
+    };
+    "/api/v1/settings/harness-defaults/{agent}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         /** Choose which models one harness's pickers offer */
         patch: operations["updateHarnessDefault"];
->>>>>>> upstream/main
         trace?: never;
     };
     "/api/v1/settings/session-interface": {
@@ -6504,17 +6512,10 @@ export interface components {
             running: boolean;
             supported: boolean;
         };
-<<<<<<< HEAD
         MoveCrewBatonInput: {
             reason?: string;
             to: components["schemas"]["CrewBatonHolder"];
         };
-        MuteDeviceRequest: {
-            /** @description True to stop sending push notifications to this device. */
-            muted: boolean;
-        };
-=======
->>>>>>> upstream/main
         NotificationEnvelope: {
             notification: components["schemas"]["NotificationResponse"];
         };
@@ -7769,14 +7770,11 @@ export interface components {
             cloudOffering: boolean;
             /** @enum {string} */
             defaultSessionMode: "chat" | "tui";
-<<<<<<< HEAD
             globalOrchestratorRules: string;
             globalWorkerRules: string;
-=======
             harnessDefaults?: {
                 [key: string]: components["schemas"]["HarnessDefault"];
             };
->>>>>>> upstream/main
             localEnabled: boolean;
             trackerIntakeEnabled: boolean;
             /** @description After a harness update, idle open sessions restart on the new release instead of running the old one until they happen to restart. */
@@ -8108,13 +8106,6 @@ export interface components {
             state?: "queued" | "running" | "completed" | "recovered" | "interrupted" | "failed";
             turnId?: string;
         };
-<<<<<<< HEAD
-        SubmitAgentHandoffRequest: {
-            /** @description Structured, source-agent-authored handoff enrichment. */
-            handoff: unknown;
-            /** @description Source invocation generation that authored this handoff. */
-            sourceGenerationId: string;
-        };
         SubmitPipelineResultRequest: {
             attemptId: string;
             controllerGeneration: string;
@@ -8133,8 +8124,6 @@ export interface components {
             replayed: boolean;
             run: components["schemas"]["PipelineRunView"];
         };
-=======
->>>>>>> upstream/main
         SubmitReviewInput: {
             /** @description Review body recorded by AO. Required for changes_requested. */
             body?: string;
@@ -14143,11 +14132,7 @@ export interface operations {
             };
         };
     };
-<<<<<<< HEAD
     getProjectCrew: {
-=======
-    forgetProjectPermissions: {
->>>>>>> upstream/main
         parameters: {
             query?: never;
             header?: never;
@@ -14165,7 +14150,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-<<<<<<< HEAD
                     "application/json": components["schemas"]["CrewsCatalogResponse"];
                 };
             };
@@ -14370,9 +14354,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectOrchestratorRulesFilePreview"];
-=======
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    forgetProjectPermissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ProjectResponse"];
->>>>>>> upstream/main
                 };
             };
             /** @description Bad Request */
@@ -24072,27 +24103,15 @@ export interface operations {
             };
         };
     };
-<<<<<<< HEAD
     updateGlobalOrchestratorRules: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
-=======
-    updateHarnessDefault: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Agent adapter identifier. */
-                agent: string;
-            };
->>>>>>> upstream/main
             cookie?: never;
         };
         requestBody: {
             content: {
-<<<<<<< HEAD
                 "application/json": components["schemas"]["ControllersUpdateGlobalOrchestratorRulesRequest"];
             };
         };
@@ -24145,9 +24164,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ControllersUpdateGlobalWorkerRulesRequest"];
-=======
-                "application/json": components["schemas"]["UpdateHarnessDefaultRequest"];
->>>>>>> upstream/main
             };
         };
         responses: {
@@ -24169,8 +24185,60 @@ export interface operations {
                     "application/json": components["schemas"]["APIError"];
                 };
             };
-<<<<<<< HEAD
-=======
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    updateHarnessDefault: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent adapter identifier. */
+                agent: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateHarnessDefaultRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
             /** @description Not Found */
             404: {
                 headers: {
@@ -24180,7 +24248,6 @@ export interface operations {
                     "application/json": components["schemas"]["APIError"];
                 };
             };
->>>>>>> upstream/main
             /** @description Internal Server Error */
             500: {
                 headers: {

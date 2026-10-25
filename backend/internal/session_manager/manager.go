@@ -1553,12 +1553,8 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		m.markSpawnFailedTerminatedAfterFailure(ctx, id, false)
 		return domain.SessionRecord{}, 0, 0, wrapSpawnStage(id, ErrSpawnCommit, err)
 	}
-<<<<<<< HEAD
 	m.commitAppliedRules(id)
-	if delivery == ports.PromptDeliveryAfterStart && afterStartPrompt != "" {
-=======
 	if delivery == ports.PromptDeliveryAfterStart {
->>>>>>> upstream/main
 		if err := m.deliverAfterStartPrompt(ctx, agent, launchCfg, handle, id, afterStartPrompt); err != nil {
 			runtimeDestroyed := m.destroySpawnRuntimeAfterFailure(ctx, handle)
 			workspaceDestroyed := m.rollbackPreparedSpawnWorkspaceAfterFailure(ctx, rec, ws, workspaceProject, runtimeDestroyed)
@@ -3767,10 +3763,7 @@ func (m *Manager) relaunchSessionWithPolicyAndGeneration(ctx context.Context, op
 		m.cleanupSystemPromptDir(rec.ID)
 		return RestoreResult{}, fmt.Errorf("%s %s: completed: %w", operation, rec.ID, err)
 	}
-<<<<<<< HEAD
 	m.commitAppliedRules(rec.ID)
-	if delivery == ports.PromptDeliveryAfterStart && afterStartPrompt != "" {
-=======
 	if initialization != nil {
 		if err := m.initializeNativeRestore(ctx, rec, handle, launchID, initialization); err != nil {
 			cleanupCtx, cancel := spawnRollbackContext(ctx)
@@ -3783,7 +3776,6 @@ func (m *Manager) relaunchSessionWithPolicyAndGeneration(ctx context.Context, op
 		if mode == RestoreModeNative {
 			afterStartPrompt = "" // restore native state without replaying a user turn
 		}
->>>>>>> upstream/main
 		if err := m.deliverAfterStartPrompt(ctx, agent, launchCfg, handle, rec.ID, afterStartPrompt); err != nil {
 			m.destroySpawnRuntimeAfterFailure(ctx, handle)
 			// A provider switch brings the source back itself, so its session
@@ -6584,9 +6576,9 @@ func safeRelPath(rel string) (string, error) {
 	return clean, nil
 }
 
-// scriptStepMinute is the unit of a Setup or Cleanup step's time limit; tests
+// scriptStepUnit is the unit of a Setup or Cleanup step's time limit; tests
 // shorten it.
-var scriptStepMinute = time.Minute
+var scriptStepUnit = time.Minute
 
 // scriptStepTimeout is the command a Setup or Cleanup step runs and its time
 // limit: the one its first line sets (domain.ScriptStepMinutes), else
@@ -6596,7 +6588,7 @@ func scriptStepTimeout(step string, fallbackMinutes int) (string, time.Duration)
 	if minutes == 0 {
 		minutes = fallbackMinutes
 	}
-	return command, time.Duration(minutes) * scriptStepMinute
+	return command, time.Duration(minutes) * scriptStepUnit
 }
 
 // runPostCreate runs each post-create command in the workspace via the platform
@@ -6631,7 +6623,7 @@ func runPostCreate(ctx context.Context, workspacePath, sourcePath string, comman
 
 // stepMinutes says a step's time limit in minutes ("1 minute", "30 minutes").
 func stepMinutes(timeout time.Duration) string {
-	if minutes := int(timeout / scriptStepMinute); minutes != 1 {
+	if minutes := int(timeout / scriptStepUnit); minutes != 1 {
 		return strconv.Itoa(minutes) + " minutes"
 	}
 	return "1 minute"

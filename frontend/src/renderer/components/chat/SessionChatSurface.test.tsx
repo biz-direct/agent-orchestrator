@@ -160,12 +160,8 @@ vi.mock("./ChatWorkspace", async () => {
 			onChooseSettings,
 			onContinueTurn,
 			configOptionError,
-<<<<<<< HEAD
-=======
 			configOptions,
 			models,
-			promptSuggestion,
->>>>>>> upstream/main
 			snapshot,
 			shellTarget,
 			onSend,
@@ -183,14 +179,9 @@ vi.mock("./ChatWorkspace", async () => {
 			onChooseSettings?: unknown;
 			onContinueTurn?: () => Promise<unknown> | void;
 			configOptionError?: string;
-<<<<<<< HEAD
-			snapshot: { sessionId?: string };
-=======
 			configOptions?: ChatConfigOption[];
 			models: ChatModel[];
-			promptSuggestion?: { id: string; text: string };
 			snapshot: Pick<ConversationSnapshot, "sessionId" | "harness" | "settings">;
->>>>>>> upstream/main
 			shellTarget?: { handleId: string };
 		}) => {
 			sideMocks.workspaceSend = onSend;
@@ -212,17 +203,13 @@ vi.mock("./ChatWorkspace", async () => {
 					<div data-testid="remember-available">{String(Boolean(onRememberPermissions))}</div>
 					<div data-testid="turn-settings-available">{String(Boolean(onChooseSettings))}</div>
 					<div data-testid="config-option-error">{configOptionError}</div>
-<<<<<<< HEAD
-=======
 					{configOptions?.map((option) => (
 						<div key={option.id} data-testid={`config-option-${option.id}`}>
 							{option.choices.map((choice) => choice.value).join(",")}
 						</div>
 					))}
 					{snapshot.harness === "claude-code" && <TurnSettingsBar models={models} settings={snapshot.settings} harness={snapshot.harness} configOptions={configOptions} onChangeConfigOption={() => {}} />}
-					<div data-testid="prompt-suggestion">{promptSuggestion?.text}</div>
 					<button type="button" onClick={() => { void Promise.resolve(onContinueTurn?.()).catch(() => {}); }}>Continue test turn</button>
->>>>>>> upstream/main
 					{headerActions}
 					{sessionTabAction}
 					<button type="button" onClick={() => onLinkOpen?.(LINK)}>
@@ -294,8 +281,6 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-<<<<<<< HEAD
-=======
 describe("SessionChatSurface pending switch effort", () => {
 	it.each([
 		{ harness: "codex", effort: undefined, shownEffort: "low", expected: "low" },
@@ -436,67 +421,6 @@ describe("SessionChatSurface pending switch effort", () => {
 	});
 });
 
-describe("SessionChatSurface prompt suggestions", () => {
-	function settleConversation() {
-		conversationState.snapshot = {
-			...snapshotFor(session.id),
-			turns: [{ id: "turn-1", state: "completed", requestedAt: "2026-10-12T00:00:00Z" }],
-		};
-		postMock.mockResolvedValue({ data: { turnId: "turn-1", prompt: "Explain the fix." } });
-	}
-
-	it("forwards a settled conversation suggestion and hides it while new work is fenced", async () => {
-		settleConversation();
-		const client = new QueryClient();
-		const tree = (newWorkDisabled = false) =>
-			<Wrapper client={client}><SessionChatSurface session={session} newWorkDisabled={newWorkDisabled} /></Wrapper>;
-		const view = render(tree());
-		await waitFor(() => expect(screen.getByTestId("prompt-suggestion")).toHaveTextContent("Explain the fix."));
-		view.rerender(tree(true));
-		expect(screen.getByTestId("prompt-suggestion")).toBeEmptyDOMElement();
-		view.rerender(tree());
-		expect(screen.getByTestId("prompt-suggestion")).toHaveTextContent("Explain the fix.");
-		expect(postMock).toHaveBeenCalledOnce();
-	});
-
-	it("keeps an in-flight suggestion while a file pane temporarily hides the composer", async () => {
-		settleConversation();
-		let signal: AbortSignal | undefined;
-		let resolve!: (value: unknown) => void;
-		postMock.mockImplementation((_path, options: { signal: AbortSignal }) => {
-			signal = options.signal;
-			return new Promise((complete) => { resolve = complete; });
-		});
-		const client = new QueryClient();
-		const tree = (workspaceFileActive = false) => <Wrapper client={client}><SessionChatSurface session={session} workspaceFileActive={workspaceFileActive} /></Wrapper>;
-		const view = render(tree());
-		await waitFor(() => expect(postMock).toHaveBeenCalledOnce());
-		view.rerender(tree(true));
-		expect(signal?.aborted).toBe(false);
-		expect(screen.getByTestId("prompt-suggestion")).toBeEmptyDOMElement();
-		await act(async () => resolve({ data: { turnId: "turn-1", prompt: "Explain the fix." } }));
-		view.rerender(tree());
-		await waitFor(() => expect(screen.getByTestId("prompt-suggestion")).toHaveTextContent("Explain the fix."));
-		expect(postMock).toHaveBeenCalledOnce();
-	});
-
-	it.each([
-		{ workspaceFileActive: true },
-		{ workspaceActiveTabKey: "file:README.md" },
-		{ reviewerChatSelected: true },
-		{ reviewerTarget: { kind: "reviewer" as const, handleId: "review-1", harness: "codex", sessionId: session.id } },
-		{ shellTarget: { kind: "shell" as const, handleId: "shell-1", generation: "generation-1", title: "Shell" } },
-		{ controllerTransitioning: true },
-		{ agentResuming: true },
-	])("does not generate while the primary chat is inactive or blocked %#", (props) => {
-		settleConversation();
-		render(<Wrapper client={new QueryClient()}><SessionChatSurface session={session} {...props} /></Wrapper>);
-		expect(postMock).not.toHaveBeenCalled();
-		expect(screen.getByTestId("prompt-suggestion")).toBeEmptyDOMElement();
-	});
-});
-
->>>>>>> upstream/main
 describe("SessionChatSurface link routing", () => {
 	it("keeps orchestrator chat mounted until its conversation and provisioning are ready", () => {
 		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

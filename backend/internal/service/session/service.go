@@ -246,11 +246,6 @@ type Service struct {
 	// service tests that construct Service directly; ClaimPR degrades to
 	// relying on the poller in that case.
 	outputTypeReconciler outputTypeReconciler
-<<<<<<< HEAD
-=======
-	// artifactDeleter deletes a session's artifact files and version rows. Nil
-	// makes DeleteArtifacts fail rather than delete outside the capture lock.
-	artifactDeleter artifactDeleter
 	// runsOnComputerLogin reports whether a new session would launch on the
 	// computer's own CLI login rather than a saved account. Nil means always.
 	runsOnComputerLogin func(context.Context, domain.AgentHarness, string) bool
@@ -260,7 +255,6 @@ type Service struct {
 // computer's login state matters only to a session that will run on it.
 func (s *Service) SetComputerLoginCheck(check func(ctx context.Context, harness domain.AgentHarness, accountID string) bool) {
 	s.runsOnComputerLogin = check
->>>>>>> upstream/main
 }
 
 // SetChatProviderPreserver wires the live Chat lifetime observation after both
@@ -1450,14 +1444,12 @@ func mapSessionError(err error) error {
 		return nil
 	case errors.Is(err, sessionmanager.ErrNotFound):
 		return apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
-<<<<<<< HEAD
 	case isRulesFileError(err):
 		var rfe *rulesfile.Error
 		_ = errors.As(err, &rfe)
 		return apierr.Invalid(rfe.Code(), rfe.Error(), rfe.Details())
 	case errors.Is(err, ports.ErrPipelineExecutionOwned):
 		return apierr.Conflict("PIPELINE_EXECUTION_OWNED", err.Error(), nil)
-=======
 	case errors.Is(err, ErrPRNotOpen):
 		return apierr.Conflict("PR_NOT_OPEN", "PR is not open", nil)
 	case errors.Is(err, ports.ErrAgentAccountUnknown):
@@ -1473,7 +1465,6 @@ func mapSessionError(err error) error {
 	case errors.Is(err, ports.ErrAgentAccountUnshared):
 		return apierr.Conflict("AGENT_ACCOUNT_UNSHARED",
 			"AO cannot link this account's folder to this computer's history. On Windows, turn on Developer Mode.", nil)
->>>>>>> upstream/main
 	case errors.Is(err, sessionmanager.ErrNotRestorable):
 		return apierr.Conflict("SESSION_NOT_RESTORABLE", "Session is not restorable", nil)
 	case errors.Is(err, sessionmanager.ErrTerminated):

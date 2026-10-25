@@ -295,32 +295,23 @@ stored in PostHog from earlier events is not deleted retroactively.
 
 ## Turn desktop and daemon telemetry off
 
-<<<<<<< HEAD
 The desktop General Settings page includes a **Share usage and error data**
 switch, off by default in this fork. It is the single opt-in for renderer
 analytics, daemon event export, Sentry and the staged agent-switch reliability
-path. The environment-variable controls below are an additional hard veto.
-Set all three variables in the environment used to launch Orchestrator.inc:
-=======
-The simplest way is **Settings > General > Privacy > Share usage analytics**.
-Turning it off stops PostHog analytics in the desktop interface, the daemon, and
-any paired phone, and resets the PostHog identity in the desktop app so no
-identity (user ID, email, GitHub username) stays in the client. It takes effect
-immediately and is remembered across restarts (it is a marker file,
-`telemetry_opt_out`, next to the installation identifier). A paired phone picks
-it up the next time it connects and keeps it until a paired desktop that has
-analytics on tells it otherwise. Turning it back on resumes sending; the desktop
-interface uses a fresh anonymous identifier until the next restart. Data already
-sent to PostHog is not deleted.
+path. Upstream's **Share usage analytics** privacy control (the
+`telemetry_opt_out` marker file) is kept as an additional veto: with it off,
+PostHog analytics stop in the desktop interface, the daemon, and any paired
+phone, and the desktop identity is dropped, even if the opt-in above is on. It
+takes effect immediately and is remembered across restarts. A paired phone
+picks it up the next time it connects. Data already sent to PostHog is not
+deleted.
 
-The **Share error events** control on the same page covers error diagnostics
-only: the daemon's Sentry capture of 5xx errors and panics. The
-daemon tags these error events with the same `install_id` when the installation
-identifier is available. If it cannot be read, consented error reporting
-continues without that tag. The tag does not include email or local paths. The
-environment-variable controls below also govern the desktop/daemon
-product-telemetry paths, for example in managed environments. Set all three variables in the environment used to launch Orchestrator.inc:
->>>>>>> upstream/main
+When error reporting is consented, the daemon tags its Sentry 5xx and panic
+events with the same `install_id` when the installation identifier is
+available. If it cannot be read, consented error reporting continues without
+that tag. The tag does not include email or local paths. The
+environment-variable controls below are an additional hard veto. Set all three
+variables in the environment used to launch Orchestrator.inc:
 
 ```bash
 export AO_TELEMETRY_RENDERER=off

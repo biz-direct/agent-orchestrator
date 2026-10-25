@@ -26,8 +26,9 @@ concurrency:
 
 jobs:
   live-feeds:
-    # Forks inherit the schedule but nobody watches their runs.
-    if: github.event_name != 'schedule' || !github.event.repository.fork
+    # Forks inherit the schedule but nobody watches their runs. FORK: also skipped
+    # on the fork for PRs (upstream-only live network check; see FORK_DECISIONS.md).
+    if: github.repository == 'OrchestratorInc/agent-orchestrator' && (github.event_name != 'schedule' || !github.event.repository.fork)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

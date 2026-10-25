@@ -23,11 +23,7 @@ it("a fresh packaged profile makes zero outbound telemetry requests and initiali
 
 	const authority = new TelemetryPolicyAuthority({ dataDir, platform: "linux" });
 	const transportFactory = vi.fn(async () => null);
-	const daemon = {
-		prepareDisable: vi.fn(),
-		applyPolicy: vi.fn(async (generation: string, enabled: boolean) => ({ status: "applied" as const, consentGeneration: generation, eventsEnabled: enabled, gateDrained: !enabled, purgeConfirmed: !enabled })),
-	};
-	const controller = new DesktopTelemetryController({ authority, daemon, transportFactory, environmentAllowsEvents: true });
+	const controller = new DesktopTelemetryController({ authority, transportFactory, environmentAllowsEvents: true });
 	const view = await controller.initialize();
 
 	expect(view.eventsEnabled).toBe(false);

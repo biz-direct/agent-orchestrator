@@ -85,7 +85,6 @@ export const ActivityTitle = memo(function ActivityTitle({ text }: { text: strin
 });
 
 /** GitHub-flavoured markdown: tables, strikethrough, task lists, autolinks. */
-<<<<<<< HEAD
 const PLUGINS = [remarkGfm, remarkSessionLinks, remarkFileReferences];
 
 /** Marks a link the file-reference plugin made from plain text, not one the agent wrote. */
@@ -140,10 +139,6 @@ function visitFileReferences(node: MarkdownNode): void {
 		index += replacement.length - 1;
 	}
 }
-const STREAMING_REHYPE = [rehypeStreamFade];
-=======
-const PLUGINS = [remarkGfm, remarkSessionLinks];
->>>>>>> upstream/main
 // Reduced motion gets plain text, not a span per character that never animates.
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 // How long a settled reply keeps its fade spans, so the last characters (and the final
@@ -376,11 +371,7 @@ function compactEmoji(children: ReactNode): ReactNode {
 	return children;
 }
 
-<<<<<<< HEAD
-function MarkdownLink({ href, children, ...props }: { href?: string; children?: ReactNode; [FILE_REFERENCE_ATTRIBUTE]?: string }) {
-=======
-function MarkdownLink({ href, children, className }: { href?: string; children?: ReactNode; className?: string }) {
->>>>>>> upstream/main
+function MarkdownLink({ href, children, className, ...props }: { href?: string; children?: ReactNode; className?: string; [FILE_REFERENCE_ATTRIBUTE]?: string }) {
 	const safeOriginContent = useContext(SafeOriginContent);
 	const { open: onLinkOpen, openFile: onFileOpen, openSession: onSessionLinkOpen, remoteHost, sessionLinkHostId, sessionLinkSourceKind, workspacePaths, fileCatalog } = useContext(OpenChatLink);
 	const fileReference = props[FILE_REFERENCE_ATTRIBUTE] !== undefined;

@@ -37,13 +37,9 @@ import {
 import { cn } from "../lib/utils";
 import { AgentAvatar } from "./AgentAvatar";
 import { ProductExternalLink } from "./ProductExternalLink";
-<<<<<<< HEAD
 import { SessionArchiveDialog } from "./SessionArchiveDialog";
-=======
-import { SessionArchiveDialog, type SessionArchiveChoice } from "./SessionArchiveDialog";
 import { ArtifactPreviewCard } from "./SessionLinkPreviewCard";
 import { HoverCard, HoverCardTrigger } from "./ui/hover-card";
->>>>>>> upstream/main
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function toBoardSessionPresentation(
@@ -108,12 +104,8 @@ export function BoardSessionCardAdapter({
 	onOpen: () => void;
 	/** Opens the session with this artifact (by path) shown in the inspector. */
 	onOpenArtifact?: (path: string) => void;
-<<<<<<< HEAD
-	onTerminate?: () => void;
-=======
 	onOpenArtifacts?: () => void;
-	onTerminate?: (choice: SessionArchiveChoice) => void;
->>>>>>> upstream/main
+	onTerminate?: () => void;
 	session: WorkspaceSession;
 	usage?: SessionUsageSummary;
 }) {
@@ -202,12 +194,8 @@ function DesktopSessionCard({
 	memoryTone?: ChipTone;
 	onOpen?: () => void;
 	onOpenArtifact?: (path: string) => void;
-<<<<<<< HEAD
-	onTerminate?: () => void;
-=======
 	onOpenArtifacts?: () => void;
-	onTerminate?: (choice: SessionArchiveChoice) => void;
->>>>>>> upstream/main
+	onTerminate?: () => void;
 	session: WorkspaceSession;
 	usage?: SessionUsageSummary;
 }) {

@@ -2375,7 +2375,6 @@ func TestEmptyCloneOnboardingCreatesFirstWorkspace(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestPreviewRulesFiles(t *testing.T) {
 	ctx := context.Background()
 	m := newManager(t)
@@ -2420,7 +2419,9 @@ func TestPreviewRulesFiles(t *testing.T) {
 	var apiErr *apierr.Error
 	if _, err := m.PreviewAgentRulesFile(ctx, "ao", ""); !errors.As(err, &apiErr) || apiErr.Code != "AGENT_RULES_FILE_REQUIRED" {
 		t.Fatalf("err = %v, want AGENT_RULES_FILE_REQUIRED", err)
-=======
+	}
+}
+
 func TestCloneDestinationPreflightPreservesExistingFolders(t *testing.T) {
 	m := newManager(t)
 	ctx := context.Background()
@@ -2513,6 +2514,5 @@ func TestKeepPreparedCloneReleasesCleanupOwnership(t *testing.T) {
 	}
 	if data, err := os.ReadFile(keep); err != nil || string(data) != "keep my work" {
 		t.Fatalf("released checkout was modified: %q, %v", data, err)
->>>>>>> upstream/main
 	}
 }

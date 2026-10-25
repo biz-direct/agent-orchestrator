@@ -350,12 +350,8 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 								memoryTone={chipToneOf(session)}
 								onOpen={() => openSession(session)}
 								onOpenArtifact={(path) => openSessionArtifact(session, path)}
-<<<<<<< HEAD
-								onTerminate={!hostId || connected ? () => terminateSession.mutate(session) : undefined}
-=======
 								onOpenArtifacts={() => openSessionArtifacts(session)}
-								onTerminate={!hostId || connected ? ({ deleteArtifacts }) => terminateSession.mutate({ ...session, deleteArtifacts }) : undefined}
->>>>>>> upstream/main
+								onTerminate={!hostId || connected ? () => terminateSession.mutate(session) : undefined}
 								session={session}
 								usage={usageBySession.get(session.id)}
 							/>

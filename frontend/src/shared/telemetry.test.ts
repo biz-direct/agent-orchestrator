@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
-=======
-import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
->>>>>>> upstream/main
+import { access, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";

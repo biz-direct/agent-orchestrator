@@ -44,9 +44,6 @@ type versionStore interface {
 	AppendSessionArtifactVersion(ctx context.Context, v domain.SessionArtifactVersion, keep int) (domain.SessionArtifactVersion, []string, error)
 	ListSessionArtifactVersions(ctx context.Context, id domain.SessionID, path string) ([]domain.SessionArtifactVersion, error)
 	CountSessionArtifactVersionsBySHA(ctx context.Context, id domain.SessionID, sha string) (int64, error)
-<<<<<<< HEAD
-=======
-	DeleteSessionArtifactVersions(ctx context.Context, id domain.SessionID) error
 	DeleteSessionArtifactPathVersions(ctx context.Context, id domain.SessionID, path string) ([]string, error)
 }
 
@@ -59,7 +56,6 @@ type writer struct {
 	harness domain.AgentHarness
 	// restoredFrom is the version a restore wrote back; zero otherwise.
 	restoredFrom int64
->>>>>>> upstream/main
 }
 
 // observation is a file's size and modification time as seen on one call.

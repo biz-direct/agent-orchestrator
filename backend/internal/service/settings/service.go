@@ -9,10 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-<<<<<<< HEAD
-=======
 	"slices"
->>>>>>> upstream/main
 	"strings"
 	"sync/atomic"
 	"time"
@@ -28,13 +25,10 @@ type Store interface {
 	GetAppSettings(ctx context.Context) (Snapshot, error)
 	SetDefaultSessionMode(ctx context.Context, mode domain.SessionMode, now time.Time) error
 	SetCloudOffering(ctx context.Context, enabled bool, now time.Time) error
-<<<<<<< HEAD
 	SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error
 	SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error
-=======
 	SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault, now time.Time) error
 	SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error
->>>>>>> upstream/main
 }
 
 // Snapshot is the current preference set.
@@ -44,20 +38,16 @@ type Snapshot struct {
 	// CloudOffering is the user's cloud toggle (Settings, Developer Mode).
 	CloudOffering          bool
 	ChatHibernationEnabled bool
-<<<<<<< HEAD
 	// GlobalOrchestratorRules are standing instructions added to every
 	// project orchestrator prompt on this daemon.
 	GlobalOrchestratorRules string
 	// GlobalWorkerRules are standing instructions added to every worker prompt
 	// on this daemon.
 	GlobalWorkerRules string
-	UpdatedAt         time.Time
-=======
 	// VersionRefresh moves idle open sessions to a harness release installed
 	// while they ran (Settings, General). On by default.
 	VersionRefresh bool
 	UpdatedAt      time.Time
->>>>>>> upstream/main
 }
 
 // Offering reports which AO offerings this daemon exposes to clients. It is

@@ -20,14 +20,13 @@ func (*hibernationSettingsStore) SetDefaultSessionMode(context.Context, domain.S
 	return nil
 }
 func (*hibernationSettingsStore) SetCloudOffering(context.Context, bool, time.Time) error { return nil }
-<<<<<<< HEAD
 func (*hibernationSettingsStore) SetGlobalWorkerRules(context.Context, string, time.Time) error {
 	return nil
 }
 func (*hibernationSettingsStore) SetGlobalOrchestratorRules(context.Context, string, time.Time) error {
-=======
+	return nil
+}
 func (*hibernationSettingsStore) SetVersionRefresh(context.Context, bool, time.Time) error {
->>>>>>> upstream/main
 	return nil
 }
 
@@ -117,7 +116,6 @@ func TestOfferingBakedURLDoesNotEnableCloud(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 type rulesStore struct {
 	Store
 	snap Snapshot
@@ -170,7 +168,9 @@ func TestSetGlobalOrchestratorRules(t *testing.T) {
 	_, err = svc.SetGlobalOrchestratorRules(context.Background(), strings.Repeat("x", domain.MaxOrchestratorRulesBytes+1))
 	if !errors.Is(err, domain.ErrOrchestratorRulesTooLarge) {
 		t.Fatalf("err = %v, want too large", err)
-=======
+	}
+}
+
 func (*hibernationSettingsStore) SetHarnessDefault(context.Context, domain.AgentHarness, domain.HarnessDefault, time.Time) error {
 	return nil
 }
@@ -202,6 +202,5 @@ func TestVersionRefreshToggleIsReadOnceAndCached(t *testing.T) {
 	snapshot, err := svc.SetVersionRefresh(ctx, false)
 	if err != nil || snapshot.VersionRefresh || svc.VersionRefreshEnabled(ctx) {
 		t.Fatalf("turn off: snapshot=%+v err=%v enabled=%t", snapshot, err, svc.VersionRefreshEnabled(ctx))
->>>>>>> upstream/main
 	}
 }

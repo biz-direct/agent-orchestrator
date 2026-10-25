@@ -322,15 +322,12 @@ type ChatStartConfig struct {
 	// ReadOnly requires a provider-enforced sandbox that cannot modify the
 	// workspace. It is used for review-owned conversations.
 	ReadOnly bool
-<<<<<<< HEAD
-=======
 	// DisableNetwork requests tool network isolation for read-only background
 	// conversations. Supporting drivers must not inherit reviewer network access.
 	DisableNetwork bool
 	// DisableTools requests text-only generation for background tasks from
 	// providers that expose a native tool-selection option.
 	DisableTools bool
->>>>>>> upstream/main
 	// SystemPrompt carries AO's standing instructions for the session.
 	SystemPrompt string
 	// ProviderScopeID identifies the AO ownership boundary for opaque provider

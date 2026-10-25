@@ -1344,7 +1344,6 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 			})),
 		[activateCenterFile, closeCenterFile, dirtyFiles, fileTabs.activePath, fileTabs.openPaths, centerFileRequestsBySession, uiSessionId],
 	);
-<<<<<<< HEAD
 	const crewRoles = useSessionCrewRoles(session, hostId);
 	const removeCrewRole = useRemoveCrewRole(sessionId, hostId);
 	const activeRole = crewRoles.roles.find((role) => role.sessionId === activeRoleId);
@@ -1408,10 +1407,6 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 		),
 		[addCrewRoleAction, newShellTerminalAction],
 	);
-=======
-
-	const activeWorkspaceTabKey = fileTabs.activePath ? `file:${fileTabs.activePath}` : undefined;
->>>>>>> upstream/main
 	const previewUrl = session?.previewUrl?.trim() || undefined;
 	const previewRevision = session?.previewRevision;
 	const browserSlotVisible = Boolean(
@@ -2084,16 +2079,9 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 									headerActions={sessionHeaderActions}
 									sessionTabAction={sessionTabActions}
 									sessionTabActionWide={sessionTabActionWide}
-<<<<<<< HEAD
 									tabStripAction={tabStripActions}
-									handoffDialogOpen={handoffDialogOpen}
 									workspaceTabs={centerTabs}
-=======
-									tabStripAction={newShellTerminalAction}
-									workspaceTabs={centerFileTabs}
->>>>>>> upstream/main
 									workspaceActiveTabKey={activeWorkspaceTabKey}
-									workspaceFileActive={Boolean(fileTabs.activePath) || roleActive}
 									auxiliaryTabOrder={resolvedAuxiliaryTabOrder}
 									onAuxiliaryTabOrderChange={setAuxiliaryTabOrder}
 									controllerResumeError={!hostId && autoResume.variables === sessionId && autoResume.isError
@@ -2145,34 +2133,21 @@ export function SessionView({ sessionId, cloudOrgId, projectId, hostId }: Sessio
 									topbarActions={sessionHeaderActions}
 									sessionTabAction={sessionTabActions}
 									sessionTabActionWide={sessionTabActionWide}
-<<<<<<< HEAD
 									tabStripAction={tabStripActions}
-									handoffDialogOpen={handoffDialogOpen}
 									workspaceTabs={centerTabs}
 									workspaceActiveTabKey={activeWorkspaceTabKey}
-									workspaceFileActive={Boolean(fileTabs.activePath) || roleActive}
-=======
-									tabStripAction={newShellTerminalAction}
-									workspaceTabs={centerFileTabs}
-									workspaceActiveTabKey={activeWorkspaceTabKey}
->>>>>>> upstream/main
 									auxiliaryTabOrder={resolvedAuxiliaryTabOrder}
 									onAuxiliaryTabOrderChange={setAuxiliaryTabOrder}
 								/>
 							)}
 							</div>
-<<<<<<< HEAD
 							{roleActive && activeRole && session ? (
 								<div className="absolute inset-0 bg-background">
 									<CrewRoleChat assetBaseUrl={remoteBase} hostId={hostId} onOpenLinkInBrowser={browserView.openLink} owner={session} role={activeRole} />
 								</div>
 							) : null}
-							{fileTabs.activePath ? (
-								<div className="absolute inset-0">
-=======
 							{(session?.cloud ? Boolean(fileTabs.activePath) : fileTabs.openPaths.length > 0) ? (
 								<div className={cn("absolute inset-0",!fileTabs.activePath && "invisible pointer-events-none")} inert={!fileTabs.activePath ? true:undefined}>
->>>>>>> upstream/main
 					{session?.cloud ? (
 						<CloudFileContentPane
 							annotation={fileAnnotation}

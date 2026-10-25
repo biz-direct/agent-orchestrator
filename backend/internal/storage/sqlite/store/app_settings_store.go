@@ -27,20 +27,16 @@ type AppSettings struct {
 	// CloudOffering is the user's cloud toggle (Settings, Developer Mode). The
 	// daemon gate combines it with the deployment's control-plane URL.
 	CloudOffering bool
-<<<<<<< HEAD
 	// GlobalOrchestratorRules are standing instructions added to every
 	// project orchestrator prompt on this daemon. Empty means none.
 	GlobalOrchestratorRules string
 	// GlobalWorkerRules are standing instructions added to every worker prompt
 	// on this daemon. Empty means none.
 	GlobalWorkerRules string
-	UpdatedAt         time.Time
-=======
 	// VersionRefresh moves idle open sessions to a harness release installed
 	// while they ran.
 	VersionRefresh bool
 	UpdatedAt      time.Time
->>>>>>> upstream/main
 }
 
 // GetAppSettings reads the preference row.
@@ -57,18 +53,12 @@ func (s *Store) GetAppSettings(ctx context.Context) (AppSettings, error) {
 		HarnessDefaults: defaults,
 		// Normalized on read: a value written by a build that knows a mode this
 		// one does not must still resolve to something dispatchable.
-<<<<<<< HEAD
 		DefaultSessionMode:      domain.NormalizeSessionMode(row.DefaultSessionMode),
 		CloudOffering:           row.CloudOffering,
 		GlobalOrchestratorRules: row.GlobalOrchestratorRules,
 		GlobalWorkerRules:       row.GlobalWorkerRules,
+		VersionRefresh:          row.VersionRefresh,
 		UpdatedAt:               row.UpdatedAt,
-=======
-		DefaultSessionMode: domain.NormalizeSessionMode(row.DefaultSessionMode),
-		CloudOffering:      row.CloudOffering,
-		VersionRefresh:     row.VersionRefresh,
-		UpdatedAt:          row.UpdatedAt,
->>>>>>> upstream/main
 	}, nil
 }
 
@@ -101,7 +91,6 @@ func (s *Store) SetCloudOffering(ctx context.Context, enabled bool, now time.Tim
 	return nil
 }
 
-<<<<<<< HEAD
 // SetGlobalOrchestratorRules persists the daemon-wide orchestrator rules.
 func (s *Store) SetGlobalOrchestratorRules(ctx context.Context, rules string, now time.Time) error {
 	s.writeMu.Lock()
@@ -111,22 +100,10 @@ func (s *Store) SetGlobalOrchestratorRules(ctx context.Context, rules string, no
 		UpdatedAt:               now,
 	}); err != nil {
 		return fmt.Errorf("set global orchestrator rules: %w", err)
-=======
-// SetVersionRefresh persists whether open sessions move to new harness releases.
-func (s *Store) SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if err := s.qw.SetVersionRefresh(ctx, gen.SetVersionRefreshParams{
-		VersionRefresh: enabled,
-		UpdatedAt:      now,
-	}); err != nil {
-		return fmt.Errorf("set version refresh: %w", err)
->>>>>>> upstream/main
 	}
 	return nil
 }
 
-<<<<<<< HEAD
 // SetGlobalWorkerRules persists the daemon-wide worker rules.
 func (s *Store) SetGlobalWorkerRules(ctx context.Context, rules string, now time.Time) error {
 	s.writeMu.Lock()
@@ -138,7 +115,21 @@ func (s *Store) SetGlobalWorkerRules(ctx context.Context, rules string, now time
 		return fmt.Errorf("set global worker rules: %w", err)
 	}
 	return nil
-=======
+}
+
+// SetVersionRefresh persists whether open sessions move to new harness releases.
+func (s *Store) SetVersionRefresh(ctx context.Context, enabled bool, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.SetVersionRefresh(ctx, gen.SetVersionRefreshParams{
+		VersionRefresh: enabled,
+		UpdatedAt:      now,
+	}); err != nil {
+		return fmt.Errorf("set version refresh: %w", err)
+	}
+	return nil
+}
+
 // SetHarnessDefault updates one entry atomically so concurrent saves for other
 // harnesses cannot overwrite each other. Empty values remove the override.
 func (s *Store) SetHarnessDefault(ctx context.Context, agent domain.AgentHarness, value domain.HarnessDefault, now time.Time) error {
@@ -153,5 +144,4 @@ func (s *Store) SetHarnessDefault(ctx context.Context, agent domain.AgentHarness
 		return err
 	}
 	return s.qw.SetHarnessDefault(ctx, gen.SetHarnessDefaultParams{HarnessPath: path, Config: string(data), UpdatedAt: now})
->>>>>>> upstream/main
 }

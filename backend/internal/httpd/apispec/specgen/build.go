@@ -2829,7 +2829,6 @@ func projectOperations() []operation {
 			},
 		},
 		{
-<<<<<<< HEAD
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/pipeline", id: "getSessionPipeline", tag: "sessions",
 			summary:    "Read the task's pipeline run (latest), with stages, attempts, checkpoint, and rejections",
 			pathParams: []any{controllers.SessionIDParam{}},
@@ -2907,20 +2906,12 @@ func projectOperations() []operation {
 			reqBody:    pipelinessvc.SetDefaultInput{},
 			resps: []respUnit{
 				{http.StatusOK, pipelinessvc.DefaultStatus{}},
-=======
-			method: http.MethodDelete, path: "/api/v1/projects/{id}/permissions", id: "forgetProjectPermissions", tag: "projects",
-			summary:    "Forget remembered project permissions",
-			pathParams: []any{controllers.ProjectIDParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ProjectResponse{}},
->>>>>>> upstream/main
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
 		},
 		{
-<<<<<<< HEAD
 			method: http.MethodPut, path: "/api/v1/projects/{id}/pipelines/command-trust", id: "setProjectPipelineCommandTrust", tag: "projects",
 			summary:    "Authorize or revoke AO running validation commands declared in repository pipeline profiles",
 			pathParams: []any{controllers.ProjectIDParam{}},
@@ -3023,8 +3014,17 @@ func projectOperations() []operation {
 			},
 		},
 		{
-=======
->>>>>>> upstream/main
+			method: http.MethodDelete, path: "/api/v1/projects/{id}/permissions", id: "forgetProjectPermissions", tag: "projects",
+			summary:    "Forget remembered project permissions",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ProjectResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodDelete, path: "/api/v1/projects/{id}", id: "removeProject", tag: "projects",
 			summary:    "Remove a project; stops sessions, cleans workspaces, unregisters",
 			pathParams: []any{controllers.ProjectIDParam{}},

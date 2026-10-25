@@ -1195,8 +1195,6 @@ func (s *Store) HasConversationTurns(ctx context.Context, conversationID string)
 	return hasTurns, nil
 }
 
-<<<<<<< HEAD
-=======
 // LatestConversationTurn reads the latest non-rolled-back turn on the active
 // branch lineage without loading messages or activities.
 func (s *Store) LatestConversationTurn(ctx context.Context, conversationID string) (domain.ConversationTurn, error) {
@@ -1225,7 +1223,6 @@ func (s *Store) TurnByProviderID(ctx context.Context, conversationID, providerTu
 	return turnToDomain(row), nil
 }
 
->>>>>>> upstream/main
 // LatestVisibleUserTurnSettled checks the current branch's latest user prompt
 // without loading the full conversation history.
 func (s *Store) LatestVisibleUserTurnSettled(ctx context.Context, conversationID string, sessionID domain.SessionID) (bool, error) {

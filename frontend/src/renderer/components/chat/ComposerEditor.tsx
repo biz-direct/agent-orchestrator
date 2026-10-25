@@ -5,11 +5,7 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
-<<<<<<< HEAD
-=======
-	$addUpdateTag,
 	$createRangeSelectionFromDom,
->>>>>>> upstream/main
 	$getNodeByKey,
 	$getRoot,
 	$getSelection,
@@ -21,11 +17,7 @@ import {
 	CLEAR_HISTORY_COMMAND,
 	COMMAND_PRIORITY_HIGH,
 	DecoratorNode,
-<<<<<<< HEAD
-=======
 	getDOMSelectionFromTarget,
-	HISTORY_PUSH_TAG,
->>>>>>> upstream/main
 	KEY_ENTER_COMMAND,
 	KEY_TAB_COMMAND,
 	type EditorConfig,
@@ -682,12 +674,7 @@ export const ComposerEditor = forwardRef<
 								if (event.defaultPrevented) event.stopPropagation();
 							}}
 							className={cn(
-<<<<<<< HEAD
 								"chat-composer-scrollbar max-h-40 min-h-[4.5rem] w-full overflow-y-auto overscroll-contain bg-transparent py-1 pl-[7px] pr-0 text-base! leading-relaxed text-foreground caret-foreground outline-none selection:bg-foreground selection:text-background",
-=======
-								"chat-composer-scrollbar max-h-40 min-h-[4.5rem] w-full overflow-y-auto overscroll-contain bg-transparent py-1 pl-[7px] pr-0 text-base! leading-relaxed text-foreground caret-foreground outline-none selection:bg-foreground selection:text-on-foreground",
-								suggestion && "absolute inset-0 overflow-visible overscroll-auto",
->>>>>>> upstream/main
 								concealed ? "invisible" : disabled && "opacity-50",
 							)}
 						/>

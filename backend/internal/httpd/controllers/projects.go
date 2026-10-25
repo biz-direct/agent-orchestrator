@@ -265,26 +265,16 @@ func (c *ProjectsController) setPermissions(w http.ResponseWriter, r *http.Reque
 	envelope.WriteJSON(w, http.StatusOK, ProjectResponse{Project: p})
 }
 
-<<<<<<< HEAD
 func (c *ProjectsController) previewAgentRulesFile(w http.ResponseWriter, r *http.Request) {
 	if c.Mgr == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/projects/{id}/agent-rules-file")
 		return
 	}
 	preview, err := c.Mgr.PreviewAgentRulesFile(r.Context(), projectID(r), r.URL.Query().Get("path"))
-=======
-func (c *ProjectsController) forgetPermissions(w http.ResponseWriter, r *http.Request) {
-	if c.Mgr == nil {
-		apispec.NotImplemented(w, r, "DELETE", "/api/v1/projects/{id}/permissions")
-		return
-	}
-	p, err := c.Mgr.ForgetPermissions(r.Context(), projectID(r))
->>>>>>> upstream/main
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-<<<<<<< HEAD
 	envelope.WriteJSON(w, http.StatusOK, preview)
 }
 
@@ -299,7 +289,17 @@ func (c *ProjectsController) previewOrchestratorRulesFile(w http.ResponseWriter,
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, preview)
-=======
+}
+
+func (c *ProjectsController) forgetPermissions(w http.ResponseWriter, r *http.Request) {
+	if c.Mgr == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/projects/{id}/permissions")
+		return
+	}
+	p, err := c.Mgr.ForgetPermissions(r.Context(), projectID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
 	envelope.WriteJSON(w, http.StatusOK, ProjectResponse{Project: p})
->>>>>>> upstream/main
 }

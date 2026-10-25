@@ -12750,32 +12750,14 @@ paths:
       summary: Turn the cloud offering on or off for this machine
       tags:
       - settings
-<<<<<<< HEAD
   /api/v1/settings/global-orchestrator-rules:
     patch:
       operationId: updateGlobalOrchestratorRules
-=======
-  /api/v1/settings/harness-defaults/{agent}:
-    patch:
-      operationId: updateHarnessDefault
-      parameters:
-      - description: Agent adapter identifier.
-        in: path
-        name: agent
-        required: true
-        schema:
-          description: Agent adapter identifier.
-          type: string
->>>>>>> upstream/main
       requestBody:
         content:
           application/json:
             schema:
-<<<<<<< HEAD
               $ref: '#/components/schemas/ControllersUpdateGlobalOrchestratorRulesRequest'
-=======
-              $ref: '#/components/schemas/UpdateHarnessDefaultRequest'
->>>>>>> upstream/main
         required: true
       responses:
         "200":
@@ -12790,15 +12772,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Bad Request
-<<<<<<< HEAD
-=======
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
->>>>>>> upstream/main
         "500":
           content:
             application/json:
@@ -12811,7 +12784,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-<<<<<<< HEAD
       summary: Set the global orchestrator rules for this daemon
       tags:
       - settings
@@ -12850,9 +12822,57 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Set the global worker rules for this daemon
-=======
+      tags:
+      - settings
+  /api/v1/settings/harness-defaults/{agent}:
+    patch:
+      operationId: updateHarnessDefault
+      parameters:
+      - description: Agent adapter identifier.
+        in: path
+        name: agent
+        required: true
+        schema:
+          description: Agent adapter identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHarnessDefaultRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
       summary: Choose which models one harness's pickers offer
->>>>>>> upstream/main
       tags:
       - settings
   /api/v1/settings/session-interface:
@@ -18845,7 +18865,6 @@ components:
       - location
       - lastError
       type: object
-<<<<<<< HEAD
     MoveCrewBatonInput:
       properties:
         reason:
@@ -18855,16 +18874,6 @@ components:
       required:
       - to
       type: object
-    MuteDeviceRequest:
-      properties:
-        muted:
-          description: True to stop sending push notifications to this device.
-          type: boolean
-      required:
-      - muted
-      type: object
-=======
->>>>>>> upstream/main
     NotificationEnvelope:
       properties:
         notification:
@@ -22084,17 +22093,14 @@ components:
           - chat
           - tui
           type: string
-<<<<<<< HEAD
         globalOrchestratorRules:
           type: string
         globalWorkerRules:
           type: string
-=======
         harnessDefaults:
           additionalProperties:
             $ref: '#/components/schemas/HarnessDefault'
           type: object
->>>>>>> upstream/main
         localEnabled:
           type: boolean
         trackerIntakeEnabled:
@@ -22965,18 +22971,6 @@ components:
       - outcome
       - duplicate
       type: object
-<<<<<<< HEAD
-    SubmitAgentHandoffRequest:
-      properties:
-        handoff:
-          description: Structured, source-agent-authored handoff enrichment.
-        sourceGenerationId:
-          description: Source invocation generation that authored this handoff.
-          type: string
-      required:
-      - sourceGenerationId
-      - handoff
-      type: object
     SubmitPipelineResultRequest:
       properties:
         attemptId:
@@ -23025,8 +23019,6 @@ components:
       - accepted
       - replayed
       type: object
-=======
->>>>>>> upstream/main
     SubmitReviewInput:
       properties:
         body:

@@ -3781,8 +3781,6 @@ func (q *Queries) SelectFirstHumanTurnOnBranch(ctx context.Context, arg SelectFi
 	return id, err
 }
 
-<<<<<<< HEAD
-=======
 const selectLatestAutoResumeConversationTurn = `-- name: SelectLatestAutoResumeConversationTurn :one
 WITH RECURSIVE active_path(branch_id, max_sequence) AS (
     SELECT conversations.active_branch_id, CAST(NULL AS INTEGER)
@@ -3915,7 +3913,6 @@ func (q *Queries) SelectLatestConversationTurn(ctx context.Context, conversation
 	return i, err
 }
 
->>>>>>> upstream/main
 const selectNextQueuedConversationTurn = `-- name: SelectNextQueuedConversationTurn :one
 SELECT conversation_turns.id,
        conversation_messages.text,

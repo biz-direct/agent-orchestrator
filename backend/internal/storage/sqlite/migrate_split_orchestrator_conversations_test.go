@@ -7,11 +7,11 @@ import (
 )
 
 // Older builds left a Chat orchestrator bound to both its provisioning-time
-// session row and its project row (#6523). 0197 detaches the session row once
+// session row and its project row (#6523). 0253 (upstream 0197) detaches the session row once
 // the orchestrator has run, keeps it for one still waiting for its first
 // controller (whose start moves the queue itself), and leaves workers alone.
-func TestMigration0197DetachesSplitOrchestratorConversations(t *testing.T) {
-	db := openMigratedDatabaseCopyNoForeignKeys(t, 196)
+func TestMigration0253DetachesSplitOrchestratorConversations(t *testing.T) {
+	db := openMigratedDatabaseCopyNoForeignKeys(t, 252)
 	now := time.Date(2026, time.October, 13, 12, 0, 0, 0, time.UTC)
 
 	mustExec(t, db, `
@@ -37,7 +37,7 @@ INSERT INTO conversations (
 		now, now, now, now, now, now, now, now, now,
 		now, now, now, now, now, now, now, now, now, now)
 
-	upTo(t, db, 197)
+	upTo(t, db, 253)
 
 	for id, want := range map[string]string{
 		"ran-provisioning":     "",
