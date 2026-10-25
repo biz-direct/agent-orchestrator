@@ -202,6 +202,7 @@ var shippedMigrations = map[int64]string{
 	197: "0197_session_requested_output.sql",
 	250: "0250_app_settings_global_worker_rules.sql",
 	251: "0251_crew_baton.sql",
+	252: "0252_session_artifact_versions.sql",
 }
 
 // burnedVersion reports version numbers that must never be (re)used: they

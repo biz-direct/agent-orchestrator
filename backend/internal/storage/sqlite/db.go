@@ -367,10 +367,11 @@ func migrate(db *sql.DB) error {
 	return reconcileSchema(db)
 }
 
-// repairForkMigrationCollisions preserves both shipped meanings of 0178/0179/0195.
+// repairForkMigrationCollisions preserves both shipped meanings of 0178/0179/0195/0196.
 // The fork keeps pipelines/global rules at 0178/0179; upstream's archive
 // and sender columns move unchanged to 0195/0196, and upstream's requested-output
-// column moves from 0195 to 0197. Physical schema, not the ambiguous old ledger
+// column moves from 0195 to 0197, and upstream's artifact versioning moves from
+// 0196 to 0252. Physical schema, not the ambiguous old ledger
 // entries, determines which migrations already ran.
 func repairForkMigrationCollisions(db *sql.DB) error {
 	var gooseTable int
@@ -390,6 +391,8 @@ func repairForkMigrationCollisions(db *sql.DB) error {
 		{195, "review", []string{"is_archived"}},
 		{196, "conversation_messages", []string{"sender_session_id", "sender_project_id", "sender_display_name"}},
 		{197, "sessions", []string{"requested_output"}},
+		// Upstream shipped artifact versioning as 0196; the fork carries it at 0252.
+		{252, "session_artifact_versions", []string{"session_id", "path", "version", "sha256"}},
 	} {
 		complete := true
 		for _, column := range migration.columns {
@@ -425,6 +428,13 @@ DELETE FROM goose_db_version WHERE version_id = 179
 	if _, err := tx.Exec(`
 DELETE FROM goose_db_version WHERE version_id = 195
   AND NOT EXISTS (SELECT 1 FROM pragma_table_info('review') WHERE name = 'is_archived')`); err != nil {
+		return err
+	}
+	// Upstream recorded artifact versioning at 0196; that entry must not
+	// suppress the fork's sender migration when its columns are still absent.
+	if _, err := tx.Exec(`
+DELETE FROM goose_db_version WHERE version_id = 196
+  AND NOT EXISTS (SELECT 1 FROM pragma_table_info('conversation_messages') WHERE name = 'sender_session_id')`); err != nil {
 		return err
 	}
 	return tx.Commit()

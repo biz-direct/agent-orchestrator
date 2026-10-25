@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { appI18n } from "../i18n";
 
+const catalogGate = vi.hoisted(() => ({ hold: undefined as { locale: string; release: Promise<void> } | undefined }));
+vi.mock("../i18n", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../i18n")>();
+	return {
+		...original,
+		loadLocaleCatalog: async (locale: string) => {
+			if (catalogGate.hold?.locale === locale) await catalogGate.hold.release;
+			return original.loadLocaleCatalog(locale as never);
+		},
+	};
+});
+
 const getUiSettings = vi.fn();
 const setUiSettings = vi.fn();
 
@@ -50,6 +62,24 @@ describe("locale-store", () => {
 		expect(document.documentElement.lang).toBe("zh-CN");
 		expect(document.documentElement.dir).toBe("ltr");
 		expect(appI18n.t("settings.language")).toBe("语言");
+	});
+
+	it("keeps a newer selection when an older catalog finishes loading late", async () => {
+		let release!: () => void;
+		catalogGate.hold = { locale: "ja", release: new Promise<void>((resolve) => { release = resolve; }) };
+		try {
+			getUiSettings.mockResolvedValue({ locale: "ja" });
+			const loading = useLocaleStore.getState().load();
+			await vi.waitFor(() => expect(getUiSettings).toHaveBeenCalled());
+			await useLocaleStore.getState().setLocale("en");
+			release();
+			await loading;
+			expect(useLocaleStore.getState().locale).toBe("en");
+			expect(appI18n.language).toBe("en");
+			expect(document.documentElement.lang).toBe("en");
+		} finally {
+			catalogGate.hold = undefined;
+		}
 	});
 
 	it("does not reload after the first successful load", async () => {
